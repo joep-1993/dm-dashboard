@@ -4,6 +4,48 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-19 — Healthscore als categorie-console + de knoppen door de hele app
+
+Twee commits op `main`: `6961d7f` (style/ui) en `42577e7` (feat/healthscore).
+
+- [x] **De destructieve knop doet nu wat UI_BLUEPRINT al voorschreef.** `.btn-outline-red`
+      c.s. stond in rust op een roze rand `#e3b3b3` en vulde bij hover met een bijna-wit
+      `#fdf0f0`; nu rand `#d64545` in rust en een volle `#d64545` met witte tekst bij hover.
+      Eén regelgroep, dus élke destructieve knop erft het. Geverifieerd door de echte
+      `:hover`-regel uit `document.styleSheets` te lezen en op een tweede knop te plakken —
+      `--screenshot` kan niet hoveren.
+- [x] **39 knoppen op 18 bestanden van inline hexen + `onmouseover` naar de canonieke
+      klassen** (mapping-tabel in UI_BLUEPRINT §Buttons). Dit was de oorzaak van Joeps
+      melding "de Cancel ziet uit als een oude Remove": zulke knoppen luisteren niet naar
+      `style.css`, dus ze bleven achter bij de fix hierboven. `_tool-template.html` was de
+      bron van de verspreiding en is als eerste om. `grep -r 'onmouseover="this.style'
+      frontend/` is nu leeg; houd dat zo.
+- [x] **GSD Budgets' actielabels outlined** + de badge-tekst 1px omhoog (Bootstrap zet
+      `line-height:1`, gemeten op 8x-shots; meetrecept in LEARNINGS).
+- [x] **Healthscore herbouwd** (heet weer gewoon Healthscore): run per main/deepest
+      categorie, de twaalf testcats met dry run, en Recent runs met klikbare rijen die de
+      uiteenzetting per run openen. Nieuw `backend/healthscore_runs.py` + `pa.hs2_runs`;
+      preview en push zijn twee stappen en de push replayt de opgeslagen payload. Nieuwe
+      per-categorie coverage via `seo_visits_by_type()`. Gevalideerd op een wegwerp-uvicorn:
+      Douchewanden 90,8% visit cov, Films & Series (maincat) 93,2%.
+- [ ] **:8003 herstarten om de nieuwe endpoints te laden.** `/api/healthscore/health` is 200
+      (oude router), maar `/test-bucket`, `/categories` en `/runs` geven **404** op live — de
+      pagina toont dus "Not Found". Statische bestanden komen van disk, alleen de router
+      niet. Bare uvicorn zonder `--reload` → `fuser -k 8003/tcp` + relaunch. Wachtte op een
+      Auto-Redirects run die inmiddels geklapt is (zie hieronder). #priority:high
+- [ ] **`main_parallel_v2.py` crashte aan het eind van een 3-urige run**:
+      `UnboundLocalError: cannot access local variable 'derived'` op regel 3549, in
+      `process_url_v2` binnen de multiprocessing-pool. Alle werk van die run is weg.
+      Uitzoeken welke tak `derived` overslaat. #priority:high
+- [ ] **Elf knoppen dragen nog `btn-outline-danger`** in plaats van `btn-outline-red` (Bot
+      Hits, DMA Exclusions 2x, DMA+, GSD Budgets, Index Checker, Keyword Planner 2x, SEO
+      titles 2x, Unique Titles). Ze **renderen goed** — beide namen zitten in dezelfde
+      regelgroep — het is puur de naam die niet zegt wat je krijgt. #priority:low
+- [ ] **Twee ambers in de app**: GSD Budgets' `.lbl-amber` is `#b45309` (de tint die de DRY
+      RUN-badge daar al droeg), GSD Tag Toppers' is `#b26a00`. 15 ΔE, dus zichtbaar
+      verschillend. Bewust zo gelaten om DRY RUN niet te verkleuren; wie dit gelijktrekt,
+      doet het op beide pagina's. #priority:low
+
 ### 2026-08-18 — Auto-Redirects V55-V58: H1-vergelijking, producttelling eruit, merkfacet-guard
 
 Joeps review van `Downloads\redirects_global_f4383643_20260814_112614.xlsx`. Vier commits op

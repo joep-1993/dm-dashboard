@@ -619,7 +619,7 @@ inline the hexes.
 | Orange non-run action (Export, **"+ Add rule"**) | `btn btn-outline-orange` | orange outline, fills orange on hover | bij de rij die hij aanvult |
 | Any other action, **Refresh**, **Preview** | `btn btn-outline-purple` | **purple outline** `#5e4a90`, fills purple with white text on hover | usually right (`ms-auto`) |
 | Refresh specifiek | `btn btn-outline-purple` + `↻` glyph | idem, mét het pijltje ervoor | card-header of filterrij, rechts |
-| Destructive (Stop / Remove / Cancel) | `btn btn-outline-red` | **red outline**, fills red on hover — *only while available* | — |
+| Destructive (Stop / Remove / Cancel) | `btn btn-outline-red` | **rode outline** `#d64545` met label `#c03b3b`, vult bij hover **vol rood** `#d64545` met witte tekst — *only while available* | — |
 | Geen eigen betekenis | `btn btn-outline-secondary` / `-primary` / `-info` / `-success` / `-warning`, `btn-secondary`, `btn-preset` | **neutraal grijze outline**, grijze hover | — |
 | Not clickable / unavailable | add `disabled` | **vlak grijs**: paneelvulling `#f4f5f9`, rand `#d6d8d7`, tekst `#9aa0a6` — altijd, ook voor rode knoppen | — |
 
@@ -628,6 +628,50 @@ inline the hexes.
 Wil je betekenis, pak dan `btn-run` (uitvoeren), `btn-outline-purple` (secundair) of
 `btn-outline-orange` (toevoegen/exporteren). Dit is de reden dat DMA Exclusions' Preview van
 `btn-outline-primary` naar `btn-outline-purple` ging (2026-08-14).
+
+**Geen inline hexen en geen `onmouseover`-handlers meer — de hele app is om** (Joep,
+2026-08-19). De oude vorm was een knop die zijn kleur én zijn hover zelf meebracht:
+
+```html
+<!-- ZO NIET -->
+<button class="btn btn-sm" style="border:1px solid #d63031; color:#d63031; background:transparent;"
+        onmouseover="this.style.background='#d63031';this.style.color='white'"
+        onmouseout="this.style.background='transparent';this.style.color='#d63031'">Cancel</button>
+```
+
+Dat leverde precies één probleem op: zo'n knop luistert niet naar `style.css`. Toen de
+destructieve knop op 19 augustus zijn hover-vulling kreeg, veranderden alle
+`btn-outline-red`-knoppen mee en bleven de inline-exemplaren achter — een Cancel die naast
+een Remove staat en er anders uitziet, terwijl het hetzelfde soort knop is. Dat was de
+melding die deze opruiming startte. **39 knoppen op 18 bestanden** zijn omgezet (34 in HTML,
+5 in `js/app.js` + `js/faq.js`), plus de drie `const hover = "onmouseover=…"`-strings in
+GSD Campaigns en de knop in `_tool-template.html` — dat template was de bron van de
+verspreiding, dus die eerst. Sinds die ronde is
+`grep -r 'onmouseover="this.style' frontend/` **leeg** — houd dat zo.
+
+Omzetten gaat per kleur, niet per gevoel:
+
+| inline was | wordt | staat op |
+|---|---|---|
+| `background:#CC5500` + hover `#E97451` (gevuld) | `btn btn-run` | Run / Undo these changes / Get Category Volumes |
+| `border:1px solid #5e4a90` (outline) | `btn btn-outline-purple` | Preview, Copy, Export, Reset, Export all |
+| `border:1px solid #CC5500` (outline) | `btn btn-outline-orange` | Export, Download Excel |
+| `border:1px solid #d63031` (outline) | `btn btn-outline-red` | Cancel, Remove |
+| `border-color:#8b7bb5` (licht paars) | `btn btn-outline-purple` | Copy for Excel |
+
+Twee dingen om te weten bij zo'n omzetting:
+
+* **Geometrie mag inline blijven, kleur nooit.** `padding`, `min-width`, `w-100`,
+  `font-size` horen bij de plek van de knop en blijven staan; alleen de hexen en de
+  handlers gaan eruit. Zo verandert er visueel niets behalve de hover.
+* **`#8b7bb5` is weg.** Dat lichte paars zat op vier "Copy for Excel"-knoppen (Canonicals,
+  Redirect Checker, R-Finder, URL Checker) en haalt op wit maar **3,0:1** — als rand-en-tekst
+  dus niet leesbaar. Ze dragen nu het huispaars `#5e4a90` (7,35:1). Dit is de enige
+  omzetting waarbij de tint écht verschuift; de rest is dezelfde kleur via een klasse.
+* Nog open, zonder haast: **elf knoppen dragen `btn-outline-danger`** in plaats van
+  `btn-outline-red` (Bot Hits, DMA Exclusions 2×, DMA+, GSD Budgets, Index Checker,
+  Keyword Planner 2×, SEO titles 2×, Unique Titles). Ze **renderen goed** — beide namen
+  zitten in dezelfde regelgroep — het is puur de naam die niet zegt wat je krijgt.
 
 **De AAN-staat van een outline-knop is `.active`** (2026-08-14), en die ziet er huisstijl uit:
 paarse tint `#f3f0fa`, paarse rand en paars label, weight 600 — dezelfde taal als
@@ -783,8 +827,26 @@ padding:0;font-size:1.1rem"` was FAQ's old version of exactly this).
 **Direction of the hover, and why the class is `-red`:** outline at rest →
 **fills solid red on hover**, never the reverse. A `.btn-danger-invert` used to do
 it backwards and made identical `×` controls behave oppositely per page; it has
-been deleted, so don't reintroduce it. And it is `btn-outline-red`, not
-`btn-outline-danger`, because `style.css` themes the Bootstrap name **orange**.
+been deleted, so don't reintroduce it. Use `btn-outline-red`, niet
+`btn-outline-danger`: die Bootstrap-naam was hier ooit oranje en zit nu wel in
+dezelfde rode groep, maar `-red` is de naam die zegt wat je krijgt.
+
+**"Vult vol rood" is letterlijk** (2026-08-19, Joep, over de Remove-knop in
+Auto-Redirects → Recent runs). Rust: witte vulling, rand `#d64545`, label
+`#c03b3b`. Hover: vulling **én** rand `#d64545`, tekst `#fff` — precies dezelfde
+beweging als `btn-outline-purple` en `btn-outline-orange`, zodat de drie outline-
+knoppen zich identiek gedragen en alleen van kleur verschillen. Wat hier stond
+was een bijna-witte roze vulling (`#fdf0f0`) op een roze rand (`#e3b3b3`): dan is
+de knop in rust niet rood omlijnd en verandert hij bij hover nauwelijks, terwijl
+dit blueprint al "fills solid red on hover" voorschreef. Het label blijft in rust
+`#c03b3b` en niet `#d64545`, want die laatste haalt op wit geen 4.5:1.
+
+Dit zit in één regelgroep in `style.css` (`.btn-outline-danger, .btn-outline-red,
+.btn-remove, .btn-remove-row, .btn-red-outline, .btn-bulk-remove`), dus élke
+destructieve knop in de app erft het: Auto-Redirects + GSD Budgets Recent runs,
+SEO Prio, SEO Rulings, Canonicals Delete, Redirect Generator/Canonicals rule-×,
+R-Finder filterrijen, GSD Campaigns bulk-Remove. Zet er dus geen pagina-eigen
+rood naast.
 
 In use: R-Finder filter rows, Redirect Generator + Canonicals rule rows,
 Kopteksten + FAQ's Recent Results. The one deliberate exception is an
@@ -848,6 +910,45 @@ unreadable. So a chart hue that doubles as a label needs to be mid-to-dark. That
 constraint replaced a luminance-based `textOn()` helper in Bot Hits: picking the
 readable text colour per background works, but keeping the label palette dark is one
 rule instead of a function.
+
+**Een `.badge` staat verticaal ~1px te LAAG — symmetrische padding centreert niet**
+(Joep, 2026-08-19, GSD Budgets Results). Bootstrap zet `line-height: 1` op `.badge`,
+en die em-doos zit niet symmetrisch om het blok cap-hoogte→basislijn. Gemeten op
+8x-schermshots van de echte badge: bij `padding: .5rem .75rem` (font 0,85rem) landt de
+tekst **+1,000px** onder het midden; bij Bootstraps eigen `.35em .65em` **+1,250px**.
+Het is dus font-metriek, geen paginabug — en `align-items:center` of `inline-flex`
+lost het niet op, want die centreren dezelfde scheve regeldoos.
+
+Fix = **padding-top kleiner dan -bottom, met de som gelijk** zodat de badge niet van
+hoogte verandert:
+
+```css
+.summary-badges .badge { font-size: .85rem; padding: 0.47rem 0.75rem 0.53rem; }  /* +1,000 → 0,000px */
+#resultTables h6 .badge { padding: 0.3em 0.65em 0.4em; }                          /* +1,250 → 0,125px */
+```
+
+De correctie is ~0,06rem bij 0,85rem tekst en ~0,10em op de kleinere kop-badge; de
+reeks .50/.49/.485/.475/.47 mat +1,000 / +0,750 / +0,625 / +0,250 / 0,000px, dus het
+loopt netjes 1-op-1 met het verschil. Meetrecept staat in `cc1/LEARNINGS.md`
+(2026-08-19): render op `--force-device-scale-factor=8`, zoek de badge-band, negeer
+de rand-ring en de afgeronde hoeken, en bepaal de basislijn als de grootste
+dichtheidsval in de onderste helft van het inkblok — niet de onderkant van de ink,
+want dan meet je de staart van de `g` mee.
+
+**Gevulde actielabels gingen outlined in GSD Budgets** (zelfde dag). De vier
+budget-acties stonden vol (`#00b894` groen, `#d63031` rood, `#e17055` zalm) naast drie
+al-outlined tellers in dezelfde rij — twee silhouetten voor hetzelfde soort ding, en
+de gevulde waren 2px lager omdat ze geen rand hadden. Nu allemaal `badge lbl lbl-*`.
+Twee dingen die daarbij opvielen:
+
+* **Een lichte fill-hue overleeft de omzetting niet.** `#00b894` haalt als rand-en-tekst
+  op wit 2,54:1 en `#e17055` 3,16:1 → vervangen door `#198754` (4,53) en `#b45309`
+  (5,02). Rood `#d63031` (4,85) kon blijven. Dit is dezelfde regel als bij de
+  chart-hues hierboven: outlined labels willen mid-to-dark tinten.
+* ⚠️ **Er zijn nu twee ambers.** GSD Budgets' `.lbl-amber` is `#b45309` (de tint die de
+  DRY RUN-badge op die pagina al droeg), GSD Tag Toppers' is `#b26a00`. Ze liggen
+  15 ΔE uit elkaar, dus dat is zichtbaar. Bewust zo gelaten om DRY RUN niet te
+  verkleuren; wie dit ooit gelijktrekt, doet het op beide pagina's tegelijk.
 
 **Twee labelkolommen in één tabel verschillen in KLEUR, niet in vorm** (Joep,
 2026-08-17, GSD Campaigns). Model stond er zacht gevuld (soft fill + accentrand)

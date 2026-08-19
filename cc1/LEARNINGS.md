@@ -1,6 +1,104 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## `cc1/` staat in `.gitignore`, dus een NIEUW cc1-bestand komt er niet in (2026-08-19)
+
+`.gitignore` regel 31 is `cc1/`. De bestaande docs zijn al tracked, dus `git add -u cc1/`
+werkt gewoon en `git status` toont ze als gewijzigd — maar een **nieuw** bestand in `cc1/`
+wordt geweigerd (`The following paths are ignored…`) en verdwijnt stil uit de commit. Gebruik
+dan `git add -f cc1/<nieuw>.md`. Voor het bijwerken van bestaande docs: `git add -u cc1/`.
+
+## De verse dag in `daily_standup_metrics_category` is provisorisch, en niet een beetje (2026-08-19)
+
+Joep vroeg drie opvallende dingen over de SEO-performance van gisteren. Twee van de drie
+waren laadartefacten, dus die vraag is elke ochtend een valkuil. De tabel krijgt haar eerste
+load voor dag D rond 06:00 op D+1 en wordt **rond 06:00 op D+2 herzien** (`update_date`).
+Tot die herziening geldt voor D:
+
+1. **`affiliate_revenue_visit` is ongeveer half geland** → `omzet_visit` en dus de OPB lezen
+   veel te laag. Op 18-08 stond affiliate op €981 tegen een normale band van €1.500–2.500;
+   de OPB toonde €0,0895 (het "laagste van de maand") terwijl de herziene waarde rond €0,105
+   uitkomt. **`cpc_revenue_visit` is wél compleet op dag D** — beoordeel een verse dag dus op
+   CPR-per-visit. Op die maat was 18-08 juist de beste dag van negen (€0,0737, +6,7% t.o.v.
+   maandag). `transactions` vult ook nog aan.
+2. **De domeinsplit is onbruikbaar**: alle visits zitten op `domain='Overig'` en de NL/BE/DE-
+   rijen bestaan mét kosten/omzet maar met `visits IS NULL`. Dit raakt **elk** kanaal, niet
+   alleen SEO, en herstelt zich bij de herziening (historische 'Overig'-rijen houden ~2 visits).
+3. **`datamart.fct_visits` heeft nul rijen voor D** → geen visit-grain, URL-type of
+   real-visit-analyse van gisteren mogelijk.
+4. **`bt.search_console` is voor D en D-1 half geladen** (1,4–1,7M impressies tegen ~3,1M
+   basis), wat een positieverbetering fingeert: gewogen positie 8,3 → 6,0 en Google-CTR
+   0,85% → 1,3%. Beide nep. Niet als ranking-winst rapporteren.
+
+**Zo rapporteer je gisteren:** totalen + CPR-per-visit, en noem OPB, domeinsplit en
+GSC-positie expliciet provisorisch. Alles wat een *ratio* is, meet je op D-2 of ouder.
+
+## Een preview die je pusht, moet de payload van díe preview versturen (2026-08-19)
+
+Bij het bouwen van de Healthscore-console lag de verleiding klaar om de push de payload
+opnieuw te laten bouwen — hij is immers deterministisch uit `pa.hs2_sitemap` bij dezelfde
+`as_of`. Dat is hij niet: `fetch_page_headings` leest een **rollend 365-daags venster** voor
+het ankertekst-veld, dus tussen de preview-klik en de push-klik kan een anker verschuiven.
+Dan push je iets wat niemand heeft goedgekeurd, en het reviewen was voor niets. Daarom slaat
+de preview de volledige payload op in `pa.hs2_runs.detail` (JSONB, een paar MB voor twaalf
+buckets) en **replayt** de push die bytes. Bijkomend voordeel: de run-rij is het auditspoor.
+
+Drie dingen die daaruit volgden en breder gelden:
+
+* **Een push is zijn eigen rij, met `parent_run_id`** naar de preview. Anders kun je niet
+  zien wat er is voorgesteld tegenover wat er is verstuurd.
+* **`GET /runs` mag `detail` niet meesturen.** Die kolom bevat de payloads; de lijst wordt
+  anders tientallen megabytes. De detail-endpoint stript hem ook, tenzij je erom vraagt.
+* **Lees na een schrijfactie terug.** De Keywords API antwoordt 200 en kapt stil af (url is
+  `varchar(255)`), dus de run vergelijkt de teruggelezen url-set met wat hij verstuurde en
+  vlagt het verschil. "Het gaf 200" is niet hetzelfde als "het staat er".
+
+En een meetdetail: per-categorie coverage bestond nog niet — `pa.healthscore_coverage` is
+alleen maand × `type_url`. `seo_visits_by_type()` haalt nu (cat, npath, type_url, visits,
+revenue) over 90 dagen in één query per scope (zelfde vorm als `seo_visits_in_maincats`),
+waarna Python de tabel per categorie maakt. **"In set" betekent daar: de set die déze run zou
+publiceren**, niet de huidige live set — dat is de vraag die een run beantwoordt. Dat maakt
+ook meteen zichtbaar dat PLP op 0% staat by design (`/p/` wordt overgeslagen) terwijl juist
+die visits het gros van de omzet dragen: Douchewanden 90,8% visit cov tegen 39,7% revenue cov.
+
+## Verticaal centreren van tekst in een `.badge` meet je, je gokt het niet (2026-08-19)
+
+Joep: "de tekst in `badge badge-increase` lijkt verticaal niet in het midden te staan."
+Dat klopte, en de oorzaak is Bootstrap: `.badge` heeft `line-height: 1`, en die em-doos
+zit niet symmetrisch om het blok **cap-hoogte → basislijn**. Symmetrische padding
+centreert dus niet, en `inline-flex` + `align-items:center` ook niet — dat centreert
+dezelfde scheve regeldoos. Gemeten offsets (tekst staat te LAAG):
+
+| context | padding | offset |
+|---|---|---|
+| `.summary-badges .badge`, font .85rem | `.5rem .75rem` | **+1,000px** |
+| kop-badge in `h6`, Bootstrap-default | `.35em .65em` | **+1,250px** |
+
+Fix = padding-top kleiner dan -bottom **met de som gelijk**, zodat de badgehoogte niet
+verandert: `0.47rem .75rem 0.53rem` (→ 0,000px) en `0.3em .65em 0.4em` (→ +0,125px).
+De reeks .50/.49/.485/.475/.47 gaf +1,000 / +0,750 / +0,625 / +0,250 / 0,000px, dus de
+correctie loopt 1-op-1 met het padding-verschil.
+
+**Meetrecept** (hover en sub-pixels kun je niet met `--screenshot` alleen beoordelen):
+
+1. Zet de echte markup + `/static/css/style.css` op een tijdelijke pagina in `frontend/`
+   (of kopieer de hele tool-pagina en roep `renderResults(fakeData)` aan; sloop daarna
+   alles buiten de te fotograferen kaart uit de DOM). Daarna `rm`.
+2. Screenshot met Windows Chrome op **`--force-device-scale-factor=8`** → 1 CSS-px = 8
+   meetpunten. Zie [[wsl_screenshot_windows_chrome]] voor het commando.
+3. In Python/PIL: vind per badge de horizontale band met niet-witte pixels (= de doos),
+   negeer **de rand-ring** (~1,6 × scale px) en beperk je tot de **middelste 50% van de
+   breedte** — anders meet je de afgeronde hoeken of de rand als "ink".
+4. Basislijn = de grootste **dichtheidsval** in de onderste helft van het inkblok, NIET
+   de onderkant van de ink: dan meet je de staart van de `g` mee en lees je 0,75px fout.
+5. `delta = (captop − boxtop) − (boxbottom − basislijn)`; positief = tekst staat te laag.
+
+Zelfde truc werkt voor een hover-staat die je niet kunt hoveren: lees de echte
+`:hover`-regel uit `document.styleSheets` en plak zijn `cssText` op een tweede exemplaar
+van het element. Zo is de rode Remove-knop van Auto-Redirects diezelfde dag gecheckt.
+
+Zie UI_BLUEPRINT §"Labels / badges" voor de vastgelegde regel.
+
 ## Een guard die begint met "is er wel gematcht?" keurt alles goed wat nooit matchte (2026-08-18)
 
 Joep vroeg bij regel 102 van `redirects_global_f4383643` hoe die redirect tot stand komt:
