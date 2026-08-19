@@ -72,8 +72,6 @@ Total URLs') fancier, like the tiles Shops in range, Enabled campaigns and Last 
 - In Auto-Redirects in Recent runs, graag de Remove-knop outlined rood maken met full rood hover effect, en dit opnemen in UI_BLUEPRINT
 - In GSD Budgets in Results graag de labels (bijv. "verhogen-20: 14, verlagen-20: 13, verlagen-25: 0, c-verlagen-20: 3") outlined maken ipv full color. En de tekst in 'badge badge-increase' lijkt verticaal niet in het midden te staan.
 
-- SA360 biedstrategieën aanpassen/koppelen?
-
 M.b.t. Healthscore 2.0 graag deze wijzigingen doorvoeren:
 - Tool graag hernoemen naar "Healthscore"
 - Dashboard knop bovenin heeft tekst 'dashboard' ipv de Apps-knop
@@ -82,9 +80,11 @@ M.b.t. Healthscore 2.0 graag deze wijzigingen doorvoeren:
 - Onderaan: Recent runs (tabel met alle verleden runs + stats + export knop). Runs zijn klikbaar en als je erop klikt verschijnt een uiteenzetting van de run (zoals in GSD Budgets)
 - Run-vier/uiteenzetting: maincat/deepest cat dropdown, met daaronder de tabel met overzicht per URL-type zoals het er nu staat (URL type	SEO visits	in set	visit cov	coverage	revenue cov) 
 - Footertekst zoals aangegeven in UI_BLUEPRINT
-
 - 'PLP-pagina's meenemen' aanpassen naar 'Inclusief PLP's'
 - Infotekst "Een run bouwt de sitemap-payload voor de categorie, vergelijkt die met wat er nú live staat en meet de dekking. Er gaat niets naar de Keywords API tot je daarna expliciet op Push live drukt." weghalen
 - Infotekst "De buckets waar HS2.0 live op staat: tien deepest categorieën plus twee hele maincats. Dry run bouwt en meet alles in één keer; pushen kan daarna per bucket of allemaal." weghalen
 
 - In Recent runs alleen de volgende kolommen behouden: Gestart	Soort	Wat	Cats	Voorstel	Live	Nieuw	Weg	Visits weg	Visit cov	Status
+- SA360 biedstrategieën aanpassen/koppelen?
+
+Graag een onderzoek doen naar alle facet values in maincat Parfumerie die seoPriority=1 hebben in de taxonomy api, en waarvan de cat/facet combinatie seoprio=1 heeft ('aan' staat), maar die in de afgelopen 1.5 jaar 0 visits hebben gehad via SEO. Voor deze facet values graag kijken of ze óók geen visits hebben gehad via andere kanalen (in dezelfde daterange). Hiervan zou ik graag een uitdraai willen. Uitdraai graag in de vorm van een Excel met één tabblad waarin de facet values staan die via álle kanalen 0 visits kreeg afgelopen 1,5 jaar, en één tabblad met de facet values die via SEO 0 visits kregen, maar via andere kanalen wel.

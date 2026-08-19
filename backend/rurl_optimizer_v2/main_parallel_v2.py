@@ -2357,6 +2357,15 @@ def process_url_v2(args):
     search_derived_dom_cat = ''
     search_derived_dom_share = None
     search_derived_dom_count = None  # V45: products behind dom_share (count guard)
+    # `derived` is only assigned inside the `if has_matchable ...` block below, but
+    # the V53 block (~line 3550) reads it at function-body level. A row whose query
+    # is nothing but shop names and/or stopwords (has_matchable False) can still come
+    # out of the matcher as a multi-facet maincat-level /c/ redirect, and then V53's
+    # own guard dereferences an unbound name: UnboundLocalError inside the
+    # multiprocessing pool, which kills the WHOLE run (one row cost a 3-hour run on
+    # 2026-08-19). An empty dict is also the semantically right fallback: with no
+    # search-derived result there is nothing for V53 to prefer, so it must not fire.
+    derived: dict = {}
 
     if has_matchable and parsed.main_category and parsed.keyword:
         derived = derive_search_redirect(parsed.main_category, parsed.keyword)
@@ -4146,8 +4155,15 @@ def main():
 
                 # Incremental save every SAVE_INTERVAL URLs
                 if len(results) - last_save_count >= SAVE_INTERVAL:
-                    # Save progress
-                    batch_df = pd.DataFrame(results)
+                    # Only the rows since the last checkpoint. This used to write
+                    # the WHOLE accumulated `results` and append it, so checkpoint
+                    # k wrote k*SAVE_INTERVAL rows: 30.000 rows for 15.000 urls on
+                    # the 2026-08-19 run, growing quadratically, and every
+                    # checkpoint re-read that file. `last_save_count` was already
+                    # tracked for exactly this — it just was not used to slice.
+                    # The duplicates also flow into the final CSV, because the
+                    # resume path concatenates this file with the new batch.
+                    batch_df = pd.DataFrame(results[last_save_count:])
                     if os.path.exists(progress_file):
                         # Append to existing
                         existing_df = pd.read_csv(progress_file)
