@@ -20,6 +20,9 @@
          * de kop rendert altijd op het vlakke paneel. Ook eruit: de eigen `.chip`
          * (nu de gedeelde `.badge-purple`), `.hs-table` (nu de canonieke
          * `.tool-table`) en `.spinner-inline` (nu Bootstraps `.spinner-border`).
+         * De transparante outline-knop in een kaartkop stond hier één dag als
+         * pagina-regel en is nu gedeeld (`style.css`, `.card-header :is(…)`), dus
+         * een kopie hier zou die stil overschrijven.
          * ------------------------------------------------------------------ */
 
         /* Outlined labels — UI_BLUEPRINT §"Labels / badges": transparant, rand in
@@ -228,24 +231,6 @@
         #catJob:not(:empty), #testJob:not(:empty) { margin-top: 1rem; }
         #runCardNote:not(:empty), #runCardJob:not(:empty),
         #runsNote:not(:empty) { margin-bottom: 1rem; }
-
-        /* Een outline-knop IN EEN KAARTKOP is transparant, niet wit (Joep,
-           2026-08-19). De gedeelde regel zet `background-color: var(--flat-surface)`
-           = #ffffff, en op de kop (--flat-panel, #f4f5f9) leest dat als een wit
-           blokje om de knop. UI_BLUEPRINT schrijft voor de Refresh-knop letterlijk
-           "transparent background, purple outline and label" voor, dus dit brengt de
-           knop terug op zijn canonieke vorm.
-           De hover wordt hier expliciet herhaald: het blueprint waarschuwt dat een
-           kale background-override in een page-<style> ook op hover kan winnen en
-           dan witte tekst op wit wit oplevert. Zo staat de vulling er in beide
-           staten zwart op wit.
-           Blast radius bewust beperkt tot deze pagina: dezelfde witte vulling zit in
-           élke kaartkop van de app, en dat gelijktrekken is één regel in style.css —
-           een aparte beslissing, geen bijproduct van deze opruiming. */
-        .card-header .btn-outline-purple,
-        .card-header .btn-outline-orange { background-color: transparent; }
-        .card-header .btn-outline-purple:hover:not(:disabled) { background-color: #5e4a90; color: #fff; }
-        .card-header .btn-outline-orange:hover:not(:disabled) { background-color: #CC5500; color: #fff; }
 
         /* Rood kadertje voor een fout of een geblokkeerde push. Geen .info-note —
            dat is geel en bedoeld voor een staande notitie, niet voor een fout. */

@@ -629,6 +629,41 @@ body {
     cursor: not-allowed;
 }
 
+/* ------------------------------------------------------------------ *
+ * EEN OUTLINE-KNOP IN EEN KAARTKOP IS TRANSPARANT, NIET WIT (Joep, 2026-08-19).
+ *
+ * De drie outline-groepen hierboven zetten `background-color: var(--flat-surface)`
+ * = #ffffff. Op een kaartbody is dat onzichtbaar (wit op wit), maar de kaartkop
+ * staat op `--flat-panel` (#f4f5f9) en daar leest het als een wit blokje óm de
+ * knop — precies wat UI_BLUEPRINT bij de Refresh-knop verbiedt ("transparent
+ * background, purple outline and label"). Die regel stond er dus al; alleen deed
+ * de CSS iets anders. Geraakt: 25 pagina's met een Refresh/Export/Copy in een
+ * kaartkop.
+ *
+ * De drie `:not()`s zijn niet decoratief — ze houden deze regel uit de andere
+ * drie staten, en daarmee ORDE-ONAFHANKELIJK:
+ *   :not(:hover)     de hover-groepen vullen vol paars/oranje/rood. Zonder dit
+ *                    wint (0,5,0) van hun (0,3,0) en krijg je witte tekst op een
+ *                    transparante knop.
+ *   :not(:disabled)  `.btn:disabled` blijft vlak grijs — onbeschikbaar wint altijd
+ *                    van kleur.
+ *   :not(.active)    de aan-staat houdt zijn paarse tint (#f3f0fa), zoals de
+ *                    Export/Verwijder-toggles in Healthscore → Recent runs.
+ * `:is()` erft de specificiteit van één klasse, dus dit blijft (0,5,0) in plaats
+ * van te exploderen over 21 selectors.
+ *
+ * NIET de navbar en niet een gevulde knop: `.btn-run` c.s. hóórt een vlak te zijn.
+ * ------------------------------------------------------------------ */
+.card-header :is(.btn-outline-purple, .btn-purple-outline, .btn-purple-action, .btn-hs-outline,
+                 .btn-outline-orange, .btn-orange-action,
+                 .btn-outline-secondary, .btn-outline-primary, .btn-outline-info,
+                 .btn-outline-success, .btn-outline-warning, .btn-secondary,
+                 .btn-preset, .btn-tool, .btn-bulk-pause, .btn-bulk-activate,
+                 .btn-outline-danger, .btn-outline-red, .btn-remove, .btn-red-outline,
+                 .btn-bulk-remove):not(:hover):not(:disabled):not(.active) {
+    background-color: transparent;
+}
+
 /* .btn-danger-invert (solid red at rest, outline on hover) is GONE. It was the
    mirror image of .btn-outline-red below and the two coexisting meant identical
    × controls behaved oppositely per page. Everything now uses .btn-outline-red:
