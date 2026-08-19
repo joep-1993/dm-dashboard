@@ -762,15 +762,29 @@ hierboven. Consequences:
   or white outline "so it shows on the purple header" is compensating for a colour that
   never paints, and reads as a different button from every other Refresh (Joep, 2026-07-31:
   *"the Refresh button in Performance per day should be transparent (is now white)"*).
-* **Maar "transparent" is niet wat `style.css` doet, en dat scheelt zichtbaar** (Joep,
-  2026-08-19). De drie outline-groepen zetten `background-color: var(--flat-surface)` =
-  `#ffffff`, en op een kaartkop (`--flat-panel`, `#f4f5f9`) leest dat als een wit blokje om
-  de knop — precies wat dit blueprint hierboven verbiedt. In Healthscore staat nu een
-  pagina-regel `.card-header .btn-outline-purple, .card-header .btn-outline-orange
-  { background-color: transparent; }` **met de hover er expliciet naast** (zie de corollary
-  hieronder: zonder die herhaling kan een kale override ook op hover winnen). Dit geldt voor
-  élke kaartkop in de app; app-breed gelijktrekken is één regel in `style.css` en staat als
-  open punt in `cc1/TASKS.md`.
+* **"Transparent" was niet wat `style.css` deed — sinds 2026-08-19 wel, app-breed** (Joep).
+  De drie outline-groepen zetten `background-color: var(--flat-surface)` = `#ffffff`. Op een
+  kaartbody is dat onzichtbaar (wit op wit), maar de kop staat op `--flat-panel` (`#f4f5f9`)
+  en daar las het als een wit blokje óm de knop — precies wat de regel hierboven al verbood.
+  De regel stond er dus al; alleen deed de CSS iets anders. Nu staat in `style.css`:
+
+  ```css
+  .card-header :is(.btn-outline-purple, …, .btn-outline-red, …)
+              :not(:hover):not(:disabled):not(.active) { background-color: transparent; }
+  ```
+
+  **De drie `:not()`s zijn de hele truc, en je haalt ze er niet uit.** Ze houden deze regel
+  buiten de andere drie staten, waardoor hij orde-onafhankelijk is: `:not(:hover)` laat de
+  hover-groepen vol paars/oranje/rood vullen (zonder dit wint (0,5,0) van hun (0,3,0) en
+  krijg je witte tekst op een transparante knop — dat is de corollary hieronder, nu als
+  selector opgelost in plaats van door de hover te herhalen), `:not(:disabled)` laat
+  `.btn:disabled` vlak grijs blijven, en `:not(.active)` laat de aan-staat zijn paarse tint
+  `#f3f0fa` houden. `:is()` erft de specificiteit van één klasse, dus dit blijft (0,5,0)
+  in plaats van te exploderen over 21 selectors. Gemeten na de wijziging: rust
+  `rgba(0,0,0,0)`, disabled `#f4f5f9`, active `#f3f0fa`, en `.btn-run` blijft gevuld
+  `#CC5500` — een gevulde CTA hóórt een vlak te zijn. Raakt 25 pagina's met een
+  Refresh/Export/Copy in een kaartkop; op een kaartbody verandert er niets, want daar was
+  wit al onzichtbaar.
 * Before styling anything **against** a header colour, check the rendered colour in the
   browser (or a headless screenshot), not the inline style in the HTML.
 * **Een knopvariant "voor op donker" is per definitie verdacht.** URL Validator had

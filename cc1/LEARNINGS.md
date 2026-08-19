@@ -1,6 +1,37 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een gedeelde regel die drie andere staten moet laten staan: `:not()`, niet volgorde (2026-08-20)
+
+Outline-knoppen app-breed transparant maken in een kaartkop is één declaratie, maar hij moet
+zich buiten drie bestaande staten houden: de hover-vulling, `.btn:disabled` en de paarse
+`.active`-tint. Twee manieren, en de eerste is een tijdbom:
+
+1. **Op volgorde.** `.card-header .btn-outline-purple` is (0,2,0), de hover-groep
+   `.btn-outline-purple:hover:not(:disabled)` is (0,3,0), dus de hover wint op specificiteit --
+   maar `.btn:disabled` is óók (0,2,0), en dan beslist de plek in het bestand. Zet je de nieuwe
+   regel ná de disabled-regel, dan is een uitgeschakelde knop in een kaartkop transparant in
+   plaats van vlak grijs. Dat werkt tot iemand een blok verplaatst.
+2. **Op selector.** `:not(:hover):not(:disabled):not(.active)` erbij, en de regel MATCHT die
+   staten niet meer. Dan doet volgorde niet mee en hoef je de hover ook niet te herhalen (wat
+   het blueprint eerder voorschreef als workaround: een kale override kan op hover winnen en
+   witte tekst op een transparante vulling geven).
+
+De prijs is specificiteit: elke `:not()` telt als een klasse, dus dit is (0,5,0) en verslaat
+álles in de knopgroepen -- precies waarom die drie uitsluitingen er dan ook moeten staan.
+`:is(.btn-outline-purple, … 21 klassen …)` erft de specificiteit van zijn zwaarste argument
+(één klasse), dus de lijst kost niets extra en de regel blijft één blok in plaats van 21
+selectors. Verificatie is niet optioneel bij zoiets: gemeten in alle vier de staten (rust
+`rgba(0,0,0,0)`, disabled `#f4f5f9`, active `#f3f0fa`, `.btn-run` blijft `#CC5500`) op een
+probepagina met alle varianten in een echte kaartkop, plus visueel op vier tools.
+
+**Het meta-punt is het interessantere.** Deze regel STOND al in UI_BLUEPRINT ("transparent
+background, purple outline and label") en de CSS deed sinds de flat-merge iets anders
+(`--flat-surface` = wit). Een voorschrift dat niemand tegen de gerenderde pagina houdt, is
+onzichtbaar: op een witte kaartbody is wit-op-wit niet te zien, en alleen op de grijze kaartkop
+kwam het boven. Zelfde les als "meet de gerénderde achtergrond, niet de inline stijl" --
+maar dan voor het blueprint zelf.
+
 ## Drie dingen die een schermshot vertelde en de code niet (2026-08-19)
 
 Een ronde van ~20 UI-punten op Healthscore. De drie die tijd kostten of tijd gaan schelen,

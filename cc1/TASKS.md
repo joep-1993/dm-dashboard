@@ -31,10 +31,12 @@ vastgelegde regels in UI_BLUEPRINT §Tables, §Buttons, §Labels, §Stat tiles.
       (`.hs-head`, `.chip`, `.hs-table`, `.spinner-inline`).
 - [x] `.btn-outline-red.active` toegevoegd aan de gedeelde active-groep in `style.css` — zonder
       die selector was een actieve destructieve knop zwart (Bootstraps eigen `.btn.active`).
-- [ ] **Outline-knoppen in een kaartkop app-breed transparant maken.** Nu alleen in Healthscore;
-      de drie groepen zetten `background-color: var(--flat-surface)` = wit, en op `--flat-panel`
-      leest dat als een wit blokje. Eén regel in `style.css` + de hover ernaast, en dan alle
-      kaartkoppen in één keer. Joep beslist. #priority:low
+- [x] **Outline-knoppen in een kaartkop app-breed transparant** (Joep gaf groen licht dezelfde
+      dag). Eén regel in `style.css`: `.card-header :is(…):not(:hover):not(:disabled):not(.active)`.
+      De pagina-regel in Healthscore is weggehaald, want een page-`<style>` laadt later en zou de
+      gedeelde regel stil overschrijven. Nagemeten in alle vier de staten (rust transparant,
+      disabled `#f4f5f9`, active `#f3f0fa`, `.btn-run` blijft gevuld) en visueel gecheckt op
+      Bot Hits, SEO stats, Index Checker en Canonicals. Zie UI_BLUEPRINT §Buttons.
 - [ ] **`.tool-table td` padding gelijk aan de kop, app-breed.** Nu pagina-regel in Healthscore.
       Waarden staan overal 10px links van hun kop (`th` 6px/14px, `td` 4px van `.table-sm`).
       Bredere cellen verschuiven kolombreedtes op 35 pagina's, dus meten vóór uitrollen.
