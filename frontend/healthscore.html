@@ -7,63 +7,250 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
-        /* --- Outlined labels: UI_BLUEPRINT "Labels / badges". Zelfde klassen en
-           tinten als GSD Budgets, inclusief de padding-nudge (Bootstrap zet
-           line-height:1 op .badge, waardoor de tekst ~1px te laag landt). --- */
+        /* ------------------------------------------------------------------ *
+         * Healthscore — alleen wat van DEZE pagina is. De basisvormen (kaart,
+         * kaartkop, knoppen, .tool-table + sticky grijze kop, .chk-list,
+         * .skel-*, .progress.indeterminate, .alert-done-yellow, .badge-purple)
+         * staan in css/style.css; die hoeven hier niet herhaald te worden en een
+         * kopie zou de gedeelde regel stil overschrijven (een page-<style> laadt
+         * ná de stylesheet). Bron voor elke keuze hieronder: cc1/UI_BLUEPRINT.md.
+         *
+         * Eruit gegaan op 2026-08-19: `.card-header.hs-head` (paarse kaartkop).
+         * Dat was dode CSS — `.card-header` in style.css draagt `!important`, dus
+         * de kop rendert altijd op het vlakke paneel. Ook eruit: de eigen `.chip`
+         * (nu de gedeelde `.badge-purple`), `.hs-table` (nu de canonieke
+         * `.tool-table`) en `.spinner-inline` (nu Bootstraps `.spinner-border`).
+         * ------------------------------------------------------------------ */
+
+        /* Outlined labels — UI_BLUEPRINT §"Labels / badges": transparant, rand in
+           currentColor, UPPERCASE, en de hue als TEKSTkleur (dus mid-to-dark; een
+           lichte tint is als rand-en-tekst op wit onleesbaar). Bootstrap zet
+           color:#fff op .badge, dus dit blok moet ná Bootstrap laden — een
+           page-<style> doet dat.
+
+           De verticale padding is ASYMMETRISCH en dat is geen slordigheid:
+           Bootstrap zet `line-height: 1` op .badge en die em-doos zit niet
+           symmetrisch om het blok cap-hoogte→basislijn, dus symmetrische padding
+           centreert niet (Joep, 2026-08-19: "tekst in done-label staat verticaal
+           niet in het midden"). `align-items: center` of `inline-flex` helpt hier
+           niet — dat centreert dezelfde scheve regeldoos.
+           Nagemeten op een 8×-schermshot van dít label (recept in
+           cc1/LEARNINGS.md 2026-08-19), positief = tekst staat te laag:
+             .20/.20 → +1,250px   .18/.22 → +0,875px   .16/.24 → +0,375px
+             .15/.25 → +0,125px   .13/.27 → −0,250px
+           Dus 0.15em boven / 0.25em onder, en de SOM blijft 0,4em zodat de
+           labelhoogte niet verandert (gemeten 14,5px in alle varianten). */
         .lbl { background: transparent; font-weight: 700; border: 1px solid currentColor;
-               padding: 0.3em 0.65em 0.4em; }
-        .lbl-green { color: #198754; }
-        .lbl-red   { color: #d63031; }
-        .lbl-amber { color: #b45309; }
-        .lbl-ink   { color: #2d3436; }
+               text-transform: uppercase; letter-spacing: .03em; font-size: 0.7rem;
+               padding: 0.15em 0.55em 0.25em; border-radius: 0.375rem; display: inline-block; }
 
-        .card-header.hs-head { background: #5e4a90; color: #fff; }
-        .muted-sm { font-size: 0.78rem; color: #9a96a8; }
-        .chip { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 0.78rem;
-                font-weight: 600; background: #fff; color: #5e4a90; border: 1px solid #e0d8f2; }
+        /* Labels dragen drie verschillende betekenissen, dus drie palettes — twee
+           labels mogen verschillen in kleur en niet in vorm (UI_BLUEPRINT):
 
-        /* Grid, geen flex: met flex-grow rekt een laatste losse kaart zich over de
-           hele regel uit ("39,7% revenue cov" over 1076px). auto-fill houdt alle
-           kaarten even breed en lijnt de restrij links uit. */
-        .stat-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
+             Niveau  deepest / maincat        → lichtblauw / roze
+             Status  done / error / running   → groen / rood / amber
+             Soort   preview / push           → teal / paars
+
+           Het merkpaar lichtblauw + roze zit op NIVEAU, omdat die labels ook in
+           Testcats staan en één tint daar en hier hetzelfde moet betekenen (Joep,
+           2026-08-19). Soort staat sinds diezelfde dag niet meer als kolom in Recent
+           runs (die kolom is eruit) maar alleen in de kop van de run-kaart, en draagt
+           teal + paars: de twee overgebleven hues uit het `.lbl-*`-vocabulaire van
+           deze app (GSD Tag Toppers) die op wit genoeg contrast halen. Push was
+           rood, en dat botste met een mislukte run — juist de rij die je bekijkt had
+           dan twee rode labels naast elkaar.
+           Grijs (`.lbl-ink`) is weg: nooit grijs als labelkleur, dat leest als
+           uitgeschakelde chrome. Contrast op wit staat per regel. */
+        .lbl-green  { color: #198754; }   /* done    — 4,53:1 */
+        .lbl-red    { color: #d63031; }   /* error   — 4,85:1 */
+        .lbl-amber  { color: #b45309; }   /* running — 5,02:1 */
+        .lbl-blue   { color: #1f99c4; }   /* deepest — zelfde lichtblauw als CPR in GSD Campaigns */
+        .lbl-pink   { color: #be4693; }   /* maincat — 4,65:1 */
+        .lbl-teal   { color: #0f766e; }   /* preview — 5,45:1 */
+        .lbl-purple { color: #5e4a90; }   /* push    — 7,35:1 */
+
+        /* Bijschrift/metatekst. Was #9a96a8 (3,0:1) en las als grijze ruis; nu de
+           gedeelde --flat-muted, zodat het bij de rest van de app past. */
+        .muted-sm { font-size: 0.8rem; color: var(--flat-muted); }
+
+        /* TEGELS OP ÉÉN RIJ (Joep, 2026-08-19). Dit stond op
+           `repeat(auto-fill, minmax(132px, 1fr))`: in een kaartbody van ~1010px past
+           dat zeven keer, dus de achtste tegel viel op een eigen regel en las als
+           een andere soort tegel. `grid-auto-flow: column` legt ALTIJD één rij neer,
+           hoeveel tegels de renderer ook meegeeft, en de `minmax(0, 1fr)` erbij
+           houdt de rij binnen de kaart in plaats van hem door een lang getal breder
+           te laten worden.
+           Reken na bij een tegel erbij: 8 tegels in 1010px met 8px gap geeft
+           (1010 − 56) / 8 = 119px, en daar past het langste getal dat deze tool
+           toont ("1.299", "39,7%", "35.866") op 1,3rem tabular-nums. */
+        .stat-row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; }
         .stat-card { background: #fff; border: 1px solid #e6e3ef; border-radius: 10px;
-                     padding: 0.75rem 0.6rem; text-align: center; }
-        .stat-card h3 { margin: 0; font-size: 1.35rem; font-weight: 700; color: #5e4a90; }
+                     padding: 0.7rem 0.4rem; text-align: center;
+                     box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+                     display: flex; flex-direction: column; justify-content: center; }
+        .stat-card h3 { margin: 0; font-size: 1.3rem; font-weight: 700; color: #5e4a90;
+                        font-variant-numeric: tabular-nums; }
         .stat-card h3.pos { color: #198754; }
         .stat-card h3.neg { color: #d63031; }
-        .stat-card .label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: .04em;
-                            color: #8a8a8a; margin-top: 2px; }
+        .stat-card .label { font-size: 0.66rem; text-transform: uppercase; letter-spacing: .04em;
+                            color: #8a8a8a; margin-top: 3px; line-height: 1.25; }
 
-        /* Coverage-tabel per URL-type — ongewijzigd overgenomen, dit is de tabel
-           die Joep in de uiteenzetting terug wil zien. */
-        .hs-table { font-size: 0.9rem; }
-        .hs-table th { background: #5e4a90; color: #fff; font-weight: 600; font-size: 0.78rem;
-                       text-transform: uppercase; letter-spacing: 0.4px; }
-        .hs-table td, .hs-table th { text-align: right; vertical-align: middle; white-space: nowrap; }
-        .hs-table td:first-child, .hs-table th:first-child { text-align: left; }
-        .hs-table tr.row-all td { font-weight: 700; background: #f3f0fa; }
-        .cov-bar { position: relative; height: 16px; background: #eee; border-radius: 8px;
-                   overflow: hidden; min-width: 90px; }
+        /* Tabellen. De vorm komt uit style.css (.tool-table-wrap, .tool-table,
+           sticky grijze kop, .col-center); hier staan de kolomregels, want die horen
+           bij de data.
+
+           DE CELPADDING IS DE FIX voor "de waarden staan niet onder hun kop" (Joep,
+           2026-08-19). `.tool-table th` in style.css draagt `padding: 6px 14px`,
+           terwijl een td zijn padding van Bootstraps `.table-sm` krijgt: 4px. Dus
+           stond elke waarde 10px links van zijn eigen kop — het meest zichtbaar in
+           een linkse tekstkolom als Gestart en URL type. Hier gelijkgetrokken.
+           Let op bij hergebruik: deze misalignment zit in élke tool die .tool-table
+           gebruikt; dit is bewust een pagina-regel gebleven en geen wijziging in
+           style.css, want die verandert de kolombreedtes van 35 pagina's tegelijk. */
+        .tool-table th, .tool-table td { padding: 6px 14px; }
+        .tool-table-wrap { max-height: 520px; }
+        .tool-table td { white-space: nowrap; }
+        /* Getalkolommen staan GECENTREERD (Joep, 2026-08-19) — met tabular-nums,
+           zodat de cijfers ondanks het centreren onder elkaar blijven staan. */
+        .tool-table .col-center { font-variant-numeric: tabular-nums; }
+        .tool-table tbody tr.run-row { cursor: pointer; }
+        /* Selectievakjes verschijnen pas als je op Export klikt: de kolom staat er
+           altijd in de DOM en wordt door deze klasse zichtbaar. Dat scheelt een
+           hertekening van de kop en houdt colspan overal 12. */
+        .col-check { width: 36px; text-align: center; }
+        #runsTable:not(.select-mode) .col-check { display: none; }
+        .tool-table tbody tr.row-selected > td { background: #f7f4fd; }
+        .col-check .form-check-input { margin: 0; vertical-align: middle; }
+        /* Geen eigen hover: .table-hover geeft de blauwe interactietint uit het
+           vlakke thema, en blauw IS in dit dashboard de kleur van rijhover. */
+        .tool-table tbody tr.run-row.selected > td { background: #f1edfa; }
+        .tool-table tbody tr.run-row.selected > td:first-child { box-shadow: inset 3px 0 0 #5e4a90; }
+        /* De totaalregel van de dekkingstabel is BOLD met een scheidingslijn, niet
+           een paars vlak (Joep, 2026-08-19: "Alle types heeft een andere kleur").
+           Een tint zegt "andere soort rij", terwijl dit gewoon de som is van de
+           rijen eronder; een lijn zegt precies dat. */
+        .cov-table tbody tr.row-all > td { font-weight: 700; border-bottom: 2px solid var(--flat-border); }
+
+        /* Dekkingsbalkje: gecentreerd in zijn kolom en dun, zodat het een teken is
+           en niet een tweede getal. Rood zodra de dekking onder 50% zakt — dat is
+           het geval dat je wilt zien (PLP staat by design op 0%). */
+        .cov-table { margin-bottom: 0; }
+        .run-cat-body .tool-table-wrap, #runCardBody > .tool-table-wrap { margin-bottom: 1rem; }
+        .cov-bar { position: relative; height: 9px; width: 90%; margin: 0 auto;
+                   background: #eef0f2; border-radius: 5px; overflow: hidden; }
         .cov-bar > span { position: absolute; left: 0; top: 0; bottom: 0; background: #5e4a90; }
         .cov-bar.gap > span { background: #d63031; }
 
-        /* Recent runs. De basis (.tool-table-wrap, sticky grijze kop, .col-center)
-           staat in css/style.css — UI_BLUEPRINT "Tables": een nieuwe tabel krijgt
-           die opmaak gratis, dus hier alleen wat pagina-eigen is. */
-        .tool-table-wrap { max-height: 520px; }
-        .tool-table td { white-space: nowrap; }
-        .tool-table .col-num { text-align: right; }
-        .tool-table tbody tr.run-row { cursor: pointer; }
-        .tool-table tbody tr.run-row:hover { background: #f6f4fb; }
-        .tool-table tbody tr.run-row.selected { background: #f3f0fa; box-shadow: inset 3px 0 0 #5e4a90; }
+        /* Kopje boven een tabel binnen een kaart: de run-kaart draagt sinds
+           2026-08-19 twee dekkingstabellen (hele run en de gekozen categorie), en
+           zonder kopje lezen die als één tabel die twee keer begint. */
+        .sub-head { font-size: 0.78rem; font-weight: 600; color: var(--flat-muted);
+                    text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+        /* De categoriekiezer van een run past zich aan zijn inhoud aan in plaats van
+           aan de halve kaartbreedte, met een plafond zodat een lange naam de regel
+           niet uit elkaar trekt. */
+        .run-cat-sel { width: auto; max-width: 22rem; }
 
+        /* Zoekbare dropdown — de categorieselectie is een cascade van twee stuks:
+           maincat → categorie (Joep, 2026-08-19). Wat dat oplost: 3.569 opties in
+           één lijst kun je niet overzien, en binnen een gekozen maincat zijn het er
+           ~100.
+
+           De KNOP draagt `form-select form-select-sm`, dus rand, radius, hoogte,
+           focusring en het pijltje komen uit de gedeelde formulierstijl in
+           style.css. Daardoor staat deze control naast een echte <select> — de
+           "Categorie in deze run" in de run-kaart — zonder zichtbaar verschil, en
+           een themawijziging neemt hem automatisch mee. Alleen `text-align` moet er
+           los op: een <button> centreert zijn tekst, een <select> niet. */
+        .dd { position: relative; }
+        .dd-toggle { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .dd-toggle.is-empty { color: #9aa0a6; }
+        .dd-panel { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0;
+                    min-width: 100%; max-width: 34rem; background: #fff;
+                    border: 1px solid var(--flat-border); border-radius: var(--flat-radius);
+                    box-shadow: 0 8px 24px rgba(45, 42, 58, 0.16); padding: 0.45rem; }
+        .dd-count { font-size: 0.74rem; color: var(--flat-muted); padding: 5px 6px 3px; }
+        .dd-list { max-height: 244px; overflow-y: auto; }
+        .dd-opt { display: flex; align-items: baseline; gap: 10px; padding: 4px 8px;
+                  border-radius: 6px; cursor: pointer; font-size: 0.87rem; }
+        /* Hover en de toetsenbordcursor zijn dezelfde tint: het is één "hier sta je
+           nu"-staat, of je hem met de muis of met ↑/↓ aanwijst. */
+        .dd-opt:hover, .dd-opt.is-active { background: var(--flat-accent-soft); }
+        .dd-opt.is-picked { background: #f1edfa; box-shadow: inset 3px 0 0 #5e4a90; font-weight: 600; }
+        .dd-opt > .dd-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .dd-opt .dd-meta { color: var(--flat-muted); font-size: 0.78rem; margin-left: auto;
+                           white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+        /* Segmented control voor het niveau, in de vorm die SEO Stats gebruikt.
+           Radio's + `.btn-check:checked + .btn` is Bootstraps eigen selector, dus de
+           pagina mag die zelf kleuren (UI_BLUEPRINT §Buttons). */
+        .seg-toggle .btn { border: 1px solid #5e4a90; color: #5e4a90; background: transparent; }
+        .seg-toggle .btn:hover { background: #5e4a90; color: #fff; }
+        .seg-toggle .btn-check:checked + .btn { background: #5e4a90; color: #fff; border-color: #5e4a90; }
+
+        /* Eén regel per testbucket: [vinkje] [naam ……] [niveau-label]. Het label zit
+           in een EIGEN kolom en staat rechts, dus de labels lijnen op elkaar in
+           plaats van achter een naam van willekeurige lengte aan te hangen (Joep,
+           2026-08-19). De naam krimpt (minmax(0,1fr) + ellipsis), het label niet.
+           DRIE kolommen (Joep, 2026-08-19): 310px als ondergrens geeft er precies
+           drie in een kaart van ~1010px (3 × 310 = 930 past, 4 × 310 = 1240 niet) en
+           op een smal venster zakt het netjes naar twee en één. */
+        .testcat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+                        gap: 2px 18px; }
+        .testcat-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+                       align-items: center; gap: 9px; padding: 4px 7px; border-radius: 6px; }
+        .testcat-row:hover { background: var(--flat-accent-soft); }
+        .testcat-row .form-check-input { margin: 0; flex: 0 0 auto; }
+        .testcat-row label { cursor: pointer; margin: 0; font-size: 0.87rem;
+                             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        /* De skeletonregels gebruiken dezelfde drie kolommen, dus de shimmer staat
+           precies waar het vinkje, de naam en het niveau-label komen. */
+        .testcat-row .skel-bar { height: 1.1rem; }
+
+        /* Bezig-hint: Bootstraps spinner (de canonieke inline vorm), alleen op
+           labelmaat gebracht en in het huispaars. */
         .job-line { font-size: 0.85rem; display: flex; align-items: center; gap: 10px; }
-        .spinner-inline { width: 14px; height: 14px; border: 2px solid #cbb; border-top-color: #5e4a90;
-                          border-radius: 50%; display: inline-block; animation: spin 0.7s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .testcat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 4px 14px; }
-        .push-note { background: #fdf3f3; border: 1px solid #f0d5d5; color: #8a2a2a; border-radius: 8px;
-                     padding: 10px 14px; font-size: 0.85rem; }
+        .job-line .spinner-border { width: 0.95rem; height: 0.95rem; border-width: 2px; color: #5e4a90; }
+
+        /* `hidden` en `d-flex` vechten, en `d-flex` wint — daarom deze regel. Bootstraps
+           reboot heeft `[hidden] { display: none !important }`, maar de display-utility
+           `.d-flex { display: flex !important }` staat LATER in diezelfde stylesheet en
+           heeft dezelfde specificiteit (0,1,0), dus die wint. Zonder deze regel staat de
+           selectiebalk permanent open terwijl de vinkjes verborgen zijn — precies wat een
+           schermshot van de kale pagina liet zien (2026-08-19). Een id-selector verslaat
+           beide. Let op bij een volgende `hidden`-toggle: een element ZONDER `d-*`-klasse
+           (`#runCard`, de twee actieknoppen) heeft dit niet nodig, want daar is
+           `[hidden]` de enige !important-regel die meedoet. */
+        #exportBar[hidden] { display: none !important; }
+
+        /* Een leeg uitvoerpaneel mag geen ruimte kosten: de marge komt pas als er
+           een balk of een banner in staat. */
+        #catJob:not(:empty), #testJob:not(:empty) { margin-top: 1rem; }
+        #runCardNote:not(:empty), #runCardJob:not(:empty),
+        #runsNote:not(:empty) { margin-bottom: 1rem; }
+
+        /* Een outline-knop IN EEN KAARTKOP is transparant, niet wit (Joep,
+           2026-08-19). De gedeelde regel zet `background-color: var(--flat-surface)`
+           = #ffffff, en op de kop (--flat-panel, #f4f5f9) leest dat als een wit
+           blokje om de knop. UI_BLUEPRINT schrijft voor de Refresh-knop letterlijk
+           "transparent background, purple outline and label" voor, dus dit brengt de
+           knop terug op zijn canonieke vorm.
+           De hover wordt hier expliciet herhaald: het blueprint waarschuwt dat een
+           kale background-override in een page-<style> ook op hover kan winnen en
+           dan witte tekst op wit wit oplevert. Zo staat de vulling er in beide
+           staten zwart op wit.
+           Blast radius bewust beperkt tot deze pagina: dezelfde witte vulling zit in
+           élke kaartkop van de app, en dat gelijktrekken is één regel in style.css —
+           een aparte beslissing, geen bijproduct van deze opruiming. */
+        .card-header .btn-outline-purple,
+        .card-header .btn-outline-orange { background-color: transparent; }
+        .card-header .btn-outline-purple:hover:not(:disabled) { background-color: #5e4a90; color: #fff; }
+        .card-header .btn-outline-orange:hover:not(:disabled) { background-color: #CC5500; color: #fff; }
+
+        /* Rood kadertje voor een fout of een geblokkeerde push. Geen .info-note —
+           dat is geel en bedoeld voor een staande notitie, niet voor een fout. */
+        .hs-error { background: #fdf3f3; border: 1px solid #f0d5d5; color: #8a2a2a;
+                    border-radius: 8px; padding: 10px 14px; font-size: 0.85rem; }
     </style>
 </head>
 <body>
@@ -134,93 +321,178 @@
       <div class="row">
         <div class="col-md-10 mx-auto">
 
-        <!-- ============ 1 · Run per categorie ============ -->
+        <!-- ============ 1 · Run per categorie ============
+             Niveau als segmented control, daarnaast de cascade maincat → categorie
+             in twee zoekbare dropdowns. De actie staat onderaan rechts.
+             De chip "selectie <as-of>" stond in deze kop en is eruit (Joep,
+             2026-08-19); de as-of van een run staat in de kop van de run-kaart, waar
+             hij bij de cijfers hoort die eraan hangen. -->
         <div class="card mb-4">
-            <div class="card-header hs-head d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <h5 class="mb-0">Run per categorie</h5>
-                <span class="chip" id="asOfChip">selectie —</span>
             </div>
             <div class="card-body">
-                <div class="row g-2 align-items-end">
-                    <div class="col-sm-3">
-                        <label class="muted-sm d-block mb-1">Niveau</label>
-                        <select id="scopeSel" class="form-select form-select-sm">
-                            <option value="deepest">Deepest categorie</option>
-                            <option value="maincat">Maincat</option>
-                        </select>
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label mb-1">Niveau</label>
+                        <div class="btn-group btn-group-sm seg-toggle w-100" role="group" aria-label="Niveau">
+                            <input type="radio" class="btn-check" name="hsScope" id="scopeDeepest"
+                                   value="deepest" autocomplete="off" checked>
+                            <label class="btn" for="scopeDeepest">Deepest</label>
+                            <input type="radio" class="btn-check" name="hsScope" id="scopeMaincat"
+                                   value="maincat" autocomplete="off">
+                            <label class="btn" for="scopeMaincat">Maincat</label>
+                        </div>
                     </div>
-                    <div class="col-sm-3">
-                        <label class="muted-sm d-block mb-1">Filter</label>
-                        <input id="catFilter" class="form-control form-control-sm" placeholder="typ een naam…">
+                    <!-- Cascade: de maincat perkt de categorielijst in (32 opties,
+                         daarna ~100 in plaats van 3.569). Bij niveau "Maincat" IS deze
+                         dropdown de keuze en staat de rechter uit. -->
+                    <div class="col-md-4">
+                        <label class="form-label mb-1" for="ddMainToggle">Maincat</label>
+                        <div class="dd" id="ddMain">
+                            <button type="button" class="form-select form-select-sm dd-toggle is-empty"
+                                    id="ddMainToggle" aria-haspopup="listbox" aria-expanded="false">
+                                <span class="dd-value">laden&hellip;</span>
+                            </button>
+                            <div class="dd-panel" hidden>
+                                <input type="search" class="form-control form-control-sm dd-search"
+                                       placeholder="Zoek een maincat&hellip;" autocomplete="off"
+                                       aria-label="Zoek een maincat"
+                                       title="Meerdere woorden: alle woorden moeten erin voorkomen, volgorde maakt niet uit. ↑/↓ loopt door de lijst, Enter kiest, Esc sluit.">
+                                <div class="dd-count"></div>
+                                <div class="dd-list" role="listbox" aria-label="Maincat"></div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="col-sm-6">
-                        <label class="muted-sm d-block mb-1">Categorie <span class="muted-sm" id="catCount"></span></label>
-                        <select id="catSel" class="form-select form-select-sm"></select>
+                    <div class="col-md-5">
+                        <label class="form-label mb-1" for="ddCatToggle">Categorie</label>
+                        <div class="dd" id="ddCat">
+                            <button type="button" class="form-select form-select-sm dd-toggle is-empty"
+                                    id="ddCatToggle" aria-haspopup="listbox" aria-expanded="false" disabled>
+                                <span class="dd-value">kies eerst een maincat</span>
+                            </button>
+                            <div class="dd-panel" hidden>
+                                <input type="search" class="form-control form-control-sm dd-search"
+                                       placeholder="Zoek op naam of id&hellip;" autocomplete="off"
+                                       aria-label="Zoek een categorie"
+                                       title="Zoekt in de categorienaam, de maincat en het id. Meerdere woorden: alle woorden moeten erin voorkomen, volgorde maakt niet uit. ↑/↓ loopt door de lijst, Enter kiest, Esc sluit.">
+                                <div class="dd-count"></div>
+                                <div class="dd-list" role="listbox" aria-label="Categorie"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
+                <div id="pickerErr" class="hs-error mt-2" hidden></div>
                 <div class="d-flex flex-wrap align-items-center gap-3 mt-3">
                     <div class="form-check mb-0">
                         <input class="form-check-input" type="checkbox" id="preserveChk" checked>
-                        <label class="form-check-label muted-sm" for="preserveChk">
+                        <label class="form-check-label" for="preserveChk">
                             Cross-categorie URLs behouden
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title>De categorie-buckets van de Keywords API lopen niet gelijk met deepest_subcat_id in Redshift. Zonder deze optie gooit een gedeeltelijke rollout live URLs weg die HS2.0 nog wél wil, alleen omdat hun eigen categorie niet in deze push zit (10 testcats: 2.935 urls / 35.866 visits).</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg>
                         </label>
                     </div>
                     <div class="form-check mb-0">
                         <input class="form-check-input" type="checkbox" id="plpChk">
-                        <label class="form-check-label muted-sm" for="plpChk">
+                        <label class="form-check-label" for="plpChk">
                             Inclusief PLP's
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title>PLP is op Beslist de productpagina (/p/). Dit kanaal draagt er normaal geen; aanzetten is alleen voor een test.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg>
                         </label>
                     </div>
-                    <button class="btn btn-run ms-auto" id="btnCatRun">Run</button>
+                    <!-- Preview is een secundaire actie: hij rekent en schrijft niets.
+                         Paarse outline (UI_BLUEPRINT §Buttons noemt Preview met naam);
+                         de oranje CTA blijft voor de knop die wél live schrijft. -->
+                    <button class="btn btn-outline-purple ms-auto" id="btnCatRun" disabled
+                            title="Kies eerst een categorie">Preview</button>
                 </div>
-                <div id="catJob" class="mt-3"></div>
-                <div id="catRunOut" class="mt-3"></div>
+                <div id="catJob"></div>
             </div>
         </div>
 
         <!-- ============ 2 · Testcategorieën ============ -->
         <div class="card mb-4">
-            <div class="card-header hs-head d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <h5 class="mb-0">Testcats</h5>
-                <span class="chip" id="testCountChip">—</span>
+                <span class="muted-sm" id="testCountChip"></span>
             </div>
             <div class="card-body">
-                <div class="testcat-grid" id="testGrid"><div class="text-muted muted-sm">Laden…</div></div>
-                <div class="d-flex flex-wrap align-items-center gap-2 mt-3">
-                    <button class="btn btn-sm btn-outline-purple" id="btnTestAll">Alles</button>
-                    <button class="btn btn-sm btn-outline-purple" id="btnTestNone">Niets</button>
-                    <button class="btn btn-run ms-auto" id="btnTestRun">Dry run</button>
+                <!-- Alles/niets is één selectievakje in plaats van twee knoppen (Joep,
+                     2026-08-19). Het staat boven de lijst die het bedient en draagt de
+                     halve staat (indeterminate) zodra er een deel aan staat. -->
+                <div class="d-flex align-items-center flex-wrap gap-2 mb-2 pb-2 border-bottom">
+                    <div class="form-check mb-0">
+                        <input class="form-check-input" type="checkbox" id="testAllChk" checked>
+                        <label class="form-check-label" for="testAllChk">Alles selecteren</label>
+                    </div>
                 </div>
-                <div id="testJob" class="mt-3"></div>
-                <div id="testRunOut" class="mt-3"></div>
+                <div class="testcat-grid" id="testGrid"></div>
+                <div class="d-flex justify-content-end mt-3">
+                    <button class="btn btn-outline-purple" id="btnTestRun">Preview</button>
+                </div>
+                <div id="testJob"></div>
             </div>
         </div>
 
-        <!-- ============ 3 · Recent runs ============ -->
+        <!-- ============ 3 · De run zelf ============
+             Eigen module (Joep, 2026-08-19): een afgeronde preview of push hoort niet
+             onderin de kaart waar je hem startte, en niet onder de historietabel. Hier
+             komt zowel de run die net klaar is als de run die je in Recent runs
+             aanklikt — één plek voor "de run waar je nu naar kijkt". Verborgen tot er
+             een run is; de kop draagt het runnummer met de labels, rechts de metadata. -->
+        <div class="card mb-4" id="runCard" hidden>
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h5 class="mb-0" id="runCardTitle">Run</h5>
+            </div>
+            <div class="card-body">
+                <div id="runCardNote"></div>
+                <div id="runCardJob"></div>
+                <div id="runCardBody"></div>
+            </div>
+        </div>
+
+        <!-- ============ 4 · Recent runs ============
+             Geen filterrij: een balk met alleen twee rechtsuitgelijnde knoppen is
+             een balk zonder reden, dus Refresh en Export staan in de kaartkop
+             (UI_BLUEPRINT §Tables, de uitzondering voor een tabel zonder filter). -->
         <div class="card mb-4">
-            <div class="card-header hs-head d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <h5 class="mb-0">Recent runs</h5>
                 <div class="d-flex gap-2">
                     <button class="btn btn-sm btn-outline-purple" id="btnRunsRefresh">&#8635; Refresh</button>
-                    <a class="btn btn-sm btn-outline-orange" id="btnRunsExport" href="/api/healthscore/runs/export.csv">Export</a>
+                    <!-- Verwijderen en Export zetten dezelfde selectiemodus aan (Joep,
+                         2026-08-19); alleen de actie in de balk onder de kop verschilt,
+                         en de selectie blijft staan als je tussen de twee wisselt. Nog
+                         een keer op dezelfde knop klikken zet de modus uit. -->
+                    <button class="btn btn-sm btn-outline-red" id="btnRunsDelete"
+                            title="Kies met vinkjes welke runs je verwijdert">Verwijder</button>
+                    <button class="btn btn-sm btn-outline-orange" id="btnRunsExport"
+                            title="Kies met vinkjes welke runs je exporteert">Export</button>
                 </div>
             </div>
             <div class="card-body">
+                <!-- Bulk-selectiebalk boven de tabel, niet in de kaartkop
+                     (UI_BLUEPRINT §Buttons): de teller links, de acties rechts. -->
+                <div id="runsNote"></div>
+                <div id="exportBar" class="d-flex flex-wrap align-items-center gap-2 mb-2" hidden>
+                    <span class="muted-sm" id="exportCount"></span>
+                    <button class="btn btn-sm btn-outline-secondary ms-auto" id="btnExportCancel">Annuleren</button>
+                    <button class="btn btn-sm btn-outline-orange" id="btnExportGo" disabled>Exporteer selectie</button>
+                    <button class="btn btn-sm btn-outline-red" id="btnDeleteGo" disabled hidden>Verwijder selectie</button>
+                </div>
                 <div class="tool-table-wrap">
-                    <table class="table table-sm table-hover tool-table">
+                    <table class="table table-sm table-hover tool-table" id="runsTable">
                         <thead class="table-light"><tr>
-                            <th>Gestart</th><th>Soort</th><th>Wat</th><th class="col-center">Cats</th>
-                            <th class="col-num">Voorstel</th><th class="col-num">Live</th>
-                            <th class="col-num">Nieuw</th><th class="col-num">Weg</th>
-                            <th class="col-num">Visits weg</th><th class="col-num">Visit cov</th>
+                            <th class="col-check"><input class="form-check-input" type="checkbox"
+                                                         id="runsAllChk" aria-label="Alles selecteren"></th>
+                            <th title="Europe/Amsterdam — de DB slaat UTC op">Gestart</th>
+                            <th>Wat</th><th class="col-center">Cats</th>
+                            <th class="col-center">Voorstel</th><th class="col-center">Live</th>
+                            <th class="col-center">Nieuw</th><th class="col-center">Weg</th>
+                            <th class="col-center">Visits weg</th><th class="col-center">Visit cov</th>
                             <th class="col-center">Status</th>
                         </tr></thead>
                         <tbody id="runsBody"></tbody>
                     </table>
                 </div>
-                <div id="runDetail" class="mt-3"></div>
             </div>
         </div>
 
@@ -236,13 +508,24 @@
     const API = '/api/healthscore';
     const fmtN   = n => (n == null ? '–' : Number(n).toLocaleString('nl-NL'));
     const fmtPct = n => (n == null ? '–' : Number(n).toFixed(1) + '%');
-    const fmtEur = n => (n == null ? '–' : '€' + Math.round(n).toLocaleString('nl-NL'));
     const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g,
         c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
     // De shared Postgres staat op Etc/UTC en geeft naïeve timestamps terug, dus
     // 'Z' erachter vóór new Date() — anders schuift de kolom een uur.
     const fmtTs = s => !s ? '–' : new Date(/[Z+]/.test(s) ? s : s + 'Z')
         .toLocaleString('nl-NL', {dateStyle: 'short', timeStyle: 'short'});
+    // Canonieke inline bezig-hint (UI_BLUEPRINT §Spinners): Bootstraps
+    // .spinner-border, niet een zelfgedraaide rand.
+    const SPIN = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>';
+    // Duur uit twee job-timestamps. Beide komen van dezelfde klok (datetime.now()
+    // in de backend), dus dit verschil is betrouwbaar zonder tijdzonewerk.
+    function jobDuration(a, b) {
+        if (!a || !b) return '';
+        const ms = new Date(b) - new Date(a);
+        if (!(ms > 0)) return '';
+        const s = Math.round(ms / 1000);
+        return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`;
+    }
 
     async function jget(p) {
         const r = await fetch(API + p);
@@ -258,60 +541,270 @@
     }
 
     // ------------------------------------------------------------------ //
-    // Categorie-picker
+    // Zoekbare dropdown — één component, twee keer gebruikt
     // ------------------------------------------------------------------ //
-    let CATS = [];
-    async function loadCategories() {
-        const scope = document.getElementById('scopeSel').value;
-        const sel = document.getElementById('catSel');
-        sel.innerHTML = '<option>laden…</option>';
+    // Geen <select>: die kan geen zoekveld dragen en 3.569 opties zijn niet te
+    // scannen. De knop is wél een `form-select`, dus hij is niet van een echte
+    // select te onderscheiden. Toetsenbord: typen filtert, ↑/↓ verplaatst de
+    // cursor, Enter kiest (zonder ↑/↓ de bovenste treffer), Esc sluit.
+    const DD_RENDER_CAP = 400;
+    const DDS = [];
+    function closeAllDropdowns(exceptRoot) {
+        DDS.forEach(d => { if (d.root !== exceptRoot) d.close(); });
+    }
+
+    function makeDropdown(id, onPick) {
+        const root   = document.getElementById(id);
+        const toggle = root.querySelector('.dd-toggle');
+        const valEl  = root.querySelector('.dd-value');
+        const panel  = root.querySelector('.dd-panel');
+        const search = root.querySelector('.dd-search');
+        const listEl = root.querySelector('.dd-list');
+        const cntEl  = root.querySelector('.dd-count');
+        let items = [], value = null, shown = [], active = -1, placeholder = '';
+
+        const hay = it => (it.name + ' ' + (it.meta || '')).toLowerCase();
+        // Meerdere woorden = AND op losse substrings, hoofdletterongevoelig — één
+        // zoekregel voor het hele dashboard.
+        function filtered() {
+            const terms = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+            return terms.length ? items.filter(it => terms.every(t => hay(it).includes(t))) : items;
+        }
+        function paintValue() {
+            const empty = !value;
+            valEl.textContent = empty ? placeholder
+                : value.name + (value.id != null ? ` (${value.id})` : '');
+            toggle.classList.toggle('is-empty', empty);
+        }
+        function paintList() {
+            shown = filtered().slice(0, DD_RENDER_CAP);
+            const all = filtered().length;
+            cntEl.textContent = items.length
+                ? `${fmtN(all)} van ${fmtN(items.length)}`
+                  + (all > shown.length ? ` · eerste ${shown.length} getoond` : '')
+                : '';
+            if (!shown.length) {
+                // Nul door een filter zegt dát, niet "geen data".
+                listEl.innerHTML = `<div class="p-2 muted-sm">Niets gevonden voor `
+                                 + `"${esc(search.value.trim())}".</div>`;
+                return;
+            }
+            listEl.innerHTML = shown.map((it, i) => {
+                const on = value && value.key === it.key;
+                return `<div class="dd-opt${on ? ' is-picked' : ''}${i === active ? ' is-active' : ''}"`
+                     + ` data-i="${i}" role="option" aria-selected="${!!on}">`
+                     + `<span class="dd-name">${esc(it.name)}</span>`
+                     + (it.meta ? `<span class="dd-meta">${esc(it.meta)}</span>` : '')
+                     + `</div>`;
+            }).join('');
+            listEl.querySelectorAll('.dd-opt[data-i]').forEach(el => {
+                el.onclick = () => pick(shown[+el.dataset.i]);
+            });
+        }
+        function setActive(i) {
+            const opts = listEl.querySelectorAll('.dd-opt[data-i]');
+            if (!opts.length) return;
+            active = Math.max(0, Math.min(i, opts.length - 1));
+            opts.forEach((el, k) => el.classList.toggle('is-active', k === active));
+            opts[active].scrollIntoView({block: 'nearest'});
+        }
+        function open() {
+            if (toggle.disabled) return;
+            closeAllDropdowns(root);
+            root.classList.add('is-open');
+            panel.hidden = false;
+            toggle.setAttribute('aria-expanded', 'true');
+            search.value = '';
+            active = -1;
+            paintList();
+            search.focus();
+            const on = listEl.querySelector('.dd-opt.is-picked');
+            if (on) on.scrollIntoView({block: 'nearest'});
+        }
+        function close() {
+            root.classList.remove('is-open');
+            panel.hidden = true;
+            toggle.setAttribute('aria-expanded', 'false');
+        }
+        function pick(it) {
+            value = it || null;
+            paintValue();
+            close();
+            toggle.focus();
+            if (onPick) onPick(value);
+        }
+
+        toggle.onclick = () => (root.classList.contains('is-open') ? close() : open());
+        search.oninput = () => { active = -1; paintList(); };
+        search.onkeydown = e => {
+            if (e.key === 'ArrowDown')      { e.preventDefault(); setActive(active + 1); }
+            else if (e.key === 'ArrowUp')   { e.preventDefault(); setActive(active - 1); }
+            else if (e.key === 'Enter')     { e.preventDefault();
+                                              const it = shown[active >= 0 ? active : 0];
+                                              if (it) pick(it); }
+            else if (e.key === 'Escape')    { e.preventDefault(); close(); toggle.focus(); }
+        };
+        DDS.push({root, close});
+
+        return {
+            // Een waarde die niet meer in de lijst zit, valt weg: wisselen van
+            // maincat mag geen categorie uit een andere maincat laten staan.
+            setItems(list) {
+                items = list || [];
+                if (value && !items.some(it => it.key === value.key)) value = null;
+                paintValue();
+                if (root.classList.contains('is-open')) paintList();
+            },
+            setPlaceholder(t) { placeholder = t; paintValue(); },
+            setDisabled(flag) { toggle.disabled = !!flag; if (flag) close(); },
+            value: () => value,
+            clear() { value = null; paintValue(); },
+            close,
+        };
+    }
+
+    // ------------------------------------------------------------------ //
+    // Categoriekiezer — cascade maincat → categorie
+    // ------------------------------------------------------------------ //
+    let MAINCATS = [], DEEPEST = [], PICKED = null, ddMain = null, ddCat = null;
+    const scopeValue = () => document.querySelector('input[name="hsScope"]:checked').value;
+
+    // Beide scopes in één keer ophalen: de cascade heeft de maincat-ids nodig (voor
+    // een maincat-run) én de deepest-lijst met zijn parent (voor het filteren).
+    // Daarna kost een niveauwissel geen request meer.
+    async function loadPickerData() {
+        const err = document.getElementById('pickerErr');
         try {
-            const j = await jget('/categories?scope=' + scope);
-            CATS = j.rows || [];
-            document.getElementById('asOfChip').textContent = 'selectie ' + (j.as_of || '—');
-            fillCatSelect();
+            const [m, d] = await Promise.all([jget('/categories?scope=maincat'),
+                                              jget('/categories?scope=deepest')]);
+            MAINCATS = m.rows || [];
+            DEEPEST  = d.rows || [];
+            err.hidden = true;
+            rebuildPickers();
         } catch (e) {
-            sel.innerHTML = '<option value="">' + esc(e.message) + '</option>';
+            err.hidden = false;
+            err.textContent = 'Categorieën laden mislukt — ' + e.message;
+            [ddMain, ddCat].forEach(dd => { dd.setItems([]); dd.setPlaceholder('niet geladen'); dd.setDisabled(true); });
+            syncPicked();
         }
     }
-    function fillCatSelect() {
-        const q = document.getElementById('catFilter').value.trim().toLowerCase();
-        const sel = document.getElementById('catSel');
-        const rows = q ? CATS.filter(c => (c.name || '').toLowerCase().includes(q)
-                                       || String(c.id).includes(q)) : CATS;
-        // Placeholder eerst: zonder die eerste lege optie staat de alfabetisch
-        // eerste categorie (!Overig) voorgeselecteerd en draait Run daarop.
-        sel.innerHTML = '<option value="">— kies een categorie —</option>'
-            + rows.slice(0, 4000).map(c =>
-                `<option value="${c.id}">${esc(c.name)}${c.parent ? ' · ' + esc(c.parent) : ''} (${c.id})</option>`
-            ).join('');
-        document.getElementById('catCount').textContent = `· ${rows.length} van ${CATS.length}`;
+
+    function rebuildPickers() {
+        const scope = scopeValue();
+        const perMain = {};
+        DEEPEST.forEach(c => { const k = c.parent || ''; perMain[k] = (perMain[k] || 0) + 1; });
+        const main = MAINCATS.map(m => ({
+            key: 'm' + m.id, id: m.id, name: m.name,
+            meta: `${fmtN(perMain[m.name] || 0)} cats`,
+        }));
+        // "Alle maincats" alleen bij niveau Deepest: als doel van een maincat-run
+        // bestaat het niet, en dan zou het een keuze zijn die nooit mag draaien.
+        if (scope === 'deepest') {
+            main.unshift({key: '*', name: 'Alle maincats', meta: `${fmtN(DEEPEST.length)} cats`});
+        }
+        ddMain.setItems(main);
+        ddMain.setPlaceholder(scope === 'maincat' ? '— kies een maincat —' : '— alle of één maincat —');
+        ddMain.setDisabled(false);
+        refreshCatItems();
+        syncPicked();
+    }
+
+    function refreshCatItems() {
+        const scope = scopeValue(), m = ddMain.value();
+        if (scope === 'maincat') {
+            ddCat.setItems([]); ddCat.setPlaceholder('n.v.t. — niveau is Maincat'); ddCat.setDisabled(true);
+            return;
+        }
+        if (!m) {
+            ddCat.setItems([]); ddCat.setPlaceholder('kies eerst een maincat'); ddCat.setDisabled(true);
+            return;
+        }
+        const rows = m.key === '*' ? DEEPEST : DEEPEST.filter(c => (c.parent || '') === m.name);
+        ddCat.setItems(rows.map(c => ({
+            key: 'c' + c.id, id: c.id, name: c.name,
+            // Bij "Alle maincats" hoort de maincat erbij: twee categorieën kunnen
+            // dezelfde naam hebben in twee maincats.
+            meta: m.key === '*' && c.parent ? esc(c.parent) : '',
+        })));
+        ddCat.setPlaceholder(rows.length ? '— kies een categorie —' : 'geen categorie in deze maincat');
+        ddCat.setDisabled(!rows.length);
+    }
+
+    // PICKED is het doel van de run, en de scope hangt eraan zodat een run nooit
+    // een deepest-id met scope=maincat kan versturen.
+    function syncPicked() {
+        const scope = scopeValue(), m = ddMain.value(), c = ddCat.value();
+        if (scope === 'maincat') PICKED = m && m.key !== '*' ? {id: m.id, name: m.name, scope} : null;
+        else                     PICKED = c ? {id: c.id, name: c.name, scope} : null;
+        updateCatRunBtn();
+    }
+
+    // De knop zegt zelf waarop hij draait (UI_BLUEPRINT: zet de selectie in het
+    // label). Zonder keuze staat hij uit, met de reden in de title — eerlijker dan
+    // een alert() ná de klik.
+    function updateCatRunBtn() {
+        const b = document.getElementById('btnCatRun');
+        b.disabled = !PICKED;
+        b.textContent = PICKED ? `Preview — ${PICKED.name}` : 'Preview';
+        b.title = PICKED ? 'Berekent het voorstel; schrijft niets naar de live API'
+                         : 'Kies eerst een categorie';
     }
 
     // ------------------------------------------------------------------ //
     // Testcategorieën
     // ------------------------------------------------------------------ //
     let TESTCATS = [];
+    // Zelfde laadtaal als de tabellen: shimmerende regels op de plek waar de
+    // buckets komen, zodat de kaart niet van leeg naar drie regels springt.
+    function testSkeleton(n = 12) {
+        return ('<div class="testcat-row"><span class="skel-bar" style="width:1rem"></span>'
+              + '<span class="skel-bar"></span>'
+              + '<span class="skel-bar" style="width:3.6rem"></span></div>').repeat(n);
+    }
     async function loadTestBucket() {
         const grid = document.getElementById('testGrid');
+        grid.innerHTML = testSkeleton();
         try {
             const j = await jget('/test-bucket');
-            TESTCATS = j.rows || [];
+            // Alfabetisch, deepest en maincats door elkaar (Joep, 2026-08-19): de
+            // endpoint geeft ze in rollout-volgorde terug, en dan moet je zoeken waar
+            // een bucket staat. Het niveau-label zegt al welk soort het is.
+            TESTCATS = (j.rows || []).slice()
+                .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'nl'));
             grid.innerHTML = TESTCATS.map((c, i) => `
-                <div class="form-check mb-0">
+                <div class="testcat-row">
                     <input class="form-check-input test-chk" type="checkbox" id="tc${i}" data-i="${i}" checked>
-                    <label class="form-check-label muted-sm" for="tc${i}">${esc(c.name)}
-                        <span class="lbl badge ${c.scope === 'maincat' ? 'lbl-amber' : 'lbl-ink'}"
-                              style="font-size:.62rem;">${c.scope === 'maincat' ? 'maincat' : 'deepest'}</span>
-                    </label>
+                    <label for="tc${i}" title="${esc(c.name)} (${c.id})">${esc(c.name)}</label>
+                    <span class="badge lbl ${c.scope === 'maincat' ? 'lbl-pink' : 'lbl-blue'}">${c.scope === 'maincat' ? 'maincat' : 'deepest'}</span>
                 </div>`).join('');
-            document.getElementById('testCountChip').textContent = TESTCATS.length + ' buckets';
+            grid.querySelectorAll('.test-chk').forEach(el => { el.onchange = syncTestAll; });
+            syncTestAll();
         } catch (e) {
-            grid.innerHTML = '<div class="text-danger muted-sm">' + esc(e.message) + '</div>';
+            grid.innerHTML = `<div class="hs-error">${esc(e.message)}</div>`;
         }
     }
     const checkedTestCats = () => Array.from(document.querySelectorAll('.test-chk'))
         .filter(el => el.checked).map(el => TESTCATS[+el.dataset.i]);
+
+    // Eén selectievakje voor alles/niets, met de halve staat erbij: bij een
+    // gedeeltelijke selectie is het vakje `indeterminate`, want "aan" of "uit" zou
+    // liegen over wat er straks gedraaid wordt.
+    function syncTestAll() {
+        const n = checkedTestCats().length, all = TESTCATS.length;
+        const box = document.getElementById('testAllChk');
+        box.checked = n === all && all > 0;
+        box.indeterminate = n > 0 && n < all;
+        document.getElementById('testCountChip').textContent = `${n} van ${all} geselecteerd`;
+        // Het aantal staat niet in het knoplabel (Joep, 2026-08-19): de teller naast de
+        // kaarttitel zegt het al, en dan leest de knop als een tweede teller. Het
+        // aantal blijft wél in de title, want dat is de plek voor "waarop draai ik".
+        const b = document.getElementById('btnTestRun');
+        b.disabled = !n;
+        b.textContent = 'Preview';
+        b.title = n ? `Berekent het voorstel voor ${n} ${n === 1 ? 'categorie' : 'categorieën'}; `
+                    + 'schrijft niets naar de live API'
+                    : 'Vink minstens één testcategorie aan';
+    }
 
     // ------------------------------------------------------------------ //
     // Jobs — preview en push lopen in de achtergrond op één worker
@@ -319,60 +812,181 @@
     let POLL = null;
     function setBusy(busy) {
         ['btnCatRun', 'btnTestRun'].forEach(id => { document.getElementById(id).disabled = busy; });
-        document.querySelectorAll('.btn-push').forEach(b => { b.disabled = busy; });
+        // `data-blocked` blijft uit: een push die de backend tóch weigert
+        // (contractproblemen, de refuse-guard in healthscore_runs.py) mag na een
+        // andere job niet ineens klikbaar worden.
+        document.querySelectorAll('.btn-push').forEach(b => {
+            b.disabled = busy || b.dataset.blocked === '1';
+        });
+        if (!busy) { updateCatRunBtn(); syncTestAll(); }
     }
-    function jobLine(el, html) { el.innerHTML = html ? `<div class="job-line">${html}</div>` : ''; }
 
-    async function startJob(path, body, jobEl, outEl, opts) {
-        jobLine(jobEl, '<span class="spinner-inline"></span><span class="muted-sm">starten…</span>');
-        // Bij een push ZIJN jobEl en outEl hetzelfde element (het detailpaneel dat
-        // straks door het push-resultaat vervangen wordt) — dan niet leeggooien,
-        // anders sloopt dat de spinner die er net in is gezet.
-        if (outEl !== jobEl) outEl.innerHTML = '';
+    // De voortgangsbalk. Twee soorten fasen, en het verschil is niet cosmetisch:
+    //   · "cat" heeft een echte noemer (het aantal categorieën) → determinate bar
+    //     met percentage.
+    //   · "prep" en "finish" zijn één ondeelbare call (de Redshift-fetches, de run
+    //     wegschrijven) → `.progress.indeterminate`, dus een segment dat heen en
+    //     weer schuift, en GEEN percentage. Een volle balk tijdens een fase die nog
+    //     loopt leest als klaar-en-vastgelopen (UI_BLUEPRINT §Status/progress bar).
+    // Er is geen Cancel: de backend heeft geen afbreekpunt, en een knop die niets
+    // doet is erger dan geen knop.
+    function jobBar(el, job) {
+        const p = job.progress || {};
+        const isPush = job.action === 'push';
+        const det = p.phase === 'cat' && p.total > 0;
+        const pct = det ? Math.round((p.done / p.total) * 100) : 0;
+        let label;
+        if (job.status === 'queued')    label = 'in de wachtrij…';
+        else if (p.phase === 'cat')     label = `${isPush ? 'Push' : 'Categorie'} ${p.done + 1} van ${p.total}`
+                                              + (p.what ? ` — ${esc(p.what)}` : '');
+        else if (p.phase === 'finish')  label = isPush ? 'run wegschrijven…'
+                                                      : 'run wegschrijven en dekking meten…';
+        else if (isPush)                label = 'snapshot maken en pushen…';
+        // De prep-fase is bij één categorie bijna de hele run, dus hij zegt wélke
+        // Redshift-stap loopt in plaats van drie minuten dezelfde regel.
+        else if (p.step === 'visits')   label = 'Redshift: SEO-visits per URL ophalen…';
+        else                            label = 'Redshift: kopteksten ophalen…';
+        el.innerHTML = `<div>`
+            + `<div class="d-flex justify-content-between align-items-center small text-muted mb-1">`
+            + `<span>${label}</span><span>${det ? pct + '%' : ''}</span></div>`
+            + `<div class="progress${det ? '' : ' indeterminate'}" style="height:1.1rem;" aria-busy="true">`
+            + `<div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar"`
+            + ` style="width:${det ? pct : 100}%; background-color:#00b894;"`
+            + ` aria-valuemin="0" aria-valuemax="100" aria-valuenow="${det ? pct : 0}"></div></div></div>`;
+    }
+
+    // Een afgeronde run laat zijn balk NIET staan: die komt weg en er komt een
+    // banner in de plaats (UI_BLUEPRINT §Done banner). Geel bij klaar, want
+    // .alert-success is in dit thema grijs en leest als "er is niets gebeurd".
+    function showDoneBanner(el, html, tone) {
+        const cls = tone === 'error' ? 'alert-danger'
+                  : tone === 'warning' ? 'alert-warning' : 'alert-done-yellow';
+        el.innerHTML = `<div class="alert ${cls} alert-dismissible fade show mb-0" role="alert">`
+            + `<span class="done-text">${html}</span>`
+            + `<button type="button" class="btn-close" aria-label="Sluiten"></button></div>`;
+        // Geen data-bs-dismiss: deze pagina laadt geen Bootstrap-JS.
+        el.querySelector('.btn-close').onclick = () => { el.innerHTML = ''; };
+    }
+
+    // cfg = {jobEl, bannerEl, withPush, keepCard}
+    async function startJob(path, body, cfg) {
+        const jobEl = cfg.jobEl, bannerEl = cfg.bannerEl || cfg.jobEl;
+        if (bannerEl !== jobEl) bannerEl.innerHTML = '';
+        jobEl.innerHTML = `<div class="job-line">${SPIN}<span class="muted-sm">starten…</span></div>`;
+        if (!cfg.keepCard) hideRunCard();
         let job;
         try {
             job = await jpost(path, body);
         } catch (e) {
-            jobLine(jobEl, `<span class="badge lbl lbl-red">mislukt</span><span class="muted-sm">${esc(e.message)}</span>`);
+            jobEl.innerHTML = '';
+            showDoneBanner(bannerEl, `<strong>Niet gestart.</strong> ${esc(e.message)}`, 'error');
             return;
         }
         setBusy(true);
         if (POLL) clearInterval(POLL);
-        POLL = setInterval(() => pollJob(job.job_id, jobEl, outEl, opts), 2500);
-        pollJob(job.job_id, jobEl, outEl, opts);
+        POLL = setInterval(() => pollJob(job.job_id, cfg), 2000);
+        pollJob(job.job_id, cfg);
     }
 
-    async function pollJob(jobId, jobEl, outEl, opts) {
+    async function pollJob(jobId, cfg) {
+        const jobEl = cfg.jobEl, bannerEl = cfg.bannerEl || cfg.jobEl;
         let j;
         try { j = await jget('/jobs/' + jobId); } catch (e) { return; }
-        if (j.status === 'queued' || j.status === 'running') {
-            jobLine(jobEl, '<span class="spinner-inline"></span>'
-                + `<span class="muted-sm">${esc(j.action)} bezig — Redshift + Keywords API, dit duurt even`
-                + `${j.started_at ? ' (sinds ' + esc(j.started_at.slice(11, 16)) + ')' : ''}</span>`);
-            return;
-        }
+        if (j.status === 'queued' || j.status === 'running') { jobBar(jobEl, j); return; }
         clearInterval(POLL); POLL = null; setBusy(false);
+        jobEl.innerHTML = '';                       // de balk komt weg, wat er ook uitkwam
         if (j.status === 'error') {
-            jobLine(jobEl, `<span class="badge lbl lbl-red">fout</span><span class="muted-sm">${esc(j.error)}</span>`);
+            showDoneBanner(bannerEl, `<strong>${esc(j.action)} mislukt.</strong> ${esc(j.error)}`, 'error');
             loadRuns();
             return;
         }
-        jobLine(jobEl, `<span class="badge lbl lbl-green">klaar</span>`
-            + `<span class="muted-sm">${esc(j.action)} · ${esc((j.finished_at || '').slice(11, 16))}</span>`);
         const runId = (j.result || {}).run_id;
         loadRuns();
+        let run = null;
         if (runId) {
-            const run = await jget('/runs/' + runId);
-            renderDetail(run, outEl, opts || {});
+            try { run = await jget('/runs/' + runId); } catch (e) { /* de banner staat er nog */ }
         }
+        // Eerst de run tekenen, dan de banner: bij een push zit de banner in de
+        // kaart die renderRunBody() opnieuw vult.
+        if (run) showRun(run, {withPush: !!cfg.withPush});
+        const st = (run || {}).stats || {};
+        const dur = jobDuration(j.started_at, j.finished_at);
+        const failed = st.pushed_failed || 0;
+        const bits = [];
+        if (st.categories != null) bits.push(`<strong>${fmtN(st.categories)}</strong> categorie(ën)`);
+        if (j.action === 'push') {
+            bits.push(`<strong>${fmtN(st.pushed_ok)}</strong> gepusht`);
+            if (failed) bits.push(`<strong>${fmtN(failed)}</strong> mislukt`);
+        } else {
+            if (st.proposed_records != null) bits.push(`<strong>${fmtN(st.proposed_records)}</strong> voorstel-urls`);
+            if (st.problems) bits.push(`<strong>${fmtN(st.problems)}</strong> contractprobleem(en)`);
+        }
+        if (dur) bits.push(dur);
+        // Geen tweede "klaar" (Joep, 2026-08-19): het STATUS-label in de kop van de
+        // run-kaart zegt al dat hij done is, dus deze banner vertelt alleen wat er
+        // uitkwam. Twee keer hetzelfde woord in twee vormen leest als twee dingen.
+        showDoneBanner(bannerEl,
+            `<strong>${esc(j.action === 'push' ? 'Push' : 'Preview')}`
+            + `${runId ? ' · run #' + runId : ''}</strong> — ` + bits.join(' · '),
+            failed || st.problems ? 'warning' : 'done');
+    }
+
+    // Een lopende job overnemen na een reload (UI_BLUEPRINT §Status-bar lifecycle
+    // regel 3): anders lijkt een run van drie minuten na F5 op een stille pagina en
+    // start iemand een tweede, die de _guard_idle met een 409 afwijst.
+    async function adoptRunningJob() {
+        let jobs;
+        try { jobs = (await jget('/jobs')).jobs || []; } catch (e) { return; }
+        const live = jobs.find(j => j.status === 'queued' || j.status === 'running');
+        if (!live) return;
+        const cfg = live.action === 'push'
+            ? {jobEl: document.getElementById('runCardJob'),
+               bannerEl: document.getElementById('runCardNote'), withPush: false, keepCard: true}
+            : (live.params || {}).label === 'Testcats'
+                ? {jobEl: document.getElementById('testJob'), withPush: true}
+                : {jobEl: document.getElementById('catJob'), withPush: true};
+        if (live.action === 'push') {
+            const card = document.getElementById('runCard');
+            card.hidden = false;
+            document.getElementById('runCardTitle').textContent = 'Push loopt';
+        }
+        setBusy(true);
+        if (POLL) clearInterval(POLL);
+        POLL = setInterval(() => pollJob(live.id, cfg), 2000);
+        pollJob(live.id, cfg);
     }
 
     // ------------------------------------------------------------------ //
-    // Run-uiteenzetting — één renderer voor de twee modules en Recent runs
+    // De run-kaart — één plek voor "de run waar je nu naar kijkt"
     // ------------------------------------------------------------------ //
     // '+'/'−' alleen bij een getal: bij een lopende run is de stat er nog niet en
     // leest "+–" of "−–" als een defect in plaats van als "nog onbekend".
     const sgn = (p, v) => (v == null ? '–' : p + fmtN(v));
+
+    function hideRunCard() {
+        const card = document.getElementById('runCard');
+        card.hidden = true;
+        document.getElementById('runCardBody').innerHTML = '';
+        document.getElementById('runCardJob').innerHTML = '';
+        document.getElementById('runCardNote').innerHTML = '';
+        document.querySelectorAll('tr.run-row').forEach(x => x.classList.remove('selected'));
+    }
+
+    function showRun(run, opts) {
+        if (!run) { hideRunCard(); return; }
+        const isPreview = run.mode === 'preview';
+        const statusLbl = run.status === 'done' ? 'lbl-green'
+                        : run.status === 'error' ? 'lbl-red' : 'lbl-amber';
+        document.getElementById('runCard').hidden = false;
+        document.getElementById('runCardTitle').innerHTML =
+            `Run #${run.run_id} `
+            + `<span class="badge lbl ${isPreview ? 'lbl-blue' : 'lbl-pink'}">${esc(run.mode)}</span> `
+            + `<span class="badge lbl ${statusLbl}">${esc(run.status)}</span>`;
+        renderRunBody(run, document.getElementById('runCardBody'), opts || {});
+        // De rij in Recent runs die bij deze run hoort, blijft aangewezen.
+        document.querySelectorAll('tr.run-row').forEach(x =>
+            x.classList.toggle('selected', +x.dataset.run === run.run_id));
+    }
 
     function statCards(cards) {
         return '<div class="stat-row mb-3">' + cards.map(c =>
@@ -380,24 +994,67 @@
             + `<div class="label">${esc(c.l)}</div></div>`).join('') + '</div>';
     }
 
+    // Dekking per URL-type. Uniforme celpadding (dezelfde 6px/14px als de kop, zie
+    // het CSS-blok) zodat een waarde onder zijn eigen kop staat, en de totaalregel
+    // is bold met een scheidingslijn in plaats van een paars vlak: een tint zegt
+    // "andere soort rij", terwijl dit gewoon de som van de rijen eronder is.
     function coverageTable(rows) {
         if (!rows || !rows.length) {
-            return '<div class="text-muted muted-sm">Geen SEO-visits in het venster voor deze categorie.</div>';
+            return '<div class="muted-sm">Geen SEO-visits in het venster voor deze categorie.</div>';
         }
-        let h = '<div class="table-responsive"><table class="table table-sm hs-table mb-0"><thead><tr>'
-              + '<th>URL type</th><th>SEO visits</th><th>in set</th><th>visit cov</th>'
-              + '<th style="min-width:120px;">coverage</th><th>revenue cov</th></tr></thead><tbody>';
-        for (const r of rows) {
-            const all = r.type_url === '__ALL__';
+        const all = rows.filter(r => r.type_url === '__ALL__');
+        const parts = rows.filter(r => r.type_url !== '__ALL__');
+        const line = (r, isAll) => {
             const cov = r.visit_coverage_pct;
             const gap = cov != null && cov < 50;
-            h += `<tr class="${all ? 'row-all' : ''}"><td>${all ? 'ALL (overall)' : esc(r.type_url)}</td>`
-               + `<td>${fmtN(r.total_visits)}</td><td>${fmtN(r.in_set_visits)}</td><td>${fmtPct(cov)}</td>`
-               + `<td><div class="cov-bar ${gap ? 'gap' : ''}"><span style="width:${cov != null ? Math.min(100, cov) : 0}%"></span></div></td>`
-               + `<td>${fmtPct(r.revenue_coverage_pct)}</td></tr>`;
-        }
-        return h + '</tbody></table></div>';
+            return `<tr class="${isAll ? 'row-all' : ''}">`
+                 + `<td>${isAll ? 'Alle types' : esc(r.type_url)}</td>`
+                 + `<td class="col-center">${fmtN(r.total_visits)}</td>`
+                 + `<td class="col-center">${fmtN(r.in_set_visits)}</td>`
+                 + `<td class="col-center">${fmtPct(cov)}</td>`
+                 + `<td><div class="cov-bar ${gap ? 'gap' : ''}" title="${esc(fmtPct(cov))} van de visits">`
+                 + `<span style="width:${cov != null ? Math.min(100, cov) : 0}%"></span></div></td>`
+                 + `<td class="col-center">${fmtPct(r.revenue_coverage_pct)}</td></tr>`;
+        };
+        return '<div class="tool-table-wrap"><table class="table table-sm table-hover tool-table cov-table"'
+             + ' style="table-layout:fixed; width:100%;"><thead class="table-light"><tr>'
+             + '<th style="width:26%;">URL type</th>'
+             + '<th class="col-center" style="width:13%;">SEO visits</th>'
+             + '<th class="col-center" style="width:12%;">In set</th>'
+             + '<th class="col-center" style="width:12%;">Visit cov</th>'
+             + '<th class="col-center" style="width:22%;">Dekking</th>'
+             + '<th class="col-center" style="width:15%;">Revenue cov</th>'
+             + '</tr></thead><tbody>'
+             + all.map(r => line(r, true)).join('')
+             + parts.map(r => line(r, false)).join('')
+             + '</tbody></table></div>';
     }
+
+    // Dekking over de HELE run (Joep, 2026-08-19): per URL-type de in-set en de
+    // totalen van álle categorieën optellen en DAARNA het percentage nemen — niet
+    // een gemiddelde van percentages, want dan weegt een categorie met 12 visits
+    // even zwaar als Kantoor. Zelfde methode als _weighted_cov in de backend, en de
+    // ALL-regel hier moet dus gelijk zijn aan de tegel "visit coverage".
+    // Kan puur in de frontend omdat coverage_rows() de absolute in_set/total voor
+    // visits én revenue meestuurt, niet alleen de percentages.
+    function runCoverage(cats) {
+        const agg = {};
+        (cats || []).forEach(c => (c.coverage || []).forEach(r => {
+            const t = agg[r.type_url] || (agg[r.type_url] = {in_v: 0, tot_v: 0, in_r: 0, tot_r: 0});
+            t.in_v  += r.in_set_visits  || 0;  t.tot_v += r.total_visits  || 0;
+            t.in_r  += r.in_set_revenue || 0;  t.tot_r += r.total_revenue || 0;
+        }));
+        const row = (tu, t) => ({
+            type_url: tu, in_set_visits: t.in_v, total_visits: t.tot_v,
+            visit_coverage_pct: t.tot_v ? 100 * t.in_v / t.tot_v : null,
+            revenue_coverage_pct: t.tot_r ? 100 * t.in_r / t.tot_r : null,
+        });
+        const parts = Object.entries(agg).filter(([tu]) => tu !== '__ALL__')
+            .sort((a, b) => b[1].tot_v - a[1].tot_v).map(([tu, t]) => row(tu, t));
+        if (!parts.length) return [];
+        return (agg.__ALL__ ? [row('__ALL__', agg.__ALL__)] : []).concat(parts);
+    }
+    const subHead = t => `<div class="sub-head">${esc(t)}</div>`;
 
     function catBlock(c, mode) {
         if (mode === 'push') {
@@ -407,12 +1064,13 @@
                 + `<span class="muted-sm">${fmtN(c.records)} records verstuurd · live terug ${fmtN(c.live_after)}`
                 + `${c.exact ? ' · byte-identiek teruggelezen' : (ok ? ' · <strong>afwijking bij teruglezen</strong>' : '')}`
                 + `${c.snapshot ? ' · snapshot ' + fmtN(c.snapshot.records) + ' records' : ''}</span>`
-                + (c.error ? `<div class="push-note mt-2">${esc(c.error)}</div>` : '')
+                + (c.error ? `<div class="hs-error mt-2">${esc(c.error)}</div>` : '')
                 + `</div>`;
         }
         const d = c.diff || {}, dc = c.drop_cost || {};
-        const skipped = Object.entries(c.skipped || {}).filter(([, n]) => n)
-            .map(([k, n]) => `${k}: ${fmtN(n)}`).join(' · ');
+        // De regel "Overgeslagen — plp: 41" is eruit (Joep, 2026-08-19). Wat er
+        // overgeslagen is, is een eigenschap van de bouw en geen uitkomst van de
+        // run; de dekkingstabel eronder laat het gevolg al zien (PLP op 0%).
         return statCards([
             {v: fmtN(c.records), l: 'voorstel urls'},
             {v: fmtN(d.live_records), l: 'nu live'},
@@ -422,36 +1080,23 @@
             {v: fmtN(dc.dropped_seo_visits), l: 'visits weg (90d)', cls: dc.dropped_seo_visits ? 'neg' : 'pos'},
             {v: fmtN(d.anchor_changed), l: 'ander anker'},
             {v: fmtN(c.preserved), l: 'behouden x-cat'},
-        ]) + (skipped ? `<div class="muted-sm mb-2">Overgeslagen — ${esc(skipped)}</div>` : '')
-           + (c.problems && c.problems.length
-               ? `<div class="push-note mb-2"><strong>${c.problems.length} contractprobleem(en)</strong> — `
+        ]) + (c.problems && c.problems.length
+               ? `<div class="hs-error mb-2"><strong>${c.problems.length} contractprobleem(en)</strong> — `
                  + `pushen is geblokkeerd:<br>${c.problems.slice(0, 5).map(esc).join('<br>')}</div>` : '');
     }
 
-    function renderDetail(run, el, opts) {
-        opts = opts || {};
-        if (!run) { el.innerHTML = ''; return; }
+    function renderRunBody(run, el, opts) {
         const st = run.stats || {}, det = run.detail || {}, cats = det.categories || [];
         const isPreview = run.mode === 'preview';
-        const statusLbl = run.status === 'done' ? 'lbl-green' : run.status === 'error' ? 'lbl-red' : 'lbl-amber';
 
-        // Een run die nog loopt heeft nog geen stats/detail — laat dat zien in
-        // plaats van een raster streepjes.
-        const running = run.status === 'running';
-
-        let head = `<div class="d-flex flex-wrap align-items-center gap-2 mb-2">`
-            + `<strong>Run #${run.run_id}</strong>`
-            + `<span class="badge lbl ${isPreview ? 'lbl-ink' : 'lbl-red'}">${esc(run.mode)}</span>`
-            + `<span class="badge lbl ${statusLbl}">${esc(run.status)}</span>`
-            + `<span class="muted-sm">${esc(run.label || '')} · ${esc(run.scope)} · as-of ${esc(run.as_of)}`
-            + ` · ${esc(run.country)} · gestart ${esc(fmtTs(run.run_ts))}`
-            + `${det.visits_days ? ' · venster ' + det.visits_days + 'd' : ''}</span></div>`;
-        if (run.error) head += `<div class="push-note mb-2">${esc(run.error)}</div>`;
-        if (running) {
-            el.innerHTML = head + '<div class="job-line"><span class="spinner-inline"></span>'
+        if (run.status === 'running') {
+            // Een run die nog loopt heeft nog geen stats/detail — zeg dat, in plaats
+            // van een raster streepjes.
+            el.innerHTML = '<div class="job-line">' + SPIN
                 + '<span class="muted-sm">deze run loopt nog — de cijfers komen als hij klaar is</span></div>';
             return;
         }
+        let head = run.error ? `<div class="hs-error mb-3">${esc(run.error)}</div>` : '';
 
         const totals = isPreview ? statCards([
             {v: fmtN(st.categories), l: 'categorieën'},
@@ -470,160 +1115,319 @@
             {v: fmtN(st.exact_readback), l: 'exact teruggelezen'},
         ]);
 
-        // Categorie-dropdown + de tabel per URL-type eronder.
-        const picker = cats.length
-            ? `<div class="row g-2 align-items-end mb-3"><div class="col-sm-6">`
-              + `<label class="muted-sm d-block mb-1">Categorie in deze run</label>`
-              + `<select class="form-select form-select-sm run-cat-sel">`
-              + cats.map((c, i) => `<option value="${i}">${esc(c.name)} (${c.id}) · ${esc(c.scope)}</option>`).join('')
-              + `</select></div></div>` : '';
+        // Dekking van de hele run, onder de totaaltegels. Bij één categorie is dit
+        // dezelfde tabel als die van de categorie, dus dan staat hij hier alleen —
+        // twee keer dezelfde cijfers onder elkaar leest als twee metingen.
+        const covAll = isPreview ? runCoverage(cats) : [];
+        const runCov = covAll.length
+            ? subHead(cats.length > 1 ? 'Dekking — hele run' : 'Dekking') + coverageTable(covAll)
+            : '';
+
+        // De dropdown kiest welke categorie je uitgeklapt ziet; de push gaat over de
+        // hele run (de knop "Alleen de gekozen categorie" is eruit, Joep 2026-08-19).
+        // Compacte inline vorm (Joep, 2026-08-19): het label naast het veld en het
+        // veld op zijn inhoud i.p.v. een halve kaartbreedte. De scope staat er alleen
+        // bij als de run er twee door elkaar heeft — anders zegt hij niets nieuws.
+        const mixed = run.scope === 'mixed';
+        const picker = cats.length > 1
+            ? `<div class="d-flex align-items-center flex-wrap gap-2 mb-3">`
+              + `<span class="sub-head mb-0">Categorie in deze run</span>`
+              + `<select class="form-select form-select-sm run-cat-sel" aria-label="Categorie in deze run">`
+              + cats.map((c, i) => `<option value="${i}">${esc(c.name)} (${c.id})`
+                  + `${mixed ? ' · ' + esc(c.scope) : ''}</option>`).join('')
+              + `</select></div>` : '';
 
         let push = '';
         if (opts.withPush && isPreview && run.status === 'done') {
             const blocked = (st.problems || 0) > 0;
-            push = `<hr><div class="push-note mb-2">`
-                + `Pushen vervangt de complete sitemap-set van ${fmtN(st.categories)} categorie(ën) via `
-                + `<code>POST /sitemap</code>. De API heeft geen DELETE, dus de weg terug is de snapshot die `
-                + `vlak voor de push wordt weggeschreven. ${fmtN(st.dropped_urls)} live URL(s) verdwijnen `
-                + `(${fmtN(st.dropped_seo_visits)} SEO-visits in 90 dagen).</div>`
-                + `<div class="d-flex flex-wrap gap-2 align-items-center">`
-                + `<button class="btn btn-outline-red btn-push" data-run="${run.run_id}" ${blocked ? 'disabled' : ''}>`
-                + `Push live naar Keywords API</button>`
-                + `<button class="btn btn-sm btn-outline-red btn-push" data-run="${run.run_id}" data-one="1" ${blocked ? 'disabled' : ''}>`
-                + `Alleen de gekozen categorie</button>`
-                + (blocked ? `<span class="muted-sm">geblokkeerd: los eerst de contractproblemen op</span>` : '')
+            const why = blocked
+                ? 'Geblokkeerd: los eerst de contractproblemen op'
+                : `Vervangt de live sitemap-set van ${fmtN(st.categories)} categorie(ën)`;
+            push = `<hr><div class="d-flex flex-wrap justify-content-end gap-2">`
+                + `<button class="btn btn-run btn-push" data-run="${run.run_id}"`
+                + `${blocked ? ' disabled data-blocked="1"' : ''} title="${esc(why)}">Push</button>`
                 + `</div>`;
         }
 
-        el.innerHTML = head + totals + picker + `<div class="run-cat-body"></div>` + push;
+        el.innerHTML = head + totals + runCov + picker + `<div class="run-cat-body"></div>` + push;
 
         const sel = el.querySelector('.run-cat-sel');
         const body = el.querySelector('.run-cat-body');
         const draw = () => {
             const c = cats[sel ? +sel.value : 0];
             if (!c) { body.innerHTML = ''; return; }
-            body.innerHTML = catBlock(c, run.mode) + (isPreview ? coverageTable(c.coverage) : '');
+            body.innerHTML = catBlock(c, run.mode)
+                + (isPreview && cats.length > 1
+                    ? subHead('Dekking — ' + c.name) + coverageTable(c.coverage) : '');
         };
         if (sel) sel.onchange = draw;
         draw();
 
-        el.querySelectorAll('.btn-push').forEach(b => {
-            b.onclick = () => {
-                const one = b.dataset.one ? [cats[sel ? +sel.value : 0].id] : null;
-                doPush(+b.dataset.run, one, cats, el);
-            };
-        });
+        const btn = el.querySelector('.btn-push');
+        if (btn) btn.onclick = () => doPush(run, st);
     }
 
-    async function doPush(runId, categoryIds, cats, el) {
-        const what = categoryIds
-            ? cats.find(c => c.id === categoryIds[0]).name
-            : `${cats.length} categorie(ën)`;
-        const typed = prompt(`Live sitemap-set van ${what} vervangen.\n\n`
-            + `Dit is direct zichtbaar op beslist.nl en de API heeft geen DELETE.\n`
-            + `Typ REPLACE om door te gaan.`);
-        if (typed === null) return;
-        if (typed.trim().toUpperCase() !== 'REPLACE') { alert('Niet gepusht — er stond geen REPLACE.'); return; }
-        await startJob('/categories/push', {run_id: runId, confirm: 'REPLACE', category_ids: categoryIds},
-                       el, el, {withPush: false});
+    // Eén waarschuwing met OK/Annuleren (Joep, 2026-08-19) — geen uitgetypte
+    // REPLACE meer. De cijfers van deze run staan erin, want een "weet je het
+    // zeker" zonder getallen zegt niets; de backend blijft zijn eigen
+    // confirm-token eisen, dus de UI stuurt die mee.
+    async function doPush(run, st) {
+        const n = st.categories, drop = st.dropped_urls || 0;
+        const lines = [
+            `Push van run #${run.run_id}: ${fmtN(n)} categorie(ën) — ${run.label || ''}`,
+            '',
+            'Dit vervangt de complete live sitemap-set van die categorie(ën) en is direct',
+            'zichtbaar op beslist.nl. De Keywords API heeft geen DELETE, dus de weg terug is',
+            'de snapshot die vlak vóór de push wordt weggeschreven.',
+            '',
+            `${fmtN(drop)} live URL(s) verdwijnen (${fmtN(st.dropped_seo_visits || 0)} SEO-visits in 90 dagen).`,
+        ];
+        if (!confirm(lines.join('\n'))) return;
+        await startJob('/categories/push', {run_id: run.run_id, confirm: 'REPLACE', category_ids: null}, {
+            jobEl: document.getElementById('runCardJob'),
+            bannerEl: document.getElementById('runCardNote'),
+            withPush: false, keepCard: true,
+        });
     }
 
     // ------------------------------------------------------------------ //
     // Recent runs
     // ------------------------------------------------------------------ //
     let RUNS = [];
+    // Selectiemodus voor Export én Verwijder. Eén selectie, twee acties: wisselen
+    // tussen de knoppen houdt je vinkjes staan. De selectie hangt aan het run_id —
+    // niet aan de rij-index, want dan verschuift hij zodra de lijst herlaadt
+    // (UI_BLUEPRINT §Bulk-select bar).
+    let SEL_MODE = null;                 // null | 'export' | 'delete'
+    const SEL = new Set();
+
     // Shimmerende placeholderrijen i.p.v. een spinner: een skeletonrij is even hoog
     // als een echte rij, dus de tabel klapt niet in en springt niet bij het laden
-    // (UI_BLUEPRINT "Tables"; .skel-row/.skel-bar staan in style.css).
+    // (UI_BLUEPRINT §Tables; .skel-row/.skel-bar staan in style.css).
+    const RUNS_COLS = 11;                // incl. de verborgen selectiekolom
     function skeletonRows(cols, n = 4) {
         const cell = '<td><span class="skel-bar"></span></td>';
         return ('<tr class="skel-row">' + cell.repeat(Math.max(cols, 1)) + '</tr>').repeat(n);
     }
+
     async function loadRuns() {
         const tb = document.getElementById('runsBody');
-        if (!RUNS.length) tb.innerHTML = skeletonRows(11);
+        if (!RUNS.length) tb.innerHTML = skeletonRows(RUNS_COLS);
         try {
             const j = await jget('/runs?limit=200');
             RUNS = j.rows || [];
         } catch (e) {
-            tb.innerHTML = `<tr><td colspan="11" class="text-danger">${esc(e.message)}</td></tr>`;
+            tb.innerHTML = `<tr><td colspan="${RUNS_COLS}" class="text-danger">${esc(e.message)}</td></tr>`;
             return;
         }
+        // Een verdwenen run (verwijderd) mag niet in de selectie blijven hangen.
+        const alive = new Set(RUNS.map(r => r.run_id));
+        Array.from(SEL).forEach(id => { if (!alive.has(id)) SEL.delete(id); });
+        renderRuns();
+    }
+
+    // Niveau als label, met dezelfde tinten als in Testcats. "mixed" is geen eigen
+    // kleur maar bestaat uit BEIDE labels — dat is letterlijk wat het betekent, en
+    // het scheelt een derde hue die met de statuskolom zou botsen.
+    function scopeLabels(scope) {
+        const one = (sc, cls) => `<span class="badge lbl ${cls}">${esc(sc)}</span>`;
+        if (scope === 'mixed') return one('deepest', 'lbl-blue') + ' ' + one('maincat', 'lbl-pink');
+        return one(scope, scope === 'maincat' ? 'lbl-pink' : 'lbl-blue');
+    }
+
+    function renderRuns() {
+        const tb = document.getElementById('runsBody');
         if (!RUNS.length) {
-            tb.innerHTML = '<tr><td colspan="11" class="text-muted">Nog geen runs — start er een hierboven.</td></tr>';
+            tb.innerHTML = `<tr><td colspan="${RUNS_COLS}" class="muted-sm">`
+                         + 'Nog geen runs — start er een hierboven.</td></tr>';
+            syncSelBar();
             return;
         }
+        const open = +(document.getElementById('runCard').dataset.run || 0);
         tb.innerHTML = RUNS.map(r => {
             const s = r.stats || {};
             const statusLbl = r.status === 'done' ? 'lbl-green' : r.status === 'error' ? 'lbl-red' : 'lbl-amber';
-            return `<tr class="run-row" data-run="${r.run_id}">
-                <td>${esc(fmtTs(r.run_ts))}</td>
-                <td><span class="badge lbl ${r.mode === 'push' ? 'lbl-red' : 'lbl-ink'}">${esc(r.mode)}</span></td>
-                <td>${esc(r.label || '')} <span class="muted-sm">${esc(r.scope)}</span></td>
+            const on = SEL.has(r.run_id);
+            // De vinkjes en de rijtint worden IN de renderer opnieuw gezet, niet één
+            // keer na een klik: anders valt de markering weg bij elke herlading.
+            return `<tr class="run-row${r.run_id === open ? ' selected' : ''}${on ? ' row-selected' : ''}" data-run="${r.run_id}">
+                <td class="col-check"><input class="form-check-input run-chk" type="checkbox"
+                        data-run="${r.run_id}" ${on ? 'checked' : ''} aria-label="Selecteer run ${r.run_id}"></td>
+                <td title="${esc(r.run_ts || '')}">${esc(fmtTs(r.run_ts))}</td>
+                <td>${esc(r.label || '')} ${scopeLabels(r.scope)}</td>
                 <td class="col-center">${fmtN((r.categories || []).length)}</td>
-                <td class="col-num">${fmtN(s.proposed_records)}</td>
-                <td class="col-num">${fmtN(s.live_records)}</td>
-                <td class="col-num">${r.mode === 'push' ? '–' : sgn('+', s.added_urls)}</td>
-                <td class="col-num">${r.mode === 'push' ? '–' : fmtN(s.dropped_urls)}</td>
-                <td class="col-num">${r.mode === 'push' ? '–' : fmtN(s.dropped_seo_visits)}</td>
-                <td class="col-num">${fmtPct(s.visit_coverage_pct)}</td>
+                <td class="col-center">${fmtN(s.proposed_records)}</td>
+                <td class="col-center">${fmtN(s.live_records)}</td>
+                <td class="col-center">${r.mode === 'push' ? '–' : sgn('+', s.added_urls)}</td>
+                <td class="col-center">${r.mode === 'push' ? '–' : fmtN(s.dropped_urls)}</td>
+                <td class="col-center">${r.mode === 'push' ? '–' : fmtN(s.dropped_seo_visits)}</td>
+                <td class="col-center">${fmtPct(s.visit_coverage_pct)}</td>
                 <td class="col-center"><span class="badge lbl ${statusLbl}">${esc(r.status)}</span></td>
             </tr>`;
         }).join('');
         tb.querySelectorAll('tr.run-row').forEach(tr => {
-            tr.onclick = () => openRun(+tr.dataset.run, tr);
+            const id = +tr.dataset.run;
+            // In selectiemodus is een rijklik een vinkje, geen "open de run": je bent
+            // dan rijen aan het aanwijzen, niet aan het lezen.
+            tr.onclick = e => {
+                if (!SEL_MODE) { openRun(id); return; }
+                if (e.target.classList.contains('run-chk')) return;   // die handelt zelf af
+                toggleSel(id, !SEL.has(id));
+            };
         });
+        tb.querySelectorAll('.run-chk').forEach(box => {
+            box.onclick = e => e.stopPropagation();
+            box.onchange = e => toggleSel(+box.dataset.run, e.target.checked);
+        });
+        syncSelBar();
     }
 
-    async function openRun(runId, tr) {
-        document.querySelectorAll('tr.run-row').forEach(x => x.classList.remove('selected'));
-        if (tr) tr.classList.add('selected');
-        const el = document.getElementById('runDetail');
-        el.innerHTML = '<div class="job-line"><span class="spinner-inline"></span>'
-                     + '<span class="muted-sm">run laden…</span></div>';
+    function toggleSel(id, on) {
+        if (on) SEL.add(id); else SEL.delete(id);
+        const tr = document.querySelector(`tr.run-row[data-run="${id}"]`);
+        if (tr) {
+            tr.classList.toggle('row-selected', on);
+            const box = tr.querySelector('.run-chk');
+            if (box) box.checked = on;
+        }
+        syncSelBar();
+    }
+
+    function setSelMode(mode) {
+        SEL_MODE = mode;
+        document.getElementById('runsTable').classList.toggle('select-mode', !!mode);
+        document.getElementById('exportBar').hidden = !mode;
+        document.getElementById('btnRunsExport').classList.toggle('active', mode === 'export');
+        document.getElementById('btnRunsDelete').classList.toggle('active', mode === 'delete');
+        document.getElementById('btnExportGo').hidden = mode !== 'export';
+        document.getElementById('btnDeleteGo').hidden = mode !== 'delete';
+        if (!mode) SEL.clear();
+        renderRuns();
+    }
+
+    function syncSelBar() {
+        const n = SEL.size, all = RUNS.length;
+        document.getElementById('exportCount').textContent =
+            `${fmtN(n)} van ${fmtN(all)} geselecteerd`;
+        const go = document.getElementById('btnExportGo');
+        go.disabled = !n;
+        go.textContent = n ? `Exporteer ${fmtN(n)}` : 'Exporteer selectie';
+        const del = document.getElementById('btnDeleteGo');
+        del.disabled = !n;
+        del.textContent = n ? `Verwijder ${fmtN(n)}` : 'Verwijder selectie';
+        const box = document.getElementById('runsAllChk');
+        box.checked = n === all && all > 0;
+        box.indeterminate = n > 0 && n < all;
+    }
+
+    function exportSelection() {
+        if (!SEL.size) return;
+        // Navigeren is genoeg: het endpoint stuurt Content-Disposition: attachment,
+        // dus de browser downloadt en de pagina blijft staan. Eén CSV-schrijver in de
+        // backend voor zowel alles als een selectie.
+        window.location = API + '/runs/export.csv?ids=' + Array.from(SEL).join(',');
+    }
+
+    async function deleteSelection() {
+        if (!SEL.size) return;
+        const ids = Array.from(SEL);
+        const rows = RUNS.filter(r => SEL.has(r.run_id));
+        const pushes = rows.filter(r => r.mode === 'push').length;
+        const lines = [`${fmtN(ids.length)} run(s) verwijderen uit de historie:`, ''];
+        rows.slice(0, 8).forEach(r => lines.push(`  #${r.run_id} · ${r.mode} · ${r.label || ''}`));
+        if (rows.length > 8) lines.push(`  … en nog ${rows.length - 8}`);
+        if (pushes) {
+            lines.push('', `Let op: ${pushes} hiervan ${pushes === 1 ? 'is een push' : 'zijn pushes'} — `
+                         + 'dat is de vastlegging van een live write. De snapshots op schijf blijven staan.');
+        }
+        lines.push('', 'Dit is niet ongedaan te maken.');
+        if (!confirm(lines.join('\n'))) return;
+        const bar = document.getElementById('exportBar');
+        try {
+            const j = await jpost('/runs/delete', {ids});
+            SEL.clear();
+            await loadRuns();
+            // Stond de verwijderde run open in de run-kaart? Dan die ook weg.
+            const openId = +(document.getElementById('runCard').dataset.run || 0);
+            if (ids.includes(openId)) { document.getElementById('runCard').dataset.run = ''; hideRunCard(); }
+            setSelMode(null);
+            showDoneBanner(document.getElementById('runsNote'),
+                `<strong>${fmtN(j.deleted)} run(s) verwijderd.</strong>`, 'done');
+        } catch (e) {
+            showDoneBanner(document.getElementById('runsNote'),
+                `<strong>Verwijderen mislukt.</strong> ${esc(e.message)}`, 'error');
+        }
+    }
+
+    async function openRun(runId) {
+        const card = document.getElementById('runCard');
+        const body = document.getElementById('runCardBody');
+        card.hidden = false;
+        card.dataset.run = runId;
+        document.getElementById('runCardNote').innerHTML = '';
+        document.getElementById('runCardJob').innerHTML = '';
+        document.getElementById('runCardTitle').textContent = `Run #${runId}`;
+        body.innerHTML = '<div class="job-line">' + SPIN
+                       + '<span class="muted-sm">run laden…</span></div>';
         try {
             const run = await jget('/runs/' + runId);
-            renderDetail(run, el, {withPush: true});
-            el.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+            showRun(run, {withPush: true});
+            card.scrollIntoView({behavior: 'smooth', block: 'nearest'});
         } catch (e) {
-            el.innerHTML = `<div class="push-note">${esc(e.message)}</div>`;
+            body.innerHTML = `<div class="hs-error">${esc(e.message)}</div>`;
         }
     }
 
     // ------------------------------------------------------------------ //
     document.addEventListener('DOMContentLoaded', () => {
-        document.getElementById('scopeSel').onchange = loadCategories;
-        document.getElementById('catFilter').oninput = fillCatSelect;
+        ddMain = makeDropdown('ddMain', () => { refreshCatItems(); syncPicked(); });
+        ddCat  = makeDropdown('ddCat', () => syncPicked());
+        // Buiten een dropdown klikken sluit hem — één luisteraar voor alle twee.
+        document.addEventListener('click', e => {
+            if (!e.target.closest('.dd')) closeAllDropdowns(null);
+        });
+
+        document.querySelectorAll('input[name="hsScope"]').forEach(r => {
+            r.onchange = rebuildPickers;
+        });
         document.getElementById('btnRunsRefresh').onclick = loadRuns;
-        document.getElementById('btnTestAll').onclick = () =>
-            document.querySelectorAll('.test-chk').forEach(el => { el.checked = true; });
-        document.getElementById('btnTestNone').onclick = () =>
-            document.querySelectorAll('.test-chk').forEach(el => { el.checked = false; });
+        document.getElementById('btnRunsExport').onclick = () =>
+            setSelMode(SEL_MODE === 'export' ? null : 'export');
+        document.getElementById('btnRunsDelete').onclick = () =>
+            setSelMode(SEL_MODE === 'delete' ? null : 'delete');
+        document.getElementById('btnExportCancel').onclick = () => setSelMode(null);
+        document.getElementById('btnExportGo').onclick = exportSelection;
+        document.getElementById('btnDeleteGo').onclick = deleteSelection;
+        document.getElementById('runsAllChk').onchange = e => {
+            RUNS.forEach(r => { if (e.target.checked) SEL.add(r.run_id); else SEL.delete(r.run_id); });
+            renderRuns();
+        };
+        document.getElementById('testAllChk').onchange = e => {
+            document.querySelectorAll('.test-chk').forEach(el => { el.checked = e.target.checked; });
+            syncTestAll();
+        };
 
         document.getElementById('btnCatRun').onclick = () => {
-            const id = +document.getElementById('catSel').value;
-            if (!id) { alert('Kies eerst een categorie.'); return; }
-            const opt = document.getElementById('catSel').selectedOptions[0];
-            const cat = CATS.find(c => c.id === id) || {name: opt.textContent};
+            if (!PICKED) return;
             startJob('/categories/preview', {
-                categories: [{id, name: cat.name, scope: document.getElementById('scopeSel').value}],
+                categories: [{id: PICKED.id, name: PICKED.name, scope: PICKED.scope}],
                 include_plp: document.getElementById('plpChk').checked,
                 preserve_cross_category: document.getElementById('preserveChk').checked,
-            }, document.getElementById('catJob'), document.getElementById('catRunOut'), {withPush: true});
+            }, {jobEl: document.getElementById('catJob'), withPush: true});
         };
 
         document.getElementById('btnTestRun').onclick = () => {
             const cats = checkedTestCats();
-            if (!cats.length) { alert('Vink minstens één testcategorie aan.'); return; }
+            if (!cats.length) return;
             startJob('/categories/preview', {
                 categories: cats, label: 'Testcats',
                 include_plp: false, preserve_cross_category: true,
-            }, document.getElementById('testJob'), document.getElementById('testRunOut'), {withPush: true});
+            }, {jobEl: document.getElementById('testJob'), withPush: true});
         };
 
-        loadCategories();
+        loadPickerData();
         loadTestBucket();
-        loadRuns();
+        loadRuns().then(adoptRunningJob);
     });
     </script>
 </body>

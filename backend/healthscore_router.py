@@ -50,6 +50,9 @@ def _new_job(action: str, params: dict) -> str:
             "id": job_id, "action": action, "params": params,
             "status": "queued", "created_at": datetime.now().isoformat(timespec="seconds"),
             "started_at": None, "finished_at": None, "result": None, "error": None,
+            # Filled by the worker through _progress_setter so the page can draw a
+            # real progress bar: {"phase": ..., "done": n, "total": n, "what": ...}.
+            "progress": None,
         }
         # Trim oldest finished jobs so the dict can't grow without bound.
         if len(_JOBS) > _MAX_JOBS:
@@ -60,14 +63,31 @@ def _new_job(action: str, params: dict) -> str:
     return job_id
 
 
-def _run_job(job_id: str, fn, *args) -> None:
+def _progress_setter(job_id: str):
+    """Hand the worker a way to report progress into its own job dict.
+
+    The unit of work is one category (see healthscore_runs.preview) — that is the
+    only denominator that exists before the run starts, and it is what the UI puts
+    on the bar. The opaque phases around the loop ("prep", "finish") report a phase
+    name and no percentage, because a determinate bar parked at 100% during a phase
+    that is still running reads as finished-and-hung (cc1/UI_BLUEPRINT.md).
+    """
+    def report(**kw) -> None:
+        with _JOBS_LOCK:
+            j = _JOBS.get(job_id)
+            if j is not None:
+                j["progress"] = kw
+    return report
+
+
+def _run_job(job_id: str, fn, *args, **kwargs) -> None:
     with _JOBS_LOCK:
         j = _JOBS.get(job_id)
         if j:
             j["status"] = "running"
             j["started_at"] = datetime.now().isoformat(timespec="seconds")
     try:
-        result = fn(*args)
+        result = fn(*args, **kwargs)
         with _JOBS_LOCK:
             j = _JOBS.get(job_id)
             if j:
@@ -249,7 +269,8 @@ def categories_preview(body: PreviewIn):
               "label": body.label or (cats[0]["name"] if len(cats) == 1 else f"{len(cats)} cats")}
     job_id = _new_job("preview", params)
     _executor.submit(_run_job, job_id, hr.preview, cats, None, body.country,
-                     body.include_plp, body.preserve_cross_category, body.label)
+                     body.include_plp, body.preserve_cross_category, body.label,
+                     progress=_progress_setter(job_id))
     return {"job_id": job_id, "action": "preview", "params": params}
 
 
@@ -263,7 +284,7 @@ def categories_push(body: PushIn):
               "categories": len(body.category_ids or []) or None}
     job_id = _new_job("push", params)
     _executor.submit(_run_job, job_id, hr.push_run, body.run_id, body.confirm,
-                     body.category_ids)
+                     body.category_ids, progress=_progress_setter(job_id))
     return {"job_id": job_id, "action": "push", "params": params}
 
 
@@ -277,13 +298,40 @@ def runs(limit: int = Query(200, ge=1, le=1000)):
 
 
 @router.get("/runs/export.csv")
-def runs_export():
+def runs_export(ids: str = Query(None, description="comma-separated run_ids; empty = every run")):
+    """The run history as CSV. `ids` exports just the rows ticked in the UI."""
+    run_ids = None
+    if ids:
+        try:
+            run_ids = [int(x) for x in ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="ids must be comma-separated integers")
+        if not run_ids:
+            raise HTTPException(status_code=400, detail="no run ids given")
     try:
-        return Response(content=hr.runs_csv(), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition":
-                                 'attachment; filename="healthscore_runs.csv"'})
+        name = f"healthscore_runs_selectie_{len(run_ids)}.csv" if run_ids else "healthscore_runs.csv"
+        return Response(content=hr.runs_csv(run_ids=run_ids), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
     except Exception as e:
         logger.error("runs export failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DeleteRunsIn(BaseModel):
+    ids: list[int]
+
+
+@router.post("/runs/delete")
+def runs_delete(body: DeleteRunsIn):
+    """Remove run rows the UI ticked. Snapshots on disk are left alone."""
+    if not body.ids:
+        raise HTTPException(status_code=400, detail="no run ids given")
+    try:
+        return {"deleted": hr.delete_runs(body.ids)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("runs delete failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

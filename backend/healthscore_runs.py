@@ -150,6 +150,32 @@ def list_runs(limit: int = 200) -> list:
         return_db_connection(conn)
 
 
+def delete_runs(run_ids: list) -> int:
+    """Drop run rows by id; returns how many were actually removed.
+
+    Two things this does NOT do, on purpose. It does not touch the snapshot files a
+    push wrote to disk — those are the only rollback that exists, so they outlive the
+    history row. And it does not refuse a push row: deleting one throws away the
+    record of a live write, which is a call for the operator, not for this function.
+    The UI names what is being deleted before it asks.
+    """
+    ids = [int(x) for x in (run_ids or [])]
+    if not ids:
+        raise ValueError("no run ids given")
+    conn = get_db_connection()
+    try:
+        _ensure_table(conn)
+        cur = conn.cursor()
+        cur.execute(f"DELETE FROM {RUNS_TABLE} WHERE run_id = ANY(%s)", (ids,))
+        n = cur.rowcount
+        cur.close()
+        conn.commit()
+        logger.info("healthscore: deleted %s run(s): %s", n, ids)
+        return int(n)
+    finally:
+        return_db_connection(conn)
+
+
 def get_run(run_id: int) -> dict:
     conn = get_db_connection()
     try:
@@ -174,15 +200,24 @@ def _local(ts) -> str:
     return ts.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def runs_csv(limit: int = 1000) -> str:
-    """The Recent-runs table as CSV — the same columns the UI shows."""
+def runs_csv(limit: int = 1000, run_ids: list = None) -> str:
+    """The Recent-runs table as CSV — the same columns the UI shows.
+
+    `run_ids` exports only those runs, in the table's own order (newest first), for
+    the checkbox selection in the UI. One writer for both cases on purpose: a second
+    CSV builder in the frontend would drift from these columns the first time one
+    changes.
+    """
     cols = ["run_id", "run_ts", "mode", "scope", "label", "as_of", "country", "status",
             "categories", "proposed_records", "live_records", "added_urls", "kept_urls",
             "dropped_urls", "dropped_seo_visits", "problems", "pushed_ok", "pushed_failed"]
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
     w.writerow(cols)
+    wanted = {int(x) for x in run_ids} if run_ids else None
     for r in list_runs(limit):
+        if wanted is not None and int(r["run_id"]) not in wanted:
+            continue
         s = r.get("stats") or {}
         w.writerow([
             r["run_id"],
@@ -349,10 +384,18 @@ def _norm_payload_urls(payload: dict) -> set:
 
 def preview(categories: list, as_of: date = None, country: str = "nl",
             include_plp: bool = False, preserve_cross_category: bool = True,
-            label: str = None) -> dict:
+            label: str = None, progress=None) -> dict:
     """Build + validate + diff + price + measure every category. Sends nothing.
 
     `categories` = [{"id": int, "name": str, "scope": "deepest"|"maincat"}].
+    `progress` is an optional callback the router points at the job dict so the UI
+    can draw a real progress bar. The unit of work is ONE CATEGORY, because that
+    is the only denominator that exists before the run starts (records per
+    category are unknown until it is built). It is called with `phase`
+    ("prep" | "cat" | "finish"), `done`, `total` and, during "cat", `what`. The
+    counter advances only AFTER a category is on the results list, so the bar
+    never runs ahead of what has actually been computed; the two opaque phases
+    around the loop carry a phase name and no percentage.
     preserve_cross_category defaults ON for deepest-category runs: a partial
     rollout otherwise deletes live URLs that HS2.0 still wants, only because
     their own category was not in this push (2,935 urls / 35,866 visits on the
@@ -363,6 +406,14 @@ def preview(categories: list, as_of: date = None, country: str = "nl",
         raise ValueError("no selection built yet — run the sitemap build first")
     if not categories:
         raise ValueError("pick at least one category")
+    rep = progress if callable(progress) else (lambda **kw: None)
+    total = len(categories)
+    # "prep" is the Redshift work below: opaque calls, so it reports a phase and no
+    # number. It does carry a `step`, because on a one-category run this phase IS
+    # basically the whole run (measured 2026-08-19: ~3 of 3,5 minutes) and one static
+    # label for three minutes tells you nothing. A label change at the same
+    # percentage is the honest way to show movement in an unmeasurable phase.
+    rep(phase="prep", step="headings", done=0, total=total)
 
     scopes = {c.get("scope", "deepest") for c in categories}
     scope = scopes.pop() if len(scopes) == 1 else "mixed"
@@ -377,11 +428,13 @@ def preview(categories: list, as_of: date = None, country: str = "nl",
         # One headings fetch and one visits fetch per scope, reused per category.
         headings = kw.fetch_page_headings([c["id"] for c in deep], as_of) if deep else {}
         mc_headings = kw.fetch_maincat_headings([c["id"] for c in main], as_of) if main else {}
+        rep(phase="prep", step="visits", done=0, total=total)
         visits = seo_visits_by_type([c["id"] for c in deep], as_of, "deepest") if deep else {}
         mc_visits = seo_visits_by_type([c["id"] for c in main], as_of, "maincat") if main else {}
 
         results = []
-        for c in categories:
+        for i, c in enumerate(categories, 1):
+            rep(phase="cat", done=i - 1, total=total, what=c["name"])
             cid, is_main = int(c["id"]), c.get("scope") == "maincat"
             if is_main:
                 built = kw.build_maincat_payload(cid, as_of, mc_headings, country, include_plp)
@@ -419,6 +472,7 @@ def preview(categories: list, as_of: date = None, country: str = "nl",
                 "coverage": coverage_rows(ours, cat_visits),
             })
 
+        rep(phase="finish", done=total, total=total)
         stats = _summarise(results)
         detail = {"as_of": str(as_of), "country": country, "include_plp": include_plp,
                   "preserve_cross_category": preserve_cross_category,
@@ -478,7 +532,7 @@ def _weighted_cov(results: list, what: str) -> float:
 # Push
 # --------------------------------------------------------------------------- #
 def push_run(parent_run_id: int, confirm: str, category_ids: list = None,
-             snapshot_dir: str = SNAPSHOT_DIR) -> dict:
+             snapshot_dir: str = SNAPSHOT_DIR, progress=None) -> dict:
     """Replay a preview's stored payloads against the live API.
 
     `confirm` must be the literal string "REPLACE" — typed by a human in the UI.
@@ -516,8 +570,14 @@ def push_run(parent_run_id: int, confirm: str, category_ids: list = None,
                          [{"id": c["id"], "name": c["name"], "scope": c["scope"]} for c in cats],
                          parent_run_id=parent_run_id)
     results, ok, failed = [], 0, 0
+    # Same unit as the preview: one category. A failure still advances the
+    # counter — the unit is handled, just not well — or the bar hangs on a run
+    # that is finished.
+    rep = progress if callable(progress) else (lambda **kw: None)
+    total = len(cats)
     try:
-        for c in cats:
+        for i, c in enumerate(cats, 1):
+            rep(phase="cat", done=i - 1, total=total, what=c["name"])
             cid = int(c["id"])
             entry = {"id": cid, "name": c["name"], "scope": c["scope"],
                      "records": len(c["payload"]["keywords"])}
@@ -541,6 +601,7 @@ def push_run(parent_run_id: int, confirm: str, category_ids: list = None,
                 logger.exception("healthscore push failed for category %s", cid)
             results.append(entry)
 
+        rep(phase="finish", done=total, total=total)
         stats = {"categories": len(results), "pushed_ok": ok, "pushed_failed": failed,
                  "proposed_records": sum(r["records"] for r in results),
                  "live_records": sum(r.get("live_after") or 0 for r in results),
