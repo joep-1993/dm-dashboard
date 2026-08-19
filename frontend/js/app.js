@@ -1167,7 +1167,7 @@ async function validateAllLinks() {
                         </div>
                         <div class="d-flex align-items-center gap-2">
                             <div class="progress flex-grow-1" style="height: 25px;"><div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: ${pct}%"></div></div>
-                            <button class="btn btn-sm" style="border: 1px solid #d63031; color: #d63031;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'" onclick="cancelValidation('${taskId}')">Cancel</button>
+                            <button class="btn btn-sm btn-outline-red" onclick="cancelValidation('${taskId}')">Cancel</button>
                         </div>
                     </div>
                     <div class="alert alert-warning mb-0">
@@ -1247,7 +1247,7 @@ async function recheckSkippedUrls() {
                         </div>
                         <div class="d-flex align-items-center gap-2">
                             <div class="progress flex-grow-1" style="height: 25px;"><div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: ${pct}%"></div></div>
-                            <button class="btn btn-sm" style="border: 1px solid #d63031; color: #d63031;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'" onclick="cancelRecheck('${taskId}')">Cancel</button>
+                            <button class="btn btn-sm btn-outline-red" onclick="cancelRecheck('${taskId}')">Cancel</button>
                         </div>
                     </div>
                     <div class="alert alert-warning mb-0">

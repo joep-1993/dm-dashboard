@@ -691,7 +691,7 @@ async function validateAllFaqLinks() {
                         </div>
                         <div class="d-flex align-items-center gap-2">
                             <div class="progress flex-grow-1" style="height: 25px;"><div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: ${pct}%"></div></div>
-                            <button class="btn btn-sm" style="border: 1px solid #d63031; color: #d63031;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'" onclick="cancelFaqValidation('${taskId}')">Cancel</button>
+                            <button class="btn btn-sm btn-outline-red" onclick="cancelFaqValidation('${taskId}')">Cancel</button>
                         </div>
                     </div>
                     <div class="alert alert-warning mb-0">
@@ -770,7 +770,7 @@ async function recheckSkippedFaqUrls() {
                         </div>
                         <div class="d-flex align-items-center gap-2">
                             <div class="progress flex-grow-1" style="height: 25px;"><div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: ${pct}%"></div></div>
-                            <button class="btn btn-sm" style="border: 1px solid #d63031; color: #d63031;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'" onclick="cancelFaqRecheck('${taskId}')">Cancel</button>
+                            <button class="btn btn-sm btn-outline-red" onclick="cancelFaqRecheck('${taskId}')">Cancel</button>
                         </div>
                     </div>
                     <div class="alert alert-warning mb-0">
@@ -1139,9 +1139,7 @@ async function publishFaqV2(full = false) {
                          aria-valuemin="0" aria-valuemax="100"></div>
                 </div>
                 <div class="mt-2">
-                    <button id="publishV2CancelBtn" class="btn btn-sm" style="border: 1px solid #d63031; color: #d63031;"
-                            onmouseover="this.style.background='#d63031';this.style.color='white'"
-                            onmouseout="this.style.background='transparent';this.style.color='#d63031'"
+                    <button id="publishV2CancelBtn" class="btn btn-sm btn-outline-red"
                             onclick="cancelFaqV2('${escapeHtml(data.task_id)}')">Cancel</button>
                 </div>
             </div>`;

@@ -25,9 +25,19 @@
         .progress-area { background: #f8f9fc; border-radius: 8px; padding: 1rem; min-height: 60px; }
         .spinner-border-sm { width: 1rem; height: 1rem; }
 
-        .badge-increase { background-color: #00b894 !important; }
-        .badge-decrease { background-color: #d63031 !important; }
-        .badge-stuck { background-color: #e17055 !important; }
+        /* Outlined labels, zie UI_BLUEPRINT "Labels / badges": transparante vulling,
+           vette tekst, rand in de tekstkleur via currentColor — dus één regel per
+           kleur. Dezelfde vorm als de OOS/MANUAL-labels in DMA Exclusions en de
+           .lbl-set in GSD Tag Toppers. Was volgevuld (#00b894 / #d63031 / #e17055):
+           als rand-en-tekst op wit haalt dat groen maar 2,54:1 en dat zalmoranje
+           3,16:1, dus die twee hues moesten donkerder. Rood en amber zijn precies de
+           tinten die de LIVE- en DRY RUN-badge op deze pagina al dragen, zodat het
+           hele Results-paneel op één palet staat. */
+        .lbl { background: transparent; font-weight: 700; border: 1px solid currentColor; }
+        .lbl-green { color: #198754; }   /* 4,53:1 — #00b894 was onleesbaar als outline */
+        .lbl-red   { color: #d63031; }   /* 4,85:1 — zelfde rood als de LIVE-badge */
+        .lbl-amber { color: #b45309; }   /* 5,02:1 — zelfde amber als de DRY RUN-badge */
+        .lbl-ink   { color: #2d3436; }   /* de neutrale tellers: missed / no action / mutations */
 
         .result-table { font-size: 0.9rem; table-layout: fixed; width: 100%; }
         .result-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -52,13 +62,26 @@
         .tool-table th.sort-asc::after  { content: '▲'; opacity: 0.9; }
         .tool-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
         .tool-table .col-center { text-align: center; }
-        /* style.css themes .btn-outline-danger to orange; Remove must read red. */
+        /* Remove draagt de canonieke destructieve knop uit style.css (rood omlijnd,
+           vult vol rood bij hover); die groep is sinds 2026-08-19 ook voor
+           btn-outline-danger rood, dus hier staat geen eigen kleur meer. De regel
+           hieronder haalt alleen Bootstraps opacity van de disabled-staat weg,
+           zodat het gedeelde grijs vlak blijft. */
         .btn-remove:disabled { opacity: 1; }
 
         /* flatpickr styling — same purple theme as SEO stats / GSD Campaigns */
 
         .summary-badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
-        .summary-badges .badge { font-size: 0.85rem; padding: 0.5rem 0.75rem; }
+        /* Padding-top 0,06rem KLEINER dan -bottom. Bootstraps .badge heeft
+           line-height:1, waardoor het blok cap-hoogte→basislijn ~1px ONDER het
+           midden van de doos landt — gemeten op een 4x-schermshot: +1,00px bij de
+           gevulde badge, +0,75px outlined. De som blijft 1,0rem, dus de badge wordt
+           er niet lager van. Symmetrische padding centreert hier dus NIET; dat is
+           font-metriek, geen bug in deze pagina. */
+        .summary-badges .badge { font-size: 0.85rem; padding: 0.47rem 0.75rem 0.53rem; }
+        /* Zelfde correctie op de actiekop boven elke resultaattabel; die badge erft
+           Bootstraps eigen font-size, dus in em i.p.v. rem. */
+        #resultTables h6 .badge { padding: 0.3em 0.65em 0.4em; }
         /* De paarse flatpickr-kalender staat sinds 2026-08-14 in css/style.css: dit
            blok van negen regels stond op zes pagina's byte-identiek. Hier iets wijzigen
            doet dus niets meer — pas het daar aan. */
@@ -204,7 +227,7 @@
                                 <input class="form-check-input" type="checkbox" id="dryRunToggle" checked>
                                 <label class="form-check-label" for="dryRunToggle">Dry run</label>
                             </div>
-                            <button class="btn" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.4rem 2.5rem;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runBudgets()" id="runBtn">
+                            <button class="btn btn-run" style="padding: 0.4rem 2.5rem;" onclick="runBudgets()" id="runBtn">
                                 Run
                             </button>
                             <button class="btn btn-danger" id="cancelBtn" onclick="cancelRun()" style="display: none; padding: 0.4rem 1.5rem;">
@@ -224,7 +247,7 @@
                         <div class="card-header" style="background: #5e4a90; color: white;">
                             <h5 class="mb-0 d-flex justify-content-between align-items-center">
                                 Results
-                                <button class="btn btn-sm" style="border: 1px solid rgb(94, 74, 144); color: rgb(94, 74, 144); background: white;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='white';this.style.color='#5e4a90'" onclick="exportCsv()">Export</button>
+                                <button class="btn btn-sm btn-outline-purple" onclick="exportCsv()">Export</button>
                             </h5>
                         </div>
                         <div class="card-body">
@@ -295,10 +318,10 @@
             'c-verlagen-20': 'C-campagne verlagen -20%',
         };
         const ACTION_BADGE_CLASS = {
-            'verhogen-20': 'badge-increase',
-            'verlagen-20': 'badge-decrease',
-            'verlagen-25': 'badge-decrease',
-            'c-verlagen-20': 'badge-stuck',
+            'verhogen-20': 'lbl lbl-green',
+            'verlagen-20': 'lbl lbl-red',
+            'verlagen-25': 'lbl lbl-red',
+            'c-verlagen-20': 'lbl lbl-amber',
         };
 
         window.addEventListener('DOMContentLoaded', () => {
@@ -503,7 +526,7 @@
             meta.innerHTML = `
                 <small class="text-muted">
                     Run #${data.run_id} | <strong>${data.country || 'NL'}</strong>
-                    | ${data.dry_run ? '<span class="badge" style="border: 1px solid #b45309; color: #b45309; background: transparent;">DRY RUN</span>' : '<span class="badge" style="border: 1px solid #d63031; color: #d63031; background: transparent;">LIVE</span>'}
+                    | ${data.dry_run ? '<span class="badge lbl lbl-amber">DRY RUN</span>' : '<span class="badge lbl lbl-red">LIVE</span>'}
                     | Shops: ${data.shops_evaluated}
                     | SA360 window: ${window}
                     | Duration: ${data.duration_seconds}s
@@ -514,13 +537,13 @@
             const s = data.summary || {};
             const badges = document.getElementById('summaryBadges');
             badges.innerHTML = `
-                <span class="badge badge-increase">verhogen-20: ${s['verhogen-20'] || 0}</span>
-                <span class="badge badge-decrease">verlagen-20: ${s['verlagen-20'] || 0}</span>
-                <span class="badge badge-decrease">verlagen-25: ${s['verlagen-25'] || 0}</span>
-                <span class="badge badge-stuck">c-verlagen-20: ${s['c-verlagen-20'] || 0}</span>
-                <span class="badge" style="border: 1px solid #2d3436; color: #2d3436; background: transparent;">missed: ${s.missed || 0}</span>
-                <span class="badge" style="border: 1px solid #2d3436; color: #2d3436; background: transparent;">no action: ${s.no_action || 0}</span>
-                <span class="badge" style="border: 1px solid #2d3436; color: #2d3436; background: transparent;">budget mutations: ${s.budget_changed || 0}</span>
+                <span class="badge lbl lbl-green">verhogen-20: ${s['verhogen-20'] || 0}</span>
+                <span class="badge lbl lbl-red">verlagen-20: ${s['verlagen-20'] || 0}</span>
+                <span class="badge lbl lbl-red">verlagen-25: ${s['verlagen-25'] || 0}</span>
+                <span class="badge lbl lbl-amber">c-verlagen-20: ${s['c-verlagen-20'] || 0}</span>
+                <span class="badge lbl lbl-ink">missed: ${s.missed || 0}</span>
+                <span class="badge lbl lbl-ink">no action: ${s.no_action || 0}</span>
+                <span class="badge lbl lbl-ink">budget mutations: ${s.budget_changed || 0}</span>
             `;
 
             const tables = document.getElementById('resultTables');

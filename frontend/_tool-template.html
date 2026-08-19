@@ -171,10 +171,9 @@
                                      style="width: 0%; background-color: #00b894;"></div>
                             </div>
                             <div class="mt-2">
-                                <button class="btn btn-sm" id="cancelBtn"
-                                        style="border:1px solid #d63031; color:#d63031; background:transparent;"
-                                        onmouseover="this.style.background='#d63031';this.style.color='white'"
-                                        onmouseout="this.style.background='transparent';this.style.color='#d63031'"
+                                <!-- Destructief = btn-outline-red uit style.css: rood omlijnd, vult vol rood bij
+                                     hover. Nooit eigen hexen of onmouseover-handlers. -->
+                                <button class="btn btn-sm btn-outline-red" id="cancelBtn"
                                         onclick="cancelTool()">Cancel</button>
                             </div>
                         </div>

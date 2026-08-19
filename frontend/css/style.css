@@ -590,17 +590,25 @@ body {
 .btn-outline-danger, .btn-outline-red, .btn-remove, .btn-remove-row,
 .btn-red-outline, .btn-bulk-remove {
     background-color: var(--flat-surface);
-    border-color: #e3b3b3;
+    border-color: #d64545;
     border-width: 1px;
     border-style: solid;
     color: #c03b3b;
 }
+/* Hover = VOL rood met witte tekst, exact dezelfde beweging als .btn-outline-purple
+ * en .btn-outline-orange hierboven. Dit stond hier eerst als een bijna-witte roze
+ * vulling (#fdf0f0 met rood label en rand #e3b3b3 in rust), waardoor de knop bij
+ * hover nauwelijks van kleur veranderde en in rust roze in plaats van rood omlijnd
+ * was — terwijl UI_BLUEPRINT al "red outline, fills red on hover" voorschreef
+ * (Joep, 2026-08-19, over de Remove-knop in Auto-Redirects → Recent runs).
+ * De tekst blijft in rust #c03b3b en niet #d64545: die laatste haalt op wit geen
+ * 4.5:1. De remove-x erft de witte hover-kleur via stroke="currentColor". */
 .btn-outline-danger:hover:not(:disabled), .btn-outline-red:hover:not(:disabled),
 .btn-remove:hover:not(:disabled), .btn-remove-row:hover:not(:disabled),
 .btn-red-outline:hover:not(:disabled), .btn-bulk-remove:hover:not(:disabled) {
-    background-color: #fdf0f0;
+    background-color: #d64545;
     border-color: #d64545;
-    color: #c03b3b;
+    color: #fff;
 }
 
 /* NIET-KLIKBAAR: één grijs, ongeacht welke knopklasse eronder zit. Dit verving vier

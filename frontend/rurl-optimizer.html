@@ -32,9 +32,14 @@
            .badge-cancelled  = the filled run badge above the progress bar. */
         .status-cancelled { border-color: var(--color-button) !important; color: var(--color-button) !important; }
         .badge-cancelled { background-color: var(--color-button); color: #fff; }
-        /* style.css themes .btn-outline-danger to orange, so a destructive button
-           needs an explicit red — and orange is now the 'cancelled' colour in the
-           same table. Disabled would stay grey (never red), per UI_BLUEPRINT. */
+        /* Remove + Cancel dragen de canonieke destructieve knop uit style.css:
+           btn-outline-red = rood omlijnd in rust, vult VOL rood met witte tekst bij
+           hover. Geen eigen kleuren hier — die stonden eerder wel op deze pagina
+           omdat btn-outline-danger toen oranje was; die groep is nu ook rood.
+           Oranje is in deze tabel de 'cancelled'-status, dus een oranje knop
+           ernaast zou de kolom tegenspreken. Disabled blijft grijs (nooit rood),
+           per UI_BLUEPRINT; de regel hieronder haalt alleen Bootstraps opacity
+           weg zodat dat grijs vlak is. */
         .btn-remove:disabled { opacity: 1; }
         /* Round checkboxes to match the radio buttons above (File upload / Redshift / Manual input). */
         .form-check-input[type="checkbox"] { border-radius: 50%; }
@@ -184,7 +189,7 @@
                                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                                     <span id="refreshFacetsLabel">Refresh facets</span>
                                 </button>
-                                <button type="button" class="btn btn-outline-danger d-none" id="cancelBtn">Cancel</button>
+                                <button type="button" class="btn btn-outline-red d-none" id="cancelBtn">Cancel</button>
                                 <button type="submit" class="btn btn-primary" id="runBtn">Run</button>
                             </div>
                         </form>
@@ -224,7 +229,7 @@
                 <div class="card mb-4">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Recent runs</h5>
-                        <a href="/api/rurl/export-all" class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" title="Download every URL ever processed (deduped, one row per URL) from the rurl_processed cache.">Export all</a>
+                        <a href="/api/rurl/export-all" class="btn btn-sm btn-outline-purple" title="Download every URL ever processed (deduped, one row per URL) from the rurl_processed cache.">Export all</a>
                     </div>
                     <div class="card-body">
                         <div class="tool-table-wrap">
@@ -502,7 +507,7 @@
                     ? `<a href="${h._base}/download/${h.task_id}" class="btn btn-sm btn-outline-purple" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">Export</a>`
                     : '';
                 const rm = h.task_id
-                    ? `<button type="button" class="btn btn-sm btn-outline-danger btn-remove" data-rm-base="${h._base}" data-rm-task="${h.task_id}" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">Remove</button>`
+                    ? `<button type="button" class="btn btn-sm btn-outline-red btn-remove" data-rm-base="${h._base}" data-rm-task="${h.task_id}" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">Remove</button>`
                     : '';
                 const actions = (dl || rm)
                     ? `<div style="display: inline-flex; gap: 4px; align-items: center;">${dl}${rm}</div>`

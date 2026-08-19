@@ -272,10 +272,10 @@
                             <label class="form-check-label" for="modeInclude">Include only these shops</label>
                         </div>
                         <div class="mt-auto pt-3 d-flex justify-content-end gap-2">
-                            <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; padding: 0.25rem 0.6rem; min-width: 70px;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="previewScript()" id="previewBtn">
+                            <button class="btn btn-sm btn-outline-purple" style="padding: 0.25rem 0.6rem; min-width: 70px;" onclick="previewScript()" id="previewBtn">
                                 Preview
                             </button>
-                            <button class="btn btn-sm" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.25rem 0.6rem; min-width: 70px;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runScript()" id="runBtn">
+                            <button class="btn btn-sm btn-run" style="padding: 0.25rem 0.6rem; min-width: 70px;" onclick="runScript()" id="runBtn">
                                 Run
                             </button>
                         </div>
@@ -402,8 +402,8 @@
                             <label class="form-check-label" for="llModeInclude">Include only these shops</label>
                         </div>
                         <div class="mt-auto pt-3 d-flex justify-content-end gap-2">
-                            <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; padding: 0.25rem 0.6rem; min-width: 70px;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="runLowLinkage(true)" id="llPreviewBtn">Preview</button>
-                            <button class="btn btn-sm" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.25rem 0.6rem; min-width: 70px;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runLowLinkage(false)" id="llRunBtn">Run</button>
+                            <button class="btn btn-sm btn-outline-purple" style="padding: 0.25rem 0.6rem; min-width: 70px;" onclick="runLowLinkage(true)" id="llPreviewBtn">Preview</button>
+                            <button class="btn btn-sm btn-run" style="padding: 0.25rem 0.6rem; min-width: 70px;" onclick="runLowLinkage(false)" id="llRunBtn">Run</button>
                         </div>
                     </div>
                 </div>
@@ -1265,7 +1265,7 @@
                 const chevL = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>';
                 const chevR = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>';
                 const selInfo = selectable ? '<span class="text-muted" id="llPreviewSelectedInfo" style="font-size: 0.85rem;"></span>' : '';
-                const runSelBtnHtml = selectable ? `<button class="btn btn-sm" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.25rem 0.6rem; min-width: 70px;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runSelectedLowLinkage()" id="llRunSelectedBtn">Run selected</button>` : '';
+                const runSelBtnHtml = selectable ? `<button class="btn btn-sm btn-run" style="padding: 0.25rem 0.6rem; min-width: 70px;" onclick="runSelectedLowLinkage()" id="llRunSelectedBtn">Run selected</button>` : '';
                 const selectAllTh = selectable ? '<th style="width: 2.5rem; text-align: center;"><input type="checkbox" id="llPreviewSelectAll" title="Select all (filtered)" onclick="togglePreviewSelectAll(this.checked)"></th>' : '';
                 html += `
                 <div class="filter-row d-flex gap-2 align-items-center mt-2 mb-2">
@@ -1982,13 +1982,12 @@
             if (!kind) { el.innerHTML = ''; return; }
             if (kind === 'shops') { el.innerHTML = renderShopsSummary(previewByShop); return; }
             // create / pause / skip -> filtered campaigns table with controls
-            const hover = "onmouseover=\"this.style.background='#5e4a90';this.style.color='white'\" onmouseout=\"this.style.background='transparent';this.style.color='#5e4a90'\"";
             el.innerHTML = `
                 <div class="d-flex align-items-center gap-2 mt-3 mb-2">
                     <input type="text" class="form-control form-control-sm" style="max-width:260px;" placeholder="Filter campaigns..." id="gsdPreviewFilter" value="${escapeHtml(previewFilterText || '')}" oninput="onPreviewFilter(this.value)">
                     <div class="ms-auto d-flex gap-2">
-                        <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" ${hover} onclick="exportGsdPreviewXlsx()">Export Excel</button>
-                        <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" ${hover} onclick="copyPreviewForExcel()" id="gsdPreviewCopyBtn">Copy for Excel</button>
+                        <button class="btn btn-sm btn-outline-purple" onclick="exportGsdPreviewXlsx()">Export Excel</button>
+                        <button class="btn btn-sm btn-outline-purple" onclick="copyPreviewForExcel()" id="gsdPreviewCopyBtn">Copy for Excel</button>
                     </div>
                 </div>
                 <div id="gsdPreviewTableInner"></div>`;
@@ -2113,7 +2112,7 @@
                     <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" id="runBar" style="width:0%; background-color:#00b894;"></div>
                 </div>
                 <div class="mt-2">
-                    <button class="btn btn-sm" id="runCancelBtn" style="border:1px solid #d63031; color:#d63031; background:transparent;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'" onclick="cancelRun()">Cancel</button>
+                    <button class="btn btn-sm btn-outline-red" id="runCancelBtn" onclick="cancelRun()">Cancel</button>
                 </div>`;
 
             // Poll per-shop run progress while the run executes.
@@ -2232,7 +2231,6 @@
             const heading = d.cancelled
                 ? '<div class="fw-bold mb-2 text-warning">Cancelled — stopped early.</div>'
                 : '<div class="fw-bold mb-2 text-success">Done!</div>';
-            const hover = "onmouseover=\"this.style.background='#5e4a90';this.style.color='white'\" onmouseout=\"this.style.background='transparent';this.style.color='#5e4a90'\"";
             return `
                 ${heading}
                 <div class="d-flex flex-wrap gap-3 mb-2">
@@ -2250,8 +2248,8 @@
                 <div class="d-flex align-items-center gap-2 mt-3 mb-2">
                     <input type="text" class="form-control form-control-sm" style="max-width:260px;" placeholder="Filter..." id="gsdRunFilter" value="${escapeHtml(runResultFilterText || '')}" oninput="onRunResultFilter(this.value)">
                     <div class="ms-auto d-flex gap-2">
-                        <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" ${hover} onclick="exportRunResultXlsx()">Export Excel</button>
-                        <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" ${hover} onclick="copyRunResultForExcel()" id="gsdRunCopyBtn">Copy for Excel</button>
+                        <button class="btn btn-sm btn-outline-purple" onclick="exportRunResultXlsx()">Export Excel</button>
+                        <button class="btn btn-sm btn-outline-purple" onclick="copyRunResultForExcel()" id="gsdRunCopyBtn">Copy for Excel</button>
                     </div>
                 </div>
                 <div id="gsdRunTableWrap"></div>`;
@@ -2429,8 +2427,8 @@
             if (activityPage < 1) activityPage = 1;
             const start = perPage === Infinity ? 0 : (activityPage - 1) * perPage;
             const end = perPage === Infinity ? total : start + perPage;
-            const btnStyle = "border:1px solid #5e4a90; color:#5e4a90; background:transparent; padding:0.1rem 0.6rem; font-size:0.78rem;";
-            const btnHover = "onmouseover=\"this.style.background='#5e4a90';this.style.color='white'\" onmouseout=\"this.style.background='transparent';this.style.color='#5e4a90'\"";
+            // Alleen geometrie inline; de kleur komt van btn-outline-purple.
+            const btnStyle = "padding:0.1rem 0.6rem; font-size:0.78rem;";
             const rows = log.slice(start, end).map(entry => {
                 const time = new Date(entry.time).toLocaleString('nl-NL');
                 const cls = entry.success ? 'log-success' : 'log-error';
@@ -2442,9 +2440,9 @@
                 if (entry.reset) {
                     resetHtml = `<span class="text-muted" style="font-size:0.75rem;">reset</span>`;
                 } else if (hasUndo) {
-                    resetHtml = `<button class="btn btn-sm" title="Pause the ${nCreated} created and re-enable the ${nPaused} paused campaign(s)" style="${btnStyle}" ${btnHover} onclick="resetRun('${entry.id}')">Reset</button>`;
+                    resetHtml = `<button class="btn btn-sm" title="Pause the ${nCreated} created and re-enable the ${nPaused} paused campaign(s)" class="btn-outline-purple" style="${btnStyle}" onclick="resetRun('${entry.id}')">Reset</button>`;
                 } else if (entry.action === 'Run Script') {
-                    resetHtml = `<button class="btn btn-sm" title="Reconstruct this run from Google Ads change history (around ${escapeHtml(time)}), review, then undo" style="${btnStyle}" ${btnHover} onclick="reconstructRun('${entry.id}')">Reset</button>`;
+                    resetHtml = `<button class="btn btn-sm" title="Reconstruct this run from Google Ads change history (around ${escapeHtml(time)}), review, then undo" class="btn-outline-purple" style="${btnStyle}" onclick="reconstructRun('${entry.id}')">Reset</button>`;
                 }
                 return `<tr>
                     <td style="text-align:center; white-space:nowrap;">${time}</td>
@@ -2550,7 +2548,7 @@
                         </table>
                     </div>
                     <div class="mt-2 d-flex gap-2">
-                        <button class="btn btn-sm" style="background:#CC5500; color:white; border:none; padding:0.25rem 1rem;" onclick="applyReconstruct()">Undo these changes</button>
+                        <button class="btn btn-sm btn-run" style="padding:0.25rem 1rem;" onclick="applyReconstruct()">Undo these changes</button>
                         <button class="btn btn-sm btn-outline-secondary" onclick="cancelReconstruct()">Cancel</button>
                     </div>`;
             } catch (err) {
