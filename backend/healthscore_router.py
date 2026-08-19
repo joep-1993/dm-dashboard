@@ -18,9 +18,10 @@ from datetime import date, datetime
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel
 
+from backend import healthscore_runs as hr
 from backend import healthscore_service as hs
 
 logger = logging.getLogger(__name__)
@@ -182,6 +183,125 @@ def run(body: RunIn):
         _executor.submit(_run_job, job_id, hs.compute_shadow, month, body.cap_n)
 
     return {"job_id": job_id, "action": action, "params": params}
+
+
+# --------------------------------------------------------------------------- #
+# Category runs (preview -> push) + run history
+#
+# Two endpoints, two clicks, on purpose: a preview sends nothing, a push replays
+# what that preview stored. See healthscore_runs for why the push does not
+# rebuild. Both are background jobs on the same single worker as the pipeline
+# steps — get_live() alone moves ~17k records for a maincat.
+# --------------------------------------------------------------------------- #
+class CategoryIn(BaseModel):
+    id: int
+    name: str
+    scope: str = "deepest"           # deepest | maincat
+
+
+class PreviewIn(BaseModel):
+    categories: list[CategoryIn]
+    country: str = "nl"
+    include_plp: bool = False
+    preserve_cross_category: bool = True
+    label: Optional[str] = None
+
+
+class PushIn(BaseModel):
+    run_id: int
+    confirm: str                     # must be the literal "REPLACE"
+    category_ids: Optional[list[int]] = None
+
+
+def _guard_idle() -> None:
+    """One heavy job at a time; tell the UI instead of silently queueing."""
+    with _JOBS_LOCK:
+        active = [j for j in _JOBS.values() if j["status"] in ("queued", "running")]
+    if active:
+        raise HTTPException(status_code=409,
+                            detail=f"a {active[0]['action']} job is already running")
+
+
+@router.get("/categories")
+def categories(scope: str = Query("deepest", pattern="^(deepest|maincat)$")):
+    """Picker options. `as_of` is the selection build every run gets pinned to."""
+    try:
+        return {"scope": scope, "as_of": str(hr.latest_as_of() or ""),
+                "rows": hr.list_categories(scope)}
+    except Exception as e:
+        logger.error("categories failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/test-bucket")
+def test_bucket():
+    """The 12 buckets HS2.0 is live on (10 deepest categories + 2 maincats)."""
+    return {"rows": hr.test_bucket(), "as_of": str(hr.latest_as_of() or "")}
+
+
+@router.post("/categories/preview")
+def categories_preview(body: PreviewIn):
+    _guard_idle()
+    cats = [c.model_dump() for c in body.categories]
+    if not cats:
+        raise HTTPException(status_code=400, detail="pick at least one category")
+    params = {"categories": len(cats), "country": body.country,
+              "label": body.label or (cats[0]["name"] if len(cats) == 1 else f"{len(cats)} cats")}
+    job_id = _new_job("preview", params)
+    _executor.submit(_run_job, job_id, hr.preview, cats, None, body.country,
+                     body.include_plp, body.preserve_cross_category, body.label)
+    return {"job_id": job_id, "action": "preview", "params": params}
+
+
+@router.post("/categories/push")
+def categories_push(body: PushIn):
+    """Live write: replaces the sitemap set of every category in the run."""
+    _guard_idle()
+    if body.confirm != "REPLACE":
+        raise HTTPException(status_code=400, detail="type REPLACE to confirm the push")
+    params = {"run_id": body.run_id,
+              "categories": len(body.category_ids or []) or None}
+    job_id = _new_job("push", params)
+    _executor.submit(_run_job, job_id, hr.push_run, body.run_id, body.confirm,
+                     body.category_ids)
+    return {"job_id": job_id, "action": "push", "params": params}
+
+
+@router.get("/runs")
+def runs(limit: int = Query(200, ge=1, le=1000)):
+    try:
+        return {"rows": hr.list_runs(limit)}
+    except Exception as e:
+        logger.error("runs failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/runs/export.csv")
+def runs_export():
+    try:
+        return Response(content=hr.runs_csv(), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition":
+                                 'attachment; filename="healthscore_runs.csv"'})
+    except Exception as e:
+        logger.error("runs export failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/runs/{run_id}")
+def run_detail(run_id: int, include_payload: bool = False):
+    """Full run. The payloads are stripped unless asked for: a maincat payload is
+    ~17k records and the UI only renders the stats, the diff and the coverage."""
+    try:
+        row = hr.get_run(run_id)
+    except Exception as e:
+        logger.error("run detail failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    if not row:
+        raise HTTPException(status_code=404, detail="run not found")
+    if not include_payload:
+        for c in ((row.get("detail") or {}).get("categories") or []):
+            c.pop("payload", None)
+    return row
 
 
 @router.get("/jobs/{job_id}")
