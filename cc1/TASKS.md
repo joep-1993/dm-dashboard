@@ -4,6 +4,79 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-19 — Healthscore-console herzien op ~20 punten van Joep
+
+Commit `6dee44b` op `main` (frontend + backend). Leerpunten in LEARNINGS (zelfde datum),
+vastgelegde regels in UI_BLUEPRINT §Tables, §Buttons, §Labels, §Stat tiles.
+
+- [x] **Categorieselectie is een cascade van twee zoekbare dropdowns** (maincat → categorie).
+      Verving een `<select>` met 3.569 opties naast een los filterveld. Eén component, twee
+      keer gebruikt; de knop draagt `form-select` dus hij is niet van een echte select te
+      onderscheiden. Typen filtert (AND op woorden, naam + maincat + id), ↑/↓, Enter, Esc.
+- [x] **Voortgangsbalk met echte noemer** — één categorie per eenheid, `phase/done/total/what`
+      uit `preview()`/`push_run()` via het job-dict. Prep en finish zijn indeterminate zonder
+      percentage; prep draagt een `step` omdat daar bij één categorie ~3 van 3,5 minuut zit.
+- [x] **De run staat in een eigen kaart** (`#runCard`), zowel na een preview als bij een klik
+      in Recent runs. Voorheen onderin de kaart waar je hem startte én onder de tabel.
+- [x] **Export- en verwijderselectie in Recent runs.** Beide knoppen zetten dezelfde
+      selectiemodus aan en wisselen houdt de vinkjes. Export via `?ids=` naar dezelfde
+      CSV-schrijver (geen tweede kolomdefinitie in de frontend), `POST /runs/delete` laat de
+      snapshots op schijf staan.
+- [x] Push is één oranje knop "Push" met OK/Annuleren i.p.v. uitgetypte REPLACE (de backend
+      blijft zijn token eisen); "Alleen de gekozen categorie" eruit.
+- [x] Dekkingstabel canoniek gemaakt en verdubbeld: hele run onder de totaaltegels
+      (in-set/totalen opgeteld en dán het percentage, zoals `_weighted_cov`) plus per categorie.
+- [x] Tegelrijen op één regel, labels in drie palettes, badge-centrering gemeten, alles/niets
+      als selectievakje met halve staat, testcats alfabetisch in drie kolommen, dode CSS eruit
+      (`.hs-head`, `.chip`, `.hs-table`, `.spinner-inline`).
+- [x] `.btn-outline-red.active` toegevoegd aan de gedeelde active-groep in `style.css` — zonder
+      die selector was een actieve destructieve knop zwart (Bootstraps eigen `.btn.active`).
+- [ ] **Outline-knoppen in een kaartkop app-breed transparant maken.** Nu alleen in Healthscore;
+      de drie groepen zetten `background-color: var(--flat-surface)` = wit, en op `--flat-panel`
+      leest dat als een wit blokje. Eén regel in `style.css` + de hover ernaast, en dan alle
+      kaartkoppen in één keer. Joep beslist. #priority:low
+- [ ] **`.tool-table td` padding gelijk aan de kop, app-breed.** Nu pagina-regel in Healthscore.
+      Waarden staan overal 10px links van hun kop (`th` 6px/14px, `td` 4px van `.table-sm`).
+      Bredere cellen verschuiven kolombreedtes op 35 pagina's, dus meten vóór uitrollen.
+- [ ] Optioneel, als Joep het tóch wil: previews uit Recent runs filteren. Nu blijven ze staan,
+      want een push start altijd vanuit een bestaande preview-run — zonder die rij kun je later
+      niet meer pushen. Eén filterregel in `/runs`.
+- [ ] Nog steeds open uit de vorige ronde: de tweede tegelrij van een run met één categorie
+      herhaalt de totaaltegels. Onschuldig, maar het leest als twee metingen.
+
+### 2026-08-19 — Parfumerie-facetvalues zonder SEO-visits + bug in SEO-facetlinking
+
+Analyse-sessie, geen code in de repo. Volledige uitwerking:
+**`cc1/SEO_FACETLINKS_DEPENDENT_FACETS.md`**; kortere versie in LEARNINGS (zelfde datum).
+
+- [x] **Uitdraai opgeleverd**: `Downloads\claude\Parfumerie_facetvalues_zonder_SEO_visits_20260819.xlsx`.
+      Populatie = facet value met `seoPriority=true` én cat/facet `seoPriority=true` in maincat
+      Parfumerie (29000) = **3.802 values**. Venster 19-02-2025 t/m 18-08-2026, `fct_visits` +
+      `dim_visit`, `is_real_visit=1`, alle domeinen. **1.956 (51%) zonder SEO-visit**: tab 1 =
+      1.775 zonder visit op álle kanalen, tab 2 = 181 met alleen niet-SEO-traffic (420 visits).
+      Derde tab documenteert methode + caveats.
+- [x] **Collectie-URL's aangevuld met hun parent-merk** (kolom L resp. U): `type_parfum` werkt
+      alleen als `merk~<merkId>~~type_parfum~<id>`. 485 van de 641 Collectie-rijen hebben een
+      merk (bronnen: producten, `pa.urls`, bezochte URL's, historische `dim_visit`-URL's,
+      GSC-URL's — bron staat per rij in de sheet); 156 niet, want 0 producten én nooit een URL.
+- [x] **Bug gevonden en gemeten**: `seoPriority` zet facet values in een `<noscript>`-blok voor
+      Googlebot, maar de site leest `isSeoFacet` uit ProductSearch v2 en die staat voor
+      **dependent facetten** altijd `false`. Downstream is alles correct
+      (`tbl_CS_Cat_Column_Order.seo_prio=1`, slot aanwezig), dus de breuk zit in de projectie /
+      indexering van ProductSearch v2. Platformbreed: 3432 (Parfumerie), 3821 (Schoenen),
+      5514 (Laptops).
+- [ ] **Ticket uitzetten bij eigenaar ProductSearch v2 / de indexer.** Bewijsregels staan in
+      `SEO_FACETLINKS_DEPENDENT_FACETS.md` §2 + reproduce-commando's. Niet zelf te fixen: de API
+      is read-only (17 endpoints, allemaal GET). #priority:high
+- [ ] **Apart, lager**: dependency-registratie (`/api/Facets/{id}/value-dependencies`) staat stil
+      sinds de migratie van 2026-01-27 — Armani (234 producten met collectie-waarden) en ARMAF
+      BEAUTÉ ontbreken, 41 van de 197 registraties zijn leeg. Geen write-endpoint; enige route is
+      een volledige maincat-import (`POST /api/Import/sessions` → review → `/commit`).
+- [ ] **Opruimen op basis van de uitdraai**: 1.011 values met 0 producten + 16 die niet meer in de
+      zoekindex bestaan kunnen op `seoPriority=false` (GET-merge-PUT met flat body).
+- [ ] Optioneel: kolom "laatste echte visit ooit" toevoegen — steekproef gaf één value (V Canto)
+      met z'n laatste visit op 2025-02-02, 17 dagen vóór de venstergrens.
+
 ### 2026-08-19 — Healthscore als categorie-console + de knoppen door de hele app
 
 Twee commits op `main`: `6961d7f` (style/ui) en `42577e7` (feat/healthscore).

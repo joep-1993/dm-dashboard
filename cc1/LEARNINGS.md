@@ -1,6 +1,112 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Drie dingen die een schermshot vertelde en de code niet (2026-08-19)
+
+Een ronde van ~20 UI-punten op Healthscore. De drie die tijd kostten of tijd gaan schelen,
+allemaal gevonden met het schermshot-recept uit [[2026-08-17]] (`--screenshot` via Windows
+Chrome) en niet met lezen.
+
+**1. `--virtual-time-budget` bevriest CSS-transitions op hun STARTWAARDE.** De Preview-knop
+schoot van `disabled` naar enabled, en fotografeerde grijs. `getComputedStyle` gaf óók grijs
+terug: `rgb(244,245,249)` (= `--flat-panel`, de disabled-vulling) terwijl `b.disabled === false`
+en de enige matchende regel `.btn-run { background-color: var(--color-button) }` was. Ik heb
+drie probes verspild aan "welke regel wint hier" voordat de oorzaak duidelijk werd:
+`.btn-run` draagt `transition: background-color 0.2s ease`, en die animatieklok loopt niet mee
+met virtual time — dus de kleur blijft op t=0 staan, in de meting én in de PNG. Recept: zet in
+de probe `* { transition: none !important }` in een `<style>` vóór je klikt of meet. Daarna
+mat hetzelfde element `rgb(204,85,0)`. Zelfde categorie fout als "de gerenderde kleur meten in
+plaats van de inline stijl lezen": hier is de meting zelf het instrument dat liegt.
+
+**2. `[hidden]` verliest van Bootstraps `.d-flex`, dus een verborgen balk staat open.** De
+selectiebalk boven Recent runs (`class="d-flex … " hidden`) stond op een kale pagina permanent
+open, mét verborgen selectiekolom — een half aangezette modus. Bootstraps reboot heeft
+`[hidden] { display: none !important }`, maar de display-utility `.d-flex { display: flex
+!important }` staat LATER in diezelfde stylesheet en heeft dezelfde specificiteit (0,1,0), dus
+die wint. Fix hier: `#exportBar[hidden] { display: none !important }` (id verslaat beide).
+Waarom het bij de run-kaart wél werkte: `.card` zet `display: flex` **zonder** `!important`,
+en dan is `[hidden]` de enige belangrijke regel die meedoet. Dus de regel is: combineer
+`hidden` nooit met een `d-*`-utility — of toggle `d-none` in plaats van het attribuut.
+
+**3. Kop en cel hadden verschillende padding, in élke tool.** `.tool-table th` in `style.css`
+draagt `padding: 6px 14px`; een `td` krijgt de 4px van Bootstraps `.table-sm`. Dus staat elke
+waarde 10px links van zijn eigen kop. Bij rechts uitgelijnde getallen zie je het niet, bij een
+linkse tekstkolom wel — Joep zag het in de dekkingstabel ("de URL type-waarden zijn niet
+uitgelijnd met de header"). Staat nu als pagina-regel in Healthscore en als open punt voor de
+hele app in TASKS: bredere cellen verschuiven de kolombreedtes van 35 pagina's, dus dat is een
+eigen ronde. Zie UI_BLUEPRINT §Tables.
+
+## De noemer van een healthscore-run is een categorie, en de meeste tijd zit vóór de lus (2026-08-19)
+
+Joep wilde een voortgangsbalk in plaats van de regel "preview bezig — dit duurt even". Een bar
+zonder noemer is geen bar, dus eerst de vraag wat je telt. Records per categorie weet je pas ná
+het bouwen, dus de enige noemer die bestaat vóór de run is **het aantal categorieën**;
+`preview()` en `push_run()` rapporteren nu `phase/done/total/what` via een callback die
+`healthscore_router` aan het job-dict hangt, en `GET /jobs/{id}` draagt dat mee. De teller loopt
+pas op nadat een categorie op de resultatenlijst staat — anders loopt de balk vooruit op wat er
+is berekend.
+
+**Wat de meting daarna liet zien, is het interessante deel.** Bij een run van één categorie zit
+~3 van de 3,5 minuut in de fase VÓÓR de lus: `fetch_page_headings` + `seo_visits_by_type`, twee
+ondeelbare Redshift-calls. De determinate balk is daar dus een kwart seconde zichtbaar en de
+rest van de tijd staat er een indeterminate balk. Dat is eerlijk (UI_BLUEPRINT: nooit een volle
+balk tijdens een fase die nog loopt), maar één statisch label voor drie minuten zegt niets — dus
+die fase draagt nu een `step` (`headings` → `visits`) en de balk wisselt van label op dezelfde
+positie. Bij de testbucket (12 categorieën) verschuift de verhouding en telt de lus wél.
+
+Twee dingen om te weten bij de volgende backend-wijziging hier: de uvicorn draait **zonder
+`--reload`**, dus zo'n verandering is kill+relaunch, en één worker betekent dat je dat alleen
+mag doen als er geen job loopt (`GET /api/healthscore/jobs`, kijk op `queued|running`). Een
+restart midden in een preview laat de run-rij voor altijd op `running` staan.
+
+## seoPriority zet noscript-facetlinks; voor dependent facetten komt die vlag nooit aan (2026-08-19)
+
+Volledige uitwerking: **`cc1/SEO_FACETLINKS_DEPENDENT_FACETS.md`**.
+
+`CategoryFacetSettings.seoPriority` is **interne linkbuilding**: staat het facet aan in een
+categorie, dan worden de facet values in een `<noscript>`-blok gelinkt zodat Googlebot (crawlt
+zonder JS) ze volgt. Het is geen UI-vlag en geen robots-hint — dat verschil is precies waar ik
+deze sessie twee keer de verkeerde conclusie op trok.
+
+**De site linkt op `isSeoFacet` uit ProductSearch v2, niet op de taxonomie.** Gemeten op
+`/products/parfum_aftershave/parfum_aftershave_422758/c/merk~422868`: het noscript-blok had 16
+links over precies de vier facetten met `isSeoFacet=true` (merk, geslacht_parfum,
+inhoud_parfum_ml, verpakking) en **0** voor `type_parfum`, dat `seoPriority=true` heeft maar
+`isSeoFacet=false`. Ook de twee facetten met `seoPriority=null` (geurnoot, kenmerken) staan op
+false en worden niet gelinkt: 1-op-1 correspondentie met `isSeoFacet`.
+
+**Dependent (child) facetten zijn de verliezers.** Collectie 3432 (Parfumerie),
+type_productlijn 3821 (Schoenen, 15 van de 21 categorieën op seoPriority=true) en Modelnaam 5514
+(Laptops) hebben in **geen enkele** categorie een rij in `GET /api/CategoryFacets`, en alle drie
+`isSeoFacet=false`. Ze verschijnen wél in de Search-API-facetlijst zodra een **geregistreerde**
+parent-waarde gefilterd is — dat is ook de truc om de child→parent-mapping op te halen (één call
+per merk; met filter actief is de merk-facetlijst niet op 100 getrunceerd).
+
+**Waar het NIET misgaat** (hypotheses die ik zelf heb omgegooid, niet opnieuw onderzoeken):
+de taxonomie staat goed (`seoPriority=true` in alle 7 Parfumerie-categorieën, één bulk-edit
+2026-03-25), de pagina's leven (HTTP 200, ~2.700 SEO-visits/maand), en **de back-sync doet zijn
+werk**: in legacy MySQL `beslist.tbl_CS_Cat_Column_Order` staat voor 3432 `seo_prio=1` in alle
+zeven categorieën (3821: 60 rijen), plus een slot in `tbl_CS_Cat_Column_Slots`. Die tabel
+spiegelt `CategoryFacetSettings` exact. De breuk zit dus in de **projectie/indexering van
+ProductSearch v2** — en dat is niet zelf te fixen: die API is read-only (spec inline in de
+root-HTML, 17 endpoints, allemaal GET) en `isSeoFacet` is een afgeleide waarde.
+
+**Meetrecept dat dit soort vragen beslecht**: pagina ophalen met een echte browser-UA (zonder UA
+of na veel requests krijg je HTTP 202/405 bot-challenge), `<noscript>…</noscript>` eruit halen en
+de `href`'s groeperen op facet-slug; dat naast de `isSeoFacet`-waarden uit dezelfde
+Search-API-context leggen. Let op dat er **buiten** het noscript ook echte `<a href>`-facetlinks
+staan (related/populair-blokken: 102 in de HTML tegen 16 in het noscript) — die verklaren
+restant-traffic maar zijn geen facetlinking.
+
+**Bijvangst, generiek bruikbaar:** (a) een ongeldige facet-slug/value geeft **HTTP 400 met een
+`errors`-payload** — `curl` toont die body, `urllib` gooit een `HTTPError` en je verliest hem
+(kostte 1.745 valse "http_error"-statussen in de eerste run); `errorCode 200` = facet onbekend,
+`300` = value onbekend, en een bestaande value zonder producten geeft gewoon `total: 0`.
+(b) Lees de AND-count met **`limit=0`**: dezelfde call gaf bij limit 20 een OR-fallback (total
+5044 i.p.v. 7). (c) Bij URL-matching op `dim_visit` ook `www.shopcaddy.de` met percent-encoded
+Duitse slugs meenemen (`parf%c3%bcm_aftershave`, `marke~`) en matchen op **facet value ID**, niet
+op slug — slugs zijn hernoemd (`geurnoot` was `geurfamilie`).
+
 ## Een naam die maar in één tak bestaat, sloopt in een pool de hele run (2026-08-19)
 
 `main_parallel_v2.py` klapte na drie uur op `UnboundLocalError: cannot access local

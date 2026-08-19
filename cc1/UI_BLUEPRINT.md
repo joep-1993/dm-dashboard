@@ -89,7 +89,17 @@ other tool uses the grey default. New tools follow the grey default.
 - `<table class="table table-sm table-hover tool-table">`, `<thead class="table-light">`.
 - Header cells: **grey `#f8f9fa`**, sticky, `padding:6px 14px`, **font-size `1rem`**
   (headers are a touch larger than the `0.9rem` body).
-- Body cells: `font-size:0.9rem`, `vertical-align:middle`.
+- Body cells: `font-size:0.9rem`, `vertical-align:middle`, **en dezelfde horizontale
+  padding als de kop**. Dit is de val die op 2026-08-19 in Healthscore boven kwam
+  ("de waarden staan niet onder hun kop"): `.tool-table th` in `style.css` draagt
+  `padding: 6px 14px`, maar een `td` krijgt zijn padding van Bootstraps
+  `.table-sm > :not(caption) > * > *` = **4px**. Elke waarde staat dan 10px links van
+  zijn eigen kop, het meest zichtbaar in een linkse tekstkolom (Gestart, URL type) —
+  bij rechts uitgelijnde getallen valt het niet op, en daarom heeft niemand het jaren
+  gezien. Fix is één regel: `.tool-table th, .tool-table td { padding: 6px 14px; }`.
+  **Die staat bewust nog per pagina en niet in `style.css`**: bredere cellen verschuiven
+  de kolombreedtes van elke tabel in de app tegelijk, en dat is een eigen ronde met een
+  eigen meting. Wie het gelijktrekt, doet het app-breed in één keer.
 - **Column widths — pick one strategy, and a value must never bleed into the next column:**
   - *Fixed widths (stable on sort):* `table-layout:fixed; width:100%` + an explicit
     width on every column (a `.col-*` class per `<th>`; `width:36px` for the checkbox,
@@ -485,6 +495,24 @@ deze volgorde:
 Onder ~1400px venster wikkelt zo'n rij van acht alsnog, en dat moet ook — daar is de kolom
 ~916px en dan is 107px per tegel te smal voor het getal.
 
+**Bij een rij die een RENDERER vult, reken je niet na maar leg je de rij vast** (Healthscore,
+2026-08-19). `repeat(auto-fill, minmax(132px, 1fr))` liet daar de achtste tegel op een tweede
+regel vallen, en die las meteen als een andere soort tegel. Het aantal tegels verschilt per
+run (acht bij een preview, vijf bij een push), dus een `min-width` narekenen werkt maar voor
+één van de twee:
+
+```css
+.stat-row { display: grid; grid-auto-flow: column;
+            grid-auto-columns: minmax(0, 1fr); gap: 8px; }
+```
+
+`grid-auto-flow: column` legt altijd één rij neer, hoeveel tegels de renderer ook meegeeft, en
+de `minmax(0, …)` houdt de rij binnen de kaart in plaats van hem door een lang getal breder te
+laten worden. Wat je dan nog wél moet narekenen is of het langste GETAL past: acht tegels in
+1010px met 8px gap geeft 119px, en daar past `1.299` / `39,7%` / `35.866` op 1,3rem
+tabular-nums. Bij een getal van acht cijfers is dit dus de verkeerde keuze en hoort de rij te
+wikkelen.
+
 The canonical KPI tile is `.stat-card` as defined in `gsd-budgets.html`, and it is
 **value-first**: the number on top in brand purple, the label under it, an optional
 `.detail` line under that. No border — a 12px radius plus a soft purple shadow
@@ -686,6 +714,14 @@ Gebruikt een pagina radio's in plaats van een `.active`-klasse
 (`.btn-check:checked + .btn`), dan geldt deze regel niet: die combinatie is Bootstrap's eigen
 selector en de pagina regelt hem zelf (SEO Stats' segmented control doet dat).
 
+**De destructieve knop stond niet in die groep, en dat was ZWART** (2026-08-19, Healthscore's
+Verwijder-knop, die met `.active` zijn selectiemodus markeert). `.btn-outline-red.active` en
+`.btn-outline-danger.active` misten in de regelgroep, dus zo'n knop viel terug op Bootstraps
+eigen `.btn.active` — en die zet voor een knop zónder Bootstrap-variant `--bs-btn-active-color`
+op de bodykleur: zwarte rand, zwart label. Gemeten, niet geraden: `color=rgb(26,29,25)`. Beide
+selectors staan er nu bij, dus een actieve rode knop draagt dezelfde paarse aan-staat als de
+rest. Geen andere pagina combineerde die klassen, dus dit veranderde nergens iets anders.
+
 **Verzin geen nieuwe knopklasse.** De aliassen die pagina's zelf hebben bedacht
 (`.btn-purple-outline`, `.btn-purple-action`, `.btn-hs-outline`, `.btn-tool` → paars;
 `.btn-orange-action` → oranje; `.btn-preset`, `.btn-bulk-*` → grijs) zijn in `style.css` aan
@@ -726,6 +762,15 @@ hierboven. Consequences:
   or white outline "so it shows on the purple header" is compensating for a colour that
   never paints, and reads as a different button from every other Refresh (Joep, 2026-07-31:
   *"the Refresh button in Performance per day should be transparent (is now white)"*).
+* **Maar "transparent" is niet wat `style.css` doet, en dat scheelt zichtbaar** (Joep,
+  2026-08-19). De drie outline-groepen zetten `background-color: var(--flat-surface)` =
+  `#ffffff`, en op een kaartkop (`--flat-panel`, `#f4f5f9`) leest dat als een wit blokje om
+  de knop — precies wat dit blueprint hierboven verbiedt. In Healthscore staat nu een
+  pagina-regel `.card-header .btn-outline-purple, .card-header .btn-outline-orange
+  { background-color: transparent; }` **met de hover er expliciet naast** (zie de corollary
+  hieronder: zonder die herhaling kan een kale override ook op hover winnen). Dit geldt voor
+  élke kaartkop in de app; app-breed gelijktrekken is één regel in `style.css` en staat als
+  open punt in `cc1/TASKS.md`.
 * Before styling anything **against** a header colour, check the rendered colour in the
   browser (or a headless screenshot), not the inline style in the HTML.
 * **Een knopvariant "voor op donker" is per definitie verdacht.** URL Validator had
@@ -926,6 +971,15 @@ hoogte verandert:
 .summary-badges .badge { font-size: .85rem; padding: 0.47rem 0.75rem 0.53rem; }  /* +1,000 → 0,000px */
 #resultTables h6 .badge { padding: 0.3em 0.65em 0.4em; }                          /* +1,250 → 0,125px */
 ```
+
+Derde gemeten context, en die geldt voor het UPPERCASE outline-label van §"Category
+labels" (Healthscore, 2026-08-19): `.lbl` op `font-size: 0.7rem` met symmetrische
+`0.2em 0.55em` zet de tekst **+1,250px** te laag. Ladder: .20/.20 → +1,250 · .18/.22 →
++0,875 · .16/.24 → +0,375 · .15/.25 → **+0,125** · .13/.27 → −0,250px. Dus
+`padding: 0.15em 0.55em 0.25em`, som 0,4em, en de labelhoogte blijft 14,5px in alle
+varianten. Let op dat kleinkapitaal hier niets makkelijker maakt dan het lijkt: er zijn
+geen staartletters, dus de basislijn is de onderkant van de ink — maar de scheve em-doos
+van `line-height: 1` zit er nog net zo in.
 
 De correctie is ~0,06rem bij 0,85rem tekst en ~0,10em op de kleinere kop-badge; de
 reeks .50/.49/.485/.475/.47 mat +1,000 / +0,750 / +0,625 / +0,250 / 0,000px, dus het

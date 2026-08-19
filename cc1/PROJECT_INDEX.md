@@ -23,6 +23,17 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   │   #   _ALL_JOIN/_ALL_WHERE  = cap-sizing (knik-punt + klimatologie). Alle kanalen.
 │   │   # pa.hs2_cat_month en pa.hs2_cat_knee.yearly zijn ALL-CHANNEL -> nooit als dekkingsnoemer
 │   │   # gebruiken (Grasmaaiers juni-2026: 6.915 all-channel vs 2.081 SEO). Zie LEARNINGS 2026-08-06.
+│   ├── healthscore_runs.py   # HS2.0 run-orkestratie + historie (pa.hs2_runs): preview() bouwt/valideert/difft
+│   │   # en meet dekking per URL-type; push_run() REPLAYT de payload die díe preview opsloeg (nooit
+│   │   # herbouwen: fetch_page_headings leest een rollend 365d-venster, dus een anker kan tussen de
+│   │   # twee kliks veranderen). delete_runs() laat de snapshots op schijf staan. Beide runners
+│   │   # rapporteren voortgang via een `progress`-callback; de EENHEID IS ÉÉN CATEGORIE, want records
+│   │   # per categorie weet je pas na het bouwen (LEARNINGS 2026-08-19).
+│   ├── healthscore_router.py # /api/healthscore: categories, test-bucket, preview/push als achtergrondjob
+│   │   # op ÉÉN worker (_guard_idle geeft 409 als er al iets loopt), /jobs/{id} met progress,
+│   │   # /runs(+/{id}), /runs/export.csv?ids= (zelfde CSV-schrijver voor alles en voor een selectie),
+│   │   # POST /runs/delete. Uvicorn draait zonder --reload -> een wijziging hier is kill+relaunch,
+│   │   # en alleen als er geen job loopt.
 │   ├── bothits_ingest.py     # Bot Hits: CloudFront .gz -> pa.bothits_* (parser, dedupe, daily Timer-scheduler, CLI)
 │   │   # KORREL IS GEMETEN, NIET GEKOZEN — zie cc1/BOTHITS_PROCESS.md:
 │   │   #   volledige URL-korrel = 154M rijen/116d; week/maand bespaart ~10% (compressie 1,05x)
@@ -660,5 +671,14 @@ Maps dead `/r/` search URLs to the best facet-filtered category page. Two pipeli
 
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
+- **cc1/SEO_FACETLINKS_DEPENDENT_FACETS.md** — wat `seoPriority` doet (noscript-facetlinks voor
+  Googlebot), de bug waardoor dependent facetten die links nooit krijgen (`isSeoFacet=false` in
+  ProductSearch v2 terwijl legacy `tbl_CS_Cat_Column_Order.seo_prio=1`), het meetrecept, en de
+  Parfumerie-uitdraai van facetvalues zonder SEO-visits. Bevat ook de Taxonomy/Search-API-gotchas:
+  Search API is read-only, HTTP 400 met errors-payload, `limit=0` voor de AND-count, en de truc om
+  een child-facet te lezen door op zijn parent te filteren.
+- **cc1/BOTHITS_PROCESS.md** — CloudFront bot-logs: korrelkeuze, S3-retentie, ingest.
+- **cc1/GSD_LL_MYSTERY_RUN.md** — GSD low-linkage mystery run + kill switch.
+
 ---
-_Last updated: 2026-05-27 (session 2)_
+_Last updated: 2026-08-19_
