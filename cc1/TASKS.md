@@ -33,10 +33,24 @@ Twee commits op `main`: `6961d7f` (style/ui) en `42577e7` (feat/healthscore).
       pagina toont dus "Not Found". Statische bestanden komen van disk, alleen de router
       niet. Bare uvicorn zonder `--reload` → `fuser -k 8003/tcp` + relaunch. Wachtte op een
       Auto-Redirects run die inmiddels geklapt is (zie hieronder). #priority:high
-- [ ] **`main_parallel_v2.py` crashte aan het eind van een 3-urige run**:
-      `UnboundLocalError: cannot access local variable 'derived'` op regel 3549, in
-      `process_url_v2` binnen de multiprocessing-pool. Alle werk van die run is weg.
-      Uitzoeken welke tak `derived` overslaat. #priority:high
+- [x] **`main_parallel_v2.py` klapte na drie uur op `UnboundLocalError: derived`**
+      (`8a94e8b`). `derived` wordt alleen gezet binnen `if has_matchable and
+      parsed.main_category and parsed.keyword:`, maar het V53-blok staat op
+      functieniveau en leest hem in zijn eigen guard. `has_matchable` is False zodra de
+      query alleen uit stopwoorden/shopnamen bestaat — **171 van de 20.000 inputrijen
+      (0,9%, 40.122 visits)**: 'beste koop consumentenbond', 'de goedkoopste', 'als
+      beste getest'. Eén zo'n rij die ook een multi-facet maincat-redirect krijgt is
+      genoeg; uit een pool-worker gooit `imap_unordered` hem door en de hele run valt
+      om. `derived` krijgt nu een `{}`-fallback. Buurblok 3398 had de guard wél, dus
+      vergeten. AST-regressietest erbij, 91 tests groen. Zie LEARNINGS.
+- [x] **Checkpoint schreef elke keer alles opnieuw** (zelfde commit): `pd.DataFrame(
+      results)` in plaats van `results[last_save_count:]`, dus checkpoint k schreef
+      k*5000 rijen — 30.000 rijen voor 14.995 unieke urls, kwadratisch groeiend.
+- [ ] **De run van 19 aug is voor 75% te redden, maar het progress-bestand bevat de
+      duplicaten van vóór die fix.** Herstart met **hetzelfde `-o`-pad** (de resume-tak
+      leest `<output>_progress.csv`), en dedupliceer dat bestand eerst op
+      `original_url` — de eindsave concateneert het met de nieuwe batch, dus anders
+      lopen de dubbele rijen door naar het resultaat. #priority:medium
 - [ ] **Elf knoppen dragen nog `btn-outline-danger`** in plaats van `btn-outline-red` (Bot
       Hits, DMA Exclusions 2x, DMA+, GSD Budgets, Index Checker, Keyword Planner 2x, SEO
       titles 2x, Unique Titles). Ze **renderen goed** — beide namen zitten in dezelfde

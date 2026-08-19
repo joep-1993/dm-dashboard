@@ -1,6 +1,43 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een naam die maar in één tak bestaat, sloopt in een pool de hele run (2026-08-19)
+
+`main_parallel_v2.py` klapte na drie uur op `UnboundLocalError: cannot access local
+variable 'derived'` (regel 3549). Drie dingen die samen de kosten maakten:
+
+1. **De binding zat in een tak, de read op functieniveau.** `derived` wordt gezet binnen
+   `if has_matchable and parsed.main_category and parsed.keyword:` (regel 2361); het
+   V53-blok staat op indent 4 en leest hem in zijn *eigen* guard, als laatste voorwaarde.
+   Zolang de meeste rijen die tak wél nemen, werkt het jaren.
+2. **De ontsnappingsroute was een smalle rijsoort.** `has_matchable =
+   len(non_stopword_keywords) > 0`, dus False zodra de query alleen uit stopwoorden en/of
+   shopnamen bestaat: **171 van de 20.000 rijen (0,9%)**, zoals 'beste koop
+   consumentenbond' (4.955 visits), 'de goedkoopste', 'als beste getest'. Plus de tweede
+   voorwaarde: die rij moest óók als multi-facet maincat-`/c/`-redirect uit de matcher
+   komen. Eén rij is genoeg.
+3. **In `pool.imap_unordered` is één rij fataal voor alles.** De worker-exception wordt in
+   de hoofdlus opnieuw gegooid, dus de run stopt — niet die ene rij.
+
+**Fix:** `derived: dict = {}` naast de andere `search_derived_*`-defaults. Dat dekt alle
+vier de reads en is semantisch juist: zonder search-derived resultaat is er niets om te
+prefereren. Het buurblok op regel 3398 doet dezelfde soort check en had `and has_matchable`
+er wél bij — dit was dus een vergeten guard, geen ontwerpkeuze.
+
+**Zoek dit patroon zo** (AST, niet grep): pak de `FunctionDef`, kijk welke namen op
+`node.body`-niveau gebonden worden, en vergelijk dat met de namen die op dat niveau gelezen
+worden. De regressietest in `tests/test_v53_derived_binding.py` doet precies dat voor
+`derived`. Structureel testen is hier het enige haalbare: de rij reproduceren vraagt de hele
+pijplijn (caches, facets.csv, levende matcher), terwijl de eigenschap die de crash voorkomt
+— een binding die altijd loopt — in vijf regels te checken is.
+
+**Bijvangst in dezelfde lus:** de checkpoint schreef `pd.DataFrame(results)` en appendde dat,
+dus checkpoint k schreef k×5000 rijen — **30.000 rijen voor 14.995 unieke urls**, kwadratisch
+groeiend, en elke checkpoint las dat groeiende bestand opnieuw in. `last_save_count` werd al
+bijgehouden maar niet gebruikt om te slicen. De duplicaten lopen door naar het eindresultaat,
+want de resume-tak concateneert het progress-bestand met de nieuwe batch — dus dedupliceer
+een oud progress-bestand op `original_url` voordat je een run hervat.
+
 ## `cc1/` staat in `.gitignore`, dus een NIEUW cc1-bestand komt er niet in (2026-08-19)
 
 `.gitignore` regel 31 is `cc1/`. De bestaande docs zijn al tracked, dus `git add -u cc1/`
