@@ -1,6 +1,78 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## `/r/`-URL met een slash in de zoekterm: de row moet op de `%2f`-vorm, en de POST decodeert die weg (2026-08-20)
+
+Vervolg op de loop-entry van 2026-06-30 (ERR_TOO_MANY_REDIRECTS). **Teamsearch heeft de
+canonicalisatielus gefikst**: `/products/r/wasmachine/droger_kast/` geeft nu één nette
+`301 → /products/r/wasmachine%2fdroger_kast/`, geen 307 terug meer. Daarmee kan zo'n URL
+eindelijk een redirect krijgen — maar drie dingen zitten in de weg, en twee falen stil.
+
+**1. De site resolvet op de RAUWE `%2f`-tekst, niet op de gedecodeerde slash.** Resolver-probes
+(met junk-param, dus verse data): searchterm met letterlijke `%2f` → `NO_REDIRECT`, searchterm
+met `/` → `HAS_REDIRECT`. Een row op de letterlijke-slash-vorm **vuurt dus nooit**, want de
+CDN-301 encodeert vóór de pagina laadt. Dit is precies waarom de row die op 2026-06-30 leek te
+werken nooit iets deed.
+
+**2. `POST /api/redirect` urldecodeert `fromUrl` één keer bij opslag** — ondanks dat de
+201-response je input onveranderd terug-echoot. `fromUrl="…/r/wasmachine%2fdroger_kast/"` belandde
+in de DB als `…/r/wasmachine/droger_kast/` (id 8665288): een dode row. **Stuur `%252f` om `%2f`
+op te slaan** — id 8665289 staat wél goed en de resolver geeft er `HAS_REDIRECT` op. Verifieer
+altijd op het ongecachte `GET /api/redirects?urlContains=`, dat is de enige plek waar je ziet
+welke vorm er écht staat (en `urlContains` wil zelf ook `%25`: `urlContains=wasmachine%252f`
+zoekt op de tekst `wasmachine%2f`).
+
+**`backend/redirect_tool_service.py::post_redirect` doet die escaping niet.** Elke `/r/`-URL met
+`%2f` die via de Redirect-tool wordt geüpload wordt dus stil een dode row — geen foutmelding.
+Fixen vóór de volgende bulk-run.
+
+**3. `country` zit in de `url_UNIQUE`-key.** Alle bestaande rows naar dit badkast-doel staan op
+`"nl, be"`; met `country="nl"` krijg je een duplicate-key error. Dit staat al in de code-comment
+bij `preflight_rows`, maar het bijt ook bij een handmatige POST.
+
+**CloudFront is de ergste cache-laag, niet Varnish.** De live 301 bleef ruim 74 minuten uit:
+- Varnish op de resolver: 1h, cachet ook negatieven. Na ~1h stond de canonieke key weer goed.
+- CloudFront op de site: serveert de 200-zoekpagina van vóór het aanmaken, TTL **>74 min**
+  (`age` liep in 24 polls lineair door tot 4437 zonder ooit te resetten). Een querystring helpt
+  niet — die zit niet in de cache-key.
+- **Diagnose-truc:** vraag een variant op die een andere CloudFront-key is maar dezelfde
+  zoekterm oplevert — **hoofdletter `%2F`** werkt. `…/r/wasmachine%2Fdroger_kast/` gaf
+  `Miss from cloudfront` + de juiste `301 → …/c/t_badkast~23813977` terwijl de lowercase-key nog
+  een gecachte 200 gaf. Daarmee is bewezen dat de origin klopt en alleen de cache achterloopt.
+  De variant *zonder* trailing slash is géén test: die 301't eerst naar de slash-vorm en landt
+  weer op de gecachte key.
+- **Les voor de bulk-run: maak de rows aan vóórdat iemand de URL opvraagt.** Eén nieuwsgierige
+  browsercheck zet een 200 in CloudFront voor >1h én een negatief in Varnish, en dan lijkt je
+  net-aangemaakte redirect kapot terwijl hij prima werkt.
+
+**De populatie in kaart (Redshift, 365 dagen, `fct_visits` + `dim_visit`, `is_real_visit=1`).**
+"Een `/` ná `/r/`" is drie totaal verschillende dingen, en ongeclassificeerd tel je vooral ruis:
+
+| Soort | URL's | Real visits |
+|---|---|---|
+| Structureel suffix (`/r/term/c/facet~1`, `/r/term/page_2`) | 148.025 | 555.827 |
+| `%2f` in de term | 3.916 | 23.270 |
+| Rauwe slash in de term | 4 | 4 |
+
+- **De `%2f`-bak is de werklijst.** Dat de rauwe-slash-bak leeg is, is logisch: de CDN encodeert
+  vóór de pagina laadt, dus de `%2f`-vorm is wat als landing in `dim_visit` belandt. De 4 die
+  overblijven zijn rommel (een meegeplakte markdown-link, `/p/r/361/…`).
+- **Query-gotcha: `position('/r/' IN u)` geeft 0 als het niet gevonden wordt**, en
+  `substring(u FROM 0+3)` levert dan willekeurig afgesneden tekst op die er als een hit uitziet.
+  Het ontstond doordat het `LIKE '%/r/%'`-filter op de **rauwe** url liep (incl. querystring) en
+  de substring op de **query-gestripte** kopie — een URL met `/r/` alleen in de query kwam er zo
+  doorheen (`http://api.scrape.do/?…` → term `tp://api.scrape.do`, 1210 visits). Guard met
+  `WHERE position('/r/' IN u) > 0`.
+- **Wat de lus gekost heeft**, real visits/maand op de `%2f`-populatie: 2025-09 t/m 2026-05
+  stabiel ~2.000–3.100, **2026-06 748, 2026-07 13**, 2026-08 (t/m de 19e) 204. De visits konden
+  niet registreren omdat de pagina nooit laadde. Baseline ~2.000–2.500/mnd, dus met de redirects
+  haal je grofweg **25k visits/jaar** terug.
+- Lijst met alle 3.920 URL's incl. visits, domein en of er al een redirect staat (7 van de 3.920):
+  `Downloads\claude\r_urls_met_slash_365d_20260820.xlsx`.
+- **Voor teamsearch:** een deel van de terms is een dubbel geplakt pad, bv.
+  `…/r/action_koffer_handbagage%2fmode_accessoires%2fr%2faction_koffer_handbagage/`. Dat is een
+  frontend-bug die `/r/`-links genereert met het pad in de zoekterm.
+
 ## Eén market op twee Google Ads accounts: drie plekken waar `country` stil fout is (2026-08-20)
 
 DMA bidding en DMA exclusions moesten voor NL naast `3800751597` ook `4089798584` ("DMA NL 2")

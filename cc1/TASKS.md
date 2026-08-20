@@ -4,6 +4,30 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-20 — `/r/`-URL's met een slash in de zoekterm kunnen eindelijk redirects krijgen
+
+De canonicalisatielus van 2026-06-30 is door teamsearch gefikst. Mechaniek, de
+double-encode-gotcha en de cache-lagen staan in LEARNINGS (zelfde datum) en in auto-memory
+`redirect_api_behavior.md`.
+
+- [x] **Testcase live gezet**: `/products/r/wasmachine%2fdroger_kast/` → `…/c/t_badkast~23813977`
+      (row **8665289**, country `nl, be`). Origin geverifieerd via de hoofdletter-`%2F`-truc.
+      Row 8665288 (letterlijke-slash-vorm) is een dood bijproduct van de decode-gotcha — mag weg.
+- [x] **Populatie in kaart**: 3.916 URL's met `%2f` in de term, 23.270 real visits/365d, waarvan
+      3.913 nog zonder redirect. Lijst: `Downloads\claude\r_urls_met_slash_365d_20260820.xlsx`.
+- [ ] **`post_redirect` escapet `%` niet** (`backend/redirect_tool_service.py`) — `%2f`-URL's uit
+      de Redirect-tool worden stil dode rows. `%` → `%25` bij het POSTen, plus een
+      preflight-waarschuwing op fromUrls met `%2f`. **Doen vóór de bulk-run.**
+- [ ] **Bulk-run**: redirects instellen voor de 3.913 open URL's. Doelen per geval bepalen — de
+      slash betekent drie dingen: een of-scheiding (`slaapstoel%2fbed`), een maat of breuk
+      (`1%2f2`, `45%2f45`, `28x1_3%2f8`, `13w%2f827`), en soms een dubbel geplakt pad.
+      **Rows aanmaken vóórdat iemand de URL opvraagt** — anders zet je zelf een 200 in CloudFront
+      voor >1h.
+- [ ] **Bij teamsearch**: (a) CloudFront-invalidation op `/products/r/wasmachine%2fdroger_kast/`
+      als je de testcase live wil zien zonder de TTL af te wachten; (b) de frontend-bug die
+      `/r/`-links met het pad in de zoekterm genereert
+      (`…%2fmode_accessoires%2fr%2faction_koffer_handbagage`).
+
 ### 2026-08-20 — DMA bidding + exclusions kijken ook naar account 4089798584 (DMA NL 2)
 
 Commit `7f9422f` op `main` (2 services + 2 pagina's). Leerpunten in LEARNINGS (zelfde datum);
