@@ -42,7 +42,7 @@ import urllib.request
 from collections import OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -60,9 +60,20 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 MCC_CUSTOMER_ID = "3011145605"
-ACCOUNTS = {
-    "NL": "3800751597",
-    "BE": "9920951707",
+# A market can run on SEVERAL accounts; NL got a second one on 2026-08-20:
+# 4089798584 ("DMA NL 2"), holding a parallel set of category campaigns. Every
+# account is scanned, and each target carries the account it lives in, so a write
+# always goes to the right one. The FIRST entry is the market's primary account —
+# the fallback for exclusion records saved before this account existed (their
+# targets have no customer_id).
+ACCOUNTS: Dict[str, List[str]] = {
+    "NL": ["3800751597", "4089798584"],
+    "BE": ["9920951707"],
+}
+ACCOUNT_NAMES = {
+    "3800751597": "DMA NL",
+    "4089798584": "DMA NL 2",
+    "9920951707": "DMA BE",
 }
 
 BESTSELLERS_CAMPAIGN = "PLA/Amazon bestsellers"
@@ -72,6 +83,43 @@ CL3_INDEX = "INDEX3"             # category campaigns: leaf dimension is shop (C
 
 # Matches "PLA/<category>_a" / "_b" / "_c" but NOT the named campaigns above.
 _CATEGORY_RE = re.compile(r"^PLA/(?P<cat>.+)_(?P<tier>[abc])$")
+# DMA NL 2 names its trios with a suffix: PLA/<cat>_<tier>_limit (steered by the
+# L1/L2/L3 ladder) and PLA/<cat>_<tier>_label (steered by DMA: Label A/B/C). Both
+# are real serving campaigns for the category, so an exclusion covers both — an
+# OOS item must never keep serving in whichever family is live (Joep, 2026-08-20).
+# Note this differs from DMA bidding, which deliberately steers only `_limit`.
+_CATEGORY_RE_SUFFIXED = re.compile(r"^PLA/(?P<cat>.+)_(?P<tier>[abc])_(?:limit|label)$")
+_DEFAULT_CATEGORY_RES: Tuple[Any, ...] = (_CATEGORY_RE,)
+ACCOUNT_CATEGORY_RES: Dict[str, Tuple[Any, ...]] = {
+    "4089798584": (_CATEGORY_RE_SUFFIXED,),
+}
+
+
+def _category_res(customer_id: Optional[str] = None) -> Tuple[Any, ...]:
+    """The category-campaign patterns valid for an account (all of them if None).
+
+    The conventions are mutually exclusive — "PLA/X_a" never matches the suffixed
+    pattern and "PLA/X_a_limit" never matches the plain one — so the union is
+    unambiguous for callers that only have a campaign name (e.g. _campaign_family).
+    """
+    if customer_id is not None:
+        return ACCOUNT_CATEGORY_RES.get(str(customer_id), _DEFAULT_CATEGORY_RES)
+    seen, out = set(), []
+    for res in (_DEFAULT_CATEGORY_RES, *ACCOUNT_CATEGORY_RES.values()):
+        for r in res:
+            if r not in seen:
+                seen.add(r)
+                out.append(r)
+    return tuple(out)
+
+
+def _match_category(campaign_name: str, customer_id: Optional[str] = None):
+    """re.Match for a category campaign name, or None."""
+    for r in _category_res(customer_id):
+        m = r.match(campaign_name or "")
+        if m:
+            return m
+    return None
 
 # OOS (out-of-stock) crawl-override monitor — feeds the exclusion candidate list.
 OOS_BASE = "https://googlemc-suc.bva-apps.aks.private.beslist.nl/api/v1/overrides"
@@ -87,7 +135,7 @@ DMA_ITEM_PREFIX = "nl-nl-gold-"
 _SCAN_CACHE_TTL = 1800  # seconds (30 min)
 _SCAN_CACHE_MAX = 20000  # bound each scan cache; evict oldest ~10% past this
 _CACHE_MISS = object()
-_GA_CACHE: Dict[str, tuple] = {}     # ean -> (agg|None, ts)   None = queried, not live in DMA
+_GA_CACHE: Dict[Any, tuple] = {}     # (customer_id, ean) -> (agg|None, ts)  None = queried, not live
 _ES_CACHE: Dict[str, tuple] = {}     # norm_ean -> (headline_offer dict, ts)
 
 
@@ -287,11 +335,22 @@ def _get_client() -> GoogleAdsClient:
     return _CLIENT
 
 
-def _customer_id(market: str) -> str:
-    cid = ACCOUNTS.get((market or "").upper())
-    if not cid:
+def _customer_ids(market: str) -> List[str]:
+    """Every Google Ads account this market runs on."""
+    cids = ACCOUNTS.get((market or "").upper())
+    if not cids:
         raise ValueError(f"Unknown market {market!r}; expected one of {list(ACCOUNTS)}")
-    return cid
+    return list(cids)
+
+
+def _customer_id(market: str) -> str:
+    """The market's PRIMARY account — fallback for targets stored without one."""
+    return _customer_ids(market)[0]
+
+
+def _account_label(customer_id) -> str:
+    """Human-readable account name for warnings/UI ("DMA NL 2")."""
+    return ACCOUNT_NAMES.get(str(customer_id), str(customer_id))
 
 
 # Per-ad-group write lock. Two exclusions/re-enables that touch the SAME ad group
@@ -303,8 +362,8 @@ _AD_GROUP_LOCKS: Dict[str, threading.Lock] = {}
 _AD_GROUP_LOCKS_GUARD = threading.Lock()
 
 
-def _ad_group_lock(ad_group_id) -> threading.Lock:
-    key = str(ad_group_id)
+def _ad_group_lock(customer_id, ad_group_id) -> threading.Lock:
+    key = f"{customer_id}/{ad_group_id}"
     lk = _AD_GROUP_LOCKS.get(key)
     if lk is None:
         with _AD_GROUP_LOCKS_GUARD:
@@ -397,7 +456,7 @@ def lookup(item_id: str, market: str) -> Dict[str, Any]:
     if not item_id:
         raise ValueError("item_id is required")
     client = _get_client()
-    customer_id = _customer_id(market)
+    customer_ids = _customer_ids(market)
     ga = client.get_service("GoogleAdsService")
 
     query = f"""
@@ -411,19 +470,30 @@ def lookup(item_id: str, market: str) -> Dict[str, Any]:
         WHERE segments.product_item_id = {item_id!r}
           AND segments.date DURING LAST_30_DAYS
     """
-    serving: List[dict] = []
-    try:
-        for row in ga.search(customer_id=customer_id, query=query):
-            serving.append({
+
+    def _serving_rows(cid: str) -> List[dict]:
+        try:
+            return [{
                 "campaign": row.campaign.name,
                 "ad_group": row.ad_group.name,
+                "customer_id": cid,
                 "cl0": row.segments.product_custom_attribute0,
                 "shop": row.segments.product_custom_attribute3,
                 "type_l1": row.segments.product_type_l1,
                 "type_l2": row.segments.product_type_l2,
-            })
-    except GoogleAdsException as e:
-        raise RuntimeError(f"Google Ads query failed: {e.error.code().name}") from e
+            } for row in ga.search(customer_id=cid, query=query)]
+        except GoogleAdsException as e:
+            raise RuntimeError(f"Google Ads query failed: {e.error.code().name}") from e
+
+    # One shopping_performance_view query per account, run concurrently: it costs
+    # ~6s and dominates this lookup, so a second account must not double the wait.
+    serving: List[dict] = []
+    if len(customer_ids) == 1:
+        serving = _serving_rows(customer_ids[0])
+    else:
+        with ThreadPoolExecutor(max_workers=len(customer_ids)) as ex:
+            for rows in ex.map(_serving_rows, customer_ids):
+                serving.extend(rows)
 
     # Collect candidates across the category-matching rows, then pick
     # deterministically (lowest sorted) — serving-row order is arbitrary, so
@@ -432,7 +502,7 @@ def lookup(item_id: str, market: str) -> Dict[str, Any]:
     cl0_candidates = set()
     shop_candidates = set()
     for r in serving:
-        m = _CATEGORY_RE.match(r["campaign"])
+        m = _match_category(r["campaign"], r["customer_id"])
         if m:
             cat_candidates.append(m.group("cat"))
             if r["cl0"] and r["cl0"].isdigit():
@@ -471,7 +541,7 @@ def lookup(item_id: str, market: str) -> Dict[str, Any]:
 def _pick_category(cands: List[str]) -> Optional[str]:
     """Prefer a real product-category trio (PLA/Koffiezetapparaten_a) over a
     "<shop> store" allow-list campaign (PLA/Koffie store_a): the store campaign
-    also matches _CATEGORY_RE and would otherwise shadow the real category,
+    also matches the category pattern and would otherwise shadow the real category,
     leaving the product excluded only via APlus/bestsellers (its CL3-OTHERS leaf
     is negative, so the trio gets skipped). Store campaigns are deferred."""
     # Pick deterministically (lowest sorted), matching the min() used for cl0/shop
@@ -607,13 +677,16 @@ def _existing_negative(nodes: Dict[str, dict], subdiv_resource: str, item_id: st
     return None
 
 
-def _build_target(item_id, kind, campaign, ad_group, nodes, leaf) -> dict:
+def _build_target(item_id, kind, campaign, ad_group, nodes, leaf, customer_id) -> dict:
     """Assemble a per-ad-group target with the planned action, given its leaf node.
 
     Pure: works off the already-read `nodes`/`leaf`; no Google Ads client needed.
+    `customer_id` is the account the ad group lives in — it is persisted with the
+    target so apply/enable write to that account and not the market's primary one.
     """
     t = {
         "kind": kind,
+        "customer_id": str(customer_id),
         "campaign_id": campaign["campaign_id"],
         "campaign_name": campaign["campaign_name"],
         "ad_group_id": ad_group["ad_group_id"],
@@ -667,25 +740,30 @@ def resolve_targets(item_id: str, market: str, campaign_filter: Optional[str] = 
     """Discover every ad group + node to touch (READ-ONLY). Returns plan."""
     item_id = (item_id or "").strip()
     client = _get_client()
-    customer_id = _customer_id(market)
+    customer_ids = _customer_ids(market)
     res = resolution or _cached_lookup(item_id, market)
     cf = (campaign_filter or "").strip().lower()
 
     # The three branches below are independent READ-ONLY discovery passes
     # (~13 sequential Google Ads queries total dominate the latency). They have
     # no data dependency on each other, and within the category branch each
-    # ad-group tree read is independent too — so run them concurrently. All
-    # mutations still happen later, sequentially, in apply(), so there's no race.
-    def _category_branch():
+    # ad-group tree read is independent too — so run them concurrently. Each
+    # branch also runs once PER ACCOUNT of the market (NL: 3800751597 + DMA NL 2
+    # 4089798584), and every target it returns records the account it belongs to.
+    # All mutations still happen later, sequentially, in apply(), so there's no race.
+    def _category_branch(customer_id):
         out, warn = [], []
         if not res.get("category"):
             return out, ["Category not resolved; skipping category trio + APlus."]
         cat = res["category"]
         camps = _find_campaigns(client, customer_id, [f"PLA/{cat}_%"])
+        # The account decides the naming convention: plain PLA/<cat>_a in DMA NL,
+        # PLA/<cat>_a_limit + _a_label in DMA NL 2 (both are excluded).
         trio = [c for c in camps
-                if (m := _CATEGORY_RE.match(c["campaign_name"])) and m.group("cat") == cat]
+                if (m := _match_category(c["campaign_name"], customer_id))
+                and m.group("cat") == cat]
         if not trio:
-            warn.append(f"No PLA/{cat}_a/_b/_c campaigns found.")
+            warn.append(f"[{_account_label(customer_id)}] No PLA/{cat}_a/_b/_c campaigns found.")
         pairs = [(c, ag) for c in trio
                  for ag in _ad_groups(client, customer_id, c["campaign_id"])]
 
@@ -693,14 +771,14 @@ def resolve_targets(item_id: str, market: str, campaign_filter: Optional[str] = 
             c, ag = pair
             nodes = _read_tree(client, customer_id, ag["ad_group_id"])
             leaf = _leaf_for_category(nodes)
-            return _build_target(item_id, "category", c, ag, nodes, leaf)
+            return _build_target(item_id, "category", c, ag, nodes, leaf, customer_id)
 
         if pairs:
             with ThreadPoolExecutor(max_workers=min(8, len(pairs))) as ex:
                 out = list(ex.map(_build, pairs))
         return out, warn
 
-    def _bestsellers_branch():
+    def _bestsellers_branch(customer_id):
         # Guard: the bestsellers campaign is a flat per-item-id list, so this
         # used to run for ANY id — including a bogus/never-served one, whose
         # append then fails because the id isn't in the tree. Only attempt it
@@ -709,14 +787,15 @@ def resolve_targets(item_id: str, market: str, campaign_filter: Optional[str] = 
         if not res.get("found"):
             return [], ["Item id not resolved (no serving history); skipping Amazon bestsellers."]
         out = []
+        # Silent no-op in an account without a bestsellers campaign (DMA NL 2).
         for c in _find_campaigns(client, customer_id, [BESTSELLERS_CAMPAIGN]):
             for ag in _ad_groups(client, customer_id, c["campaign_id"]):
                 nodes = _read_tree(client, customer_id, ag["ad_group_id"])
                 leaf = _bestsellers_subdiv(nodes)
-                out.append(_build_target(item_id, "bestsellers", c, ag, nodes, leaf))
+                out.append(_build_target(item_id, "bestsellers", c, ag, nodes, leaf, customer_id))
         return out, []
 
-    def _aplus_branch():
+    def _aplus_branch(customer_id):
         # needs cl0 to pick the right per-category ad group
         if not res.get("cl0"):
             return [], (["CL0 (deepest-cat-id) not resolved; skipping APlus."]
@@ -726,20 +805,29 @@ def resolve_targets(item_id: str, market: str, campaign_filter: Optional[str] = 
         for c in _find_campaigns(client, customer_id, [APLUS_CAMPAIGN]):
             ag_rows = _aplus_adgroups_for_cl0(client, customer_id, c["campaign_id"], cl0)
             if not ag_rows:
-                warn.append(f"No APlus ad group found for category id {cl0}.")
+                warn.append(f"[{_account_label(customer_id)}] No APlus ad group "
+                            f"found for category id {cl0}.")
             for ag in ag_rows:
                 nodes = _read_tree(client, customer_id, ag["ad_group_id"])
                 leaf = _leaf_for_aplus(nodes, cl0)
-                out.append(_build_target(item_id, "aplus", c, ag, nodes, leaf))
+                out.append(_build_target(item_id, "aplus", c, ag, nodes, leaf, customer_id))
         return out, warn
 
     targets: List[dict] = []
     warnings: List[str] = []
-    with ThreadPoolExecutor(max_workers=3) as ex:
-        for fut in [ex.submit(b) for b in (_category_branch, _bestsellers_branch, _aplus_branch)]:
+    seen_warnings: set = set()
+    jobs = [(branch, cid) for cid in customer_ids
+            for branch in (_category_branch, _bestsellers_branch, _aplus_branch)]
+    with ThreadPoolExecutor(max_workers=min(6, len(jobs))) as ex:
+        for fut in [ex.submit(branch, cid) for branch, cid in jobs]:
             t, w = fut.result()
             targets.extend(t)
-            warnings.extend(w)
+            # The account-independent warnings ("category not resolved", "item id
+            # not resolved") come back once per account — say them once.
+            for msg in w:
+                if msg not in seen_warnings:
+                    seen_warnings.add(msg)
+                    warnings.append(msg)
 
     if cf:
         targets = [t for t in targets if cf in t["campaign_name"].lower()]
@@ -851,7 +939,7 @@ def _apply_one_target(client, customer_id, item_id, target) -> dict:
     rev = dict(target)  # carry kind/campaign/ad_group/leaf for enable
     leaf = target["leaf"]
 
-    with _ad_group_lock(ad_group_id):
+    with _ad_group_lock(customer_id, ad_group_id):
         temp = _Temp()
         if target["action"] == "append_negative":
             op, neg_res = _unit_op(client, customer_id, ad_group_id, temp,
@@ -956,7 +1044,7 @@ def apply(item_id: str, market: str, shop: Optional[str] = None,
     """Apply the exclusion live, then persist it for later re-enable."""
     item_id = (item_id or "").strip()
     client = _get_client()
-    customer_id = _customer_id(market)
+    primary_customer_id = _customer_id(market)
     plan = resolve_targets(item_id, market, campaign_filter)
     shop = shop or plan["resolution"].get("shop")
 
@@ -987,7 +1075,9 @@ def apply(item_id: str, market: str, shop: Optional[str] = None,
         # parallel. (Cross-item bulk parallelism is NOT safe — see resolve/apply
         # docs — but within one item the ad groups are disjoint.)
         try:
-            rev = _apply_one_target(client, customer_id, item_id, t)
+            # Write in the account the target lives in, not the market's primary.
+            rev = _apply_one_target(client, t.get("customer_id") or primary_customer_id,
+                                   item_id, t)
             return ("ok", {**rev, "result": "excluded"})
         except Exception as e:  # noqa: BLE001 - surface per-target failures, keep going
             logger.exception("apply failed for %s", t.get("campaign_name"))
@@ -1018,7 +1108,9 @@ def enable(record_id: int) -> Dict[str, Any]:
         return {"id": record_id, "status": "already_enabled", "reverted": 0}
 
     client = _get_client()
-    customer_id = _customer_id(rec["market"])
+    # Records written before NL became multi-account have no per-target account,
+    # so fall back to the market's primary — that is where they were applied.
+    primary_customer_id = _customer_id(rec["market"])
     item_id = rec["item_id"]
 
     def _revert_one(t):
@@ -1027,9 +1119,10 @@ def enable(record_id: int) -> Dict[str, Any]:
         # ad group (bulk oos_reenable), so the fresh tree read below reflects the
         # prior item's removal — that's what lets the sole-negative collapse work.
         ad_group_id = t["ad_group_id"]
+        customer_id = t.get("customer_id") or primary_customer_id
         agc = client.get_service("AdGroupCriterionService")
         try:
-            with _ad_group_lock(ad_group_id):
+            with _ad_group_lock(customer_id, ad_group_id):
                 nodes = _read_tree(client, customer_id, ad_group_id)
                 # locate the subdivision the item lives under
                 if t.get("created_subdivision"):
@@ -1383,7 +1476,7 @@ def _campaign_family(name: str) -> str:
         return "bestsellers"
     if name == APLUS_CAMPAIGN:
         return "aplus"
-    if _CATEGORY_RE.match(name):
+    if _match_category(name):
         return "category"
     return "other"
 
@@ -1421,56 +1514,79 @@ _GA_BATCH_CONCURRENCY = 6
 _OOS_BATCH = 200  # EANs per GA query (product_item_id IN (...))
 
 
-def _ga_batch_agg(ga, customer_id: str, batch: List[str]) -> Dict[str, dict]:
-    """Return item_id -> aggregated 30d metrics for the live-in-DMA EANs in this
-    batch. Each EAN lives in exactly one batch, so the agg fully aggregates it.
-    Cached per-EAN (TTL): only the uncached EANs are actually queried, and EANs
-    queried-but-not-live are cached as None so a re-scan skips them too."""
-    fresh: Dict[str, dict] = {}
-    to_query = []
-    for e in batch:
-        hit = _cache_get(_GA_CACHE, e)
-        if hit is _CACHE_MISS:
-            to_query.append(e)
-        elif hit is not None:
-            fresh[DMA_ITEM_PREFIX + e] = hit   # cached live
-        # hit is None -> cached not-live, skip
-    if not to_query:
-        return fresh
+def _merge_agg(dst: Dict[str, dict], iid: str, a: dict) -> None:
+    """Add one account's aggregate for an item into the cross-account total.
 
-    ids = [DMA_ITEM_PREFIX + e for e in to_query]
-    q = (
+    Copies on first insert: `a` may be a cached (shared) dict, so it must never
+    be mutated here.
+    """
+    cur = dst.get(iid)
+    if cur is None:
+        dst[iid] = {"clicks": a["clicks"], "impr": a["impr"], "cost": a["cost"],
+                    "conv": a["conv"], "conv_value": a["conv_value"],
+                    "campaigns": set(a["campaigns"]), "cl0s": set(a["cl0s"]),
+                    "shops": set(a["shops"])}
+        return
+    for k in ("clicks", "impr", "cost", "conv", "conv_value"):
+        cur[k] += a[k]
+    for k in ("campaigns", "cl0s", "shops"):
+        cur[k] |= a[k]
+
+
+def _ga_batch_agg(ga, customer_ids: List[str], batch: List[str]) -> Dict[str, dict]:
+    """Return item_id -> aggregated 30d metrics for the live-in-DMA EANs in this
+    batch, summed over every account of the market. Each EAN lives in exactly one
+    batch, so the agg fully aggregates it. Cached per (account, EAN) with a TTL:
+    only the uncached ones are queried, and EANs queried-but-not-live are cached
+    as None so a re-scan skips them too."""
+    q_tpl = (
         "SELECT segments.product_item_id, campaign.name, "
         "segments.product_custom_attribute0, segments.product_custom_attribute3, "
         "metrics.clicks, metrics.impressions, metrics.cost_micros, "
         "metrics.conversions, metrics.conversions_value "
         "FROM shopping_performance_view "
-        f"WHERE segments.product_item_id IN ({','.join(repr(x) for x in ids)}) "
+        "WHERE segments.product_item_id IN ({ids}) "
         "AND segments.date DURING LAST_30_DAYS"
     )
-    agg: Dict[str, dict] = {}
-    for row in _ga_search_rows(ga, customer_id, q):
-        iid = row.segments.product_item_id
-        m = row.metrics
-        a = agg.setdefault(iid, {"clicks": 0, "impr": 0, "cost": 0,
-                                 "conv": 0.0, "conv_value": 0.0, "campaigns": set(),
-                                 "cl0s": set(), "shops": set()})
-        a["clicks"] += m.clicks
-        a["impr"] += m.impressions
-        a["cost"] += m.cost_micros
-        a["conv"] += m.conversions
-        a["conv_value"] += m.conversions_value
-        if row.campaign.name:
-            a["campaigns"].add(row.campaign.name)
-        cl0 = row.segments.product_custom_attribute0
-        if cl0 and cl0.isdigit():
-            a["cl0s"].add(cl0)
-        if row.segments.product_custom_attribute3:
-            a["shops"].add(row.segments.product_custom_attribute3)
-    # cache results for every queried EAN (live -> agg, not-live -> None)
-    for e in to_query:
-        _cache_put(_GA_CACHE, e, agg.get(DMA_ITEM_PREFIX + e))
-    fresh.update(agg)
+    fresh: Dict[str, dict] = {}
+    for customer_id in customer_ids:
+        to_query = []
+        for e in batch:
+            hit = _cache_get(_GA_CACHE, (customer_id, e))
+            if hit is _CACHE_MISS:
+                to_query.append(e)
+            elif hit is not None:
+                _merge_agg(fresh, DMA_ITEM_PREFIX + e, hit)   # cached live
+            # hit is None -> cached not-live in this account, skip
+        if not to_query:
+            continue
+
+        ids = [DMA_ITEM_PREFIX + e for e in to_query]
+        q = q_tpl.format(ids=",".join(repr(x) for x in ids))
+        agg: Dict[str, dict] = {}
+        for row in _ga_search_rows(ga, customer_id, q):
+            iid = row.segments.product_item_id
+            m = row.metrics
+            a = agg.setdefault(iid, {"clicks": 0, "impr": 0, "cost": 0,
+                                     "conv": 0.0, "conv_value": 0.0, "campaigns": set(),
+                                     "cl0s": set(), "shops": set()})
+            a["clicks"] += m.clicks
+            a["impr"] += m.impressions
+            a["cost"] += m.cost_micros
+            a["conv"] += m.conversions
+            a["conv_value"] += m.conversions_value
+            if row.campaign.name:
+                a["campaigns"].add(row.campaign.name)
+            cl0 = row.segments.product_custom_attribute0
+            if cl0 and cl0.isdigit():
+                a["cl0s"].add(cl0)
+            if row.segments.product_custom_attribute3:
+                a["shops"].add(row.segments.product_custom_attribute3)
+        # cache results for every queried EAN (live -> agg, not-live -> None)
+        for e in to_query:
+            _cache_put(_GA_CACHE, (customer_id, e), agg.get(DMA_ITEM_PREFIX + e))
+        for iid, a in agg.items():
+            _merge_agg(fresh, iid, a)
     return fresh
 
 
@@ -1479,7 +1595,7 @@ def _build_oos_candidate(market: str, iid: str, a: dict, excluded: set) -> dict:
     pre-cache the resolution so a follow-up exclude skips the ~6s lookup()."""
     camps = sorted(a["campaigns"])
     fams = {_campaign_family(c) for c in camps}
-    cat = _pick_category([m.group("cat") for c in camps if (m := _CATEGORY_RE.match(c))])
+    cat = _pick_category([m.group("cat") for c in camps if (m := _match_category(c))])
     cl0 = min(a["cl0s"]) if a["cl0s"] else None      # deterministic (sorted), not row-order
     shop = min(a["shops"]) if a["shops"] else None
     _cache_resolution({
@@ -1522,7 +1638,7 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     eans = snap["eans"]
     oos_total = len(eans)
     client = _get_client()
-    customer_id = _customer_id(market)
+    customer_ids = _customer_ids(market)
     ga = client.get_service("GoogleAdsService")
 
     # which item ids are already excluded (so the UI can disable them)
@@ -1540,7 +1656,7 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     ga_pool = ThreadPoolExecutor(max_workers=_GA_BATCH_CONCURRENCY)
     try:
         def submit_wave(wv):  # submit a wave's batches as GA futures (non-blocking)
-            return [ga_pool.submit(_ga_batch_agg, ga, customer_id, b) for b in wv]
+            return [ga_pool.submit(_ga_batch_agg, ga, customer_ids, b) for b in wv]
 
         pending = submit_wave(waves[0]) if waves else []
         for wi, wv in enumerate(waves):
@@ -1620,7 +1736,7 @@ def _resolve_ad_group_target(client, customer_id, item_id, ref_target, cl0) -> d
         leaf = None
     campaign = {"campaign_id": ref_target["campaign_id"], "campaign_name": ref_target["campaign_name"]}
     ad_group = {"ad_group_id": ad_group_id, "ad_group_name": ref_target["ad_group_name"]}
-    return _build_target(item_id, kind, campaign, ad_group, nodes, leaf)
+    return _build_target(item_id, kind, campaign, ad_group, nodes, leaf, customer_id)
 
 
 def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
@@ -1638,7 +1754,7 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
     old sequential apply() produced — only ordering/concurrency changed.
     """
     client = _get_client()
-    customer_id = _customer_id(market)
+    primary_customer_id = _customer_id(market)
     # Dedup while preserving order; drop blanks.
     seen: "OrderedDict[str, None]" = OrderedDict()
     for iid in item_ids:
@@ -1662,7 +1778,10 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
         resolved = list(ex.map(_resolve, ids))
 
     per_item: "OrderedDict[str, dict]" = OrderedDict()
-    groups: Dict[str, list] = defaultdict(list)  # ad_group_id -> [(iid, target, cl0)]
+    # (account, ad_group_id) -> [(iid, target, cl0)] — the key must include the
+    # account: the serialization below exists to stop two items racing on ONE
+    # live criterion tree, and a tree is only shared within its own account.
+    groups: Dict[tuple, list] = defaultdict(list)
     for iid, plan, err in resolved:
         pi = {"plan": plan, "resolve_error": err, "results": [], "errors": []}
         per_item[iid] = pi
@@ -1671,7 +1790,8 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
         cl0 = plan["resolution"].get("cl0")
         for t in plan["targets"]:
             if t["action"] in ("append_negative", "subdivide_and_exclude"):
-                groups[t["ad_group_id"]].append((iid, t, cl0))
+                groups[(t.get("customer_id") or primary_customer_id,
+                        t["ad_group_id"])].append((iid, t, cl0))
             else:
                 pi["results"].append({**t, "result": "skipped", "reason": t.get("skip_reason")})
 
@@ -1679,6 +1799,7 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
     def _run_group(items):
         out = []  # (iid, kind, payload) with kind in {"ok","err","skip"}
         for i, (iid, ref_t, cl0) in enumerate(items):
+            customer_id = ref_t.get("customer_id") or primary_customer_id
             try:
                 # 1st item's resolved target is still fresh (nothing has mutated
                 # this ad group yet); 2nd+ re-resolve to see the new subdivision.

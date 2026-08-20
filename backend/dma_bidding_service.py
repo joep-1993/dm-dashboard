@@ -23,12 +23,32 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-COUNTRY_CUSTOMER_IDS = {
-    "NL": "3800751597",
-    "BE": "9920951707",
+# A country can run on SEVERAL accounts. NL got a second one on 2026-08-20:
+# 4089798584 ("DMA NL 2"), holding a parallel set of category campaigns. Every
+# account listed here is scanned; a campaign is always mutated in the account it
+# actually lives in (derived from its resource name), so a cross-account move is
+# impossible. The first entry is the country's primary account.
+COUNTRY_ACCOUNT_IDS: Dict[str, List[str]] = {
+    "NL": ["3800751597", "4089798584"],
+    "BE": ["9920951707"],
+}
+ACCOUNT_NAMES = {
+    "3800751597": "DMA NL",
+    "4089798584": "DMA NL 2",
+    "9920951707": "DMA BE",
 }
 DEFAULT_COUNTRY = "NL"
 MCC_CUSTOMER_ID = "3011145605"
+
+# Campaign-name substrings to skip, PER ACCOUNT. DMA NL 2 carries a second set of
+# category campaigns named PLA/<cat>_<tier>_label, steered by the "DMA: Label
+# A/B/C" portfolio strategies instead of the L1/L2/L3 ladder this tool moves
+# campaigns along — they must never be evaluated or mutated here (Joep,
+# 2026-08-20). Deliberately account-scoped, not global: 3800751597 has its own
+# ENABLED PLA/Onbekend_label sitting on Level 2 that this tool has always managed.
+ACCOUNT_CAMPAIGN_SKIP: Dict[str, Tuple[str, ...]] = {
+    "4089798584": ("_label",),
+}
 
 BID_STRATEGIES = {
     1: "DMA: Level 1 - 0,07",
@@ -102,12 +122,34 @@ def _history_persist():
 # ---------------------------------------------------------------------------
 
 
+def _resolve_customer_ids(country: str = DEFAULT_COUNTRY) -> List[str]:
+    """Return every Google Ads CUSTOMER_ID this country runs on."""
+    cids = COUNTRY_ACCOUNT_IDS.get(country.upper())
+    if not cids:
+        raise ValueError(f"Unknown country '{country}'. Expected one of: {list(COUNTRY_ACCOUNT_IDS.keys())}")
+    return list(cids)
+
+
 def _resolve_customer_id(country: str = DEFAULT_COUNTRY) -> str:
-    """Return the Google Ads CUSTOMER_ID for the given country code."""
-    cid = COUNTRY_CUSTOMER_IDS.get(country.upper())
-    if not cid:
-        raise ValueError(f"Unknown country '{country}'. Expected one of: {list(COUNTRY_CUSTOMER_IDS.keys())}")
-    return cid
+    """The country's PRIMARY account id (fallback for single-account callers)."""
+    return _resolve_customer_ids(country)[0]
+
+
+def _skip_campaign(customer_id: str, campaign_name: str) -> bool:
+    """True if this account's naming convention says the tool must ignore it."""
+    patterns = ACCOUNT_CAMPAIGN_SKIP.get(str(customer_id)) or ()
+    name = (campaign_name or "").lower()
+    return any(p.lower() in name for p in patterns)
+
+
+def _customer_id_from_resource(resource_name: str) -> Optional[str]:
+    """Extract <cid> from 'customers/<cid>/campaigns/<id>'.
+
+    A campaign must be mutated through the account that owns it, which its own
+    resource name already tells us — no need to guess from the country.
+    """
+    parts = (resource_name or "").split("/")
+    return parts[1] if len(parts) > 2 and parts[0] == "customers" else None
 
 
 def _get_client() -> GoogleAdsClient:
@@ -128,15 +170,23 @@ def _get_client() -> GoogleAdsClient:
 # ---------------------------------------------------------------------------
 
 
-def get_bid_strategies(country: str = DEFAULT_COUNTRY) -> Tuple[Dict[int, str], Dict[str, int]]:
+def get_bid_strategies(country: str = DEFAULT_COUNTRY,
+                      customer_id: Optional[str] = None) -> Tuple[Dict[int, str], Dict[str, int]]:
     """
     Query DMA Level 1/2/3 bid strategies via accessible_bidding_strategy.
     This finds both account-owned and MCC-owned (cross-account) strategies.
+
+    customer_id scopes the query to one account; None walks every account of the
+    country and merges. The three DMA levels are MCC-owned portfolio strategies
+    (owner 3011145605), so each account reports the same ids and the merge is a
+    no-op — but the primary account wins on a name clash, so an account-owned
+    look-alike can never displace the shared strategy.
+
     Returns:
         (level_to_strategy_resource, strategy_id_to_level) dicts.
         level_to_strategy_resource maps level -> full bidding_strategy resource name for mutations.
     """
-    customer_id = _resolve_customer_id(country)
+    customer_ids = [customer_id] if customer_id else _resolve_customer_ids(country)
     client = _get_client()
     ga_service = client.get_service("GoogleAdsService")
 
@@ -147,33 +197,39 @@ def get_bid_strategies(country: str = DEFAULT_COUNTRY) -> Tuple[Dict[int, str], 
         FROM accessible_bidding_strategy
     """
 
-    response = ga_service.search(customer_id=customer_id, query=query)
-
     level_to_strategy_resource: Dict[int, str] = {}
     strategy_id_to_level: Dict[str, int] = {}
 
-    for row in response:
-        name = row.accessible_bidding_strategy.name
-        strategy_id = str(row.accessible_bidding_strategy.id)
-        owner_id = str(row.accessible_bidding_strategy.owner_customer_id)
+    for cid in customer_ids:
+        for row in ga_service.search(customer_id=cid, query=query):
+            name = row.accessible_bidding_strategy.name
+            strategy_id = str(row.accessible_bidding_strategy.id)
+            owner_id = str(row.accessible_bidding_strategy.owner_customer_id)
 
-        for level, level_name in BID_STRATEGIES.items():
-            if name == level_name:
-                # Build resource name using the owner's customer ID for mutations
-                level_to_strategy_resource[level] = f"customers/{owner_id}/biddingStrategies/{strategy_id}"
-                strategy_id_to_level[strategy_id] = level
-                break
+            for level, level_name in BID_STRATEGIES.items():
+                if name == level_name:
+                    # Build resource name using the owner's customer ID for mutations
+                    level_to_strategy_resource.setdefault(
+                        level, f"customers/{owner_id}/biddingStrategies/{strategy_id}")
+                    strategy_id_to_level[strategy_id] = level
+                    break
 
-    logger.info(f"Found bid strategies: {level_to_strategy_resource}")
+    logger.info(f"Found bid strategies for {customer_ids}: {level_to_strategy_resource}")
     return level_to_strategy_resource, strategy_id_to_level
 
 
-def get_campaigns_with_strategies(country: str = DEFAULT_COUNTRY) -> List[Dict[str, Any]]:
+def get_campaigns_with_strategies(country: str = DEFAULT_COUNTRY,
+                                 customer_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Get all ENABLED campaigns with their accessible bid strategy.
-    Returns list of dicts with campaign_name, resource_name, accessible_bidding_strategy.
+    Returns list of dicts with campaign_name, resource_name, account,
+    accessible_bidding_strategy.
+
+    customer_id scopes it to one account; None walks every account of the country.
+    Campaigns the account's naming convention excludes (ACCOUNT_CAMPAIGN_SKIP,
+    e.g. DMA NL 2's `_label` set) are dropped here, so no caller can act on them.
     """
-    customer_id = _resolve_customer_id(country)
+    customer_ids = [customer_id] if customer_id else _resolve_customer_ids(country)
     client = _get_client()
     ga_service = client.get_service("GoogleAdsService")
 
@@ -183,26 +239,37 @@ def get_campaigns_with_strategies(country: str = DEFAULT_COUNTRY) -> List[Dict[s
         WHERE campaign.status = 'ENABLED'
     """
 
-    response = ga_service.search(customer_id=customer_id, query=query)
-
     campaigns = []
-    for row in response:
-        campaigns.append({
-            "campaign_name": row.campaign.name,
-            "resource_name": row.campaign.resource_name,
-            "accessible_bidding_strategy": str(row.campaign.accessible_bidding_strategy),
-        })
+    skipped_by_name = 0
+    for cid in customer_ids:
+        for row in ga_service.search(customer_id=cid, query=query):
+            if _skip_campaign(cid, row.campaign.name):
+                skipped_by_name += 1
+                continue
+            campaigns.append({
+                "campaign_name": row.campaign.name,
+                "resource_name": row.campaign.resource_name,
+                "account": cid,
+                "accessible_bidding_strategy": str(row.campaign.accessible_bidding_strategy),
+            })
 
-    logger.info(f"Found {len(campaigns)} enabled campaigns")
+    logger.info(f"Found {len(campaigns)} enabled campaigns in {customer_ids} "
+                f"({skipped_by_name} skipped by name convention)")
     return campaigns
 
 
-def get_campaign_metrics(start_days_ago: int = 9, end_days_ago: int = 3, country: str = DEFAULT_COUNTRY) -> Dict[str, Dict[str, Any]]:
+def get_campaign_metrics(start_days_ago: int = 9, end_days_ago: int = 3, country: str = DEFAULT_COUNTRY,
+                        customer_id: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
     """
     Get per-campaign metrics: clicks, conversions_value, cost_micros.
     Also calculates OPB (conversions_value / clicks) and cost in EUR.
+
+    Keyed by campaign NAME, so pass customer_id to keep one account's numbers
+    separate (that is what run_dma_bidding does). With customer_id=None the
+    accounts of a country are merged; names don't overlap between them today, and
+    if one ever did its metrics would add up rather than clobber each other.
     """
-    customer_id = _resolve_customer_id(country)
+    customer_ids = [customer_id] if customer_id else _resolve_customer_ids(country)
     client = _get_client()
     ga_service = client.get_service("GoogleAdsService")
 
@@ -216,33 +283,38 @@ def get_campaign_metrics(start_days_ago: int = 9, end_days_ago: int = 3, country
             AND segments.date BETWEEN '{start_date}' AND '{end_date}'
     """
 
-    response = ga_service.search(customer_id=customer_id, query=query)
-
     metrics: Dict[str, Dict[str, Any]] = {}
-    for row in response:
-        name = row.campaign.name
-        if name not in metrics:
-            metrics[name] = {"clicks": 0, "conversions_value": 0.0, "cost_micros": 0}
+    for cid in customer_ids:
+        for row in ga_service.search(customer_id=cid, query=query):
+            name = row.campaign.name
+            if _skip_campaign(cid, name):
+                continue
+            if name not in metrics:
+                metrics[name] = {"clicks": 0, "conversions_value": 0.0, "cost_micros": 0}
 
-        metrics[name]["clicks"] += row.metrics.clicks
-        metrics[name]["conversions_value"] += row.metrics.conversions_value
-        metrics[name]["cost_micros"] += row.metrics.cost_micros
+            metrics[name]["clicks"] += row.metrics.clicks
+            metrics[name]["conversions_value"] += row.metrics.conversions_value
+            metrics[name]["cost_micros"] += row.metrics.cost_micros
 
     # Calculate derived metrics
     for name, m in metrics.items():
         m["cost"] = m["cost_micros"] / 1_000_000
         m["opb"] = m["conversions_value"] / m["clicks"] if m["clicks"] > 0 else 0.0
 
-    logger.info(f"Got metrics for {len(metrics)} campaigns (range: {start_date} to {end_date})")
+    logger.info(f"Got metrics for {len(metrics)} campaigns in {customer_ids} "
+                f"(range: {start_date} to {end_date})")
     return metrics
 
 
-def get_dma_cla_omzet(start_days_ago: int = 9, end_days_ago: int = 3, country: str = DEFAULT_COUNTRY) -> Dict[str, float]:
+def get_dma_cla_omzet(start_days_ago: int = 9, end_days_ago: int = 3, country: str = DEFAULT_COUNTRY,
+                     customer_id: Optional[str] = None) -> Dict[str, float]:
     """
     Get DMA/CLA conversion value per campaign.
     Returns dict mapping campaign_name -> all_conversions_value.
+
+    Same account scoping as get_campaign_metrics().
     """
-    customer_id = _resolve_customer_id(country)
+    customer_ids = [customer_id] if customer_id else _resolve_customer_ids(country)
     client = _get_client()
     ga_service = client.get_service("GoogleAdsService")
 
@@ -257,14 +329,15 @@ def get_dma_cla_omzet(start_days_ago: int = 9, end_days_ago: int = 3, country: s
             AND segments.conversion_action_name = '{DMA_CLA_CONVERSION_ACTION}'
     """
 
-    response = ga_service.search(customer_id=customer_id, query=query)
-
     omzet: Dict[str, float] = {}
-    for row in response:
-        name = row.campaign.name
-        omzet[name] = omzet.get(name, 0.0) + row.metrics.all_conversions_value
+    for cid in customer_ids:
+        for row in ga_service.search(customer_id=cid, query=query):
+            name = row.campaign.name
+            if _skip_campaign(cid, name):
+                continue
+            omzet[name] = omzet.get(name, 0.0) + row.metrics.all_conversions_value
 
-    logger.info(f"Got DMA/CLA omzet for {len(omzet)} campaigns")
+    logger.info(f"Got DMA/CLA omzet for {len(omzet)} campaigns in {customer_ids}")
     return omzet
 
 
@@ -273,12 +346,16 @@ def change_bid_strategy(campaign_resource_name: str, new_strategy_resource: str,
     Mutate a campaign's bidding_strategy to a new strategy.
     new_strategy_resource is the full resource name (e.g. customers/{owner_id}/biddingStrategies/{id}).
     Skips mutation if dry_run is True.
+
+    The mutate runs against the account that OWNS the campaign, read straight off
+    its resource name — a country can span several accounts, so deriving it from
+    `country` would send every write to the primary account.
     """
     if dry_run:
         logger.info(f"[DRY RUN] Would change {campaign_resource_name} to strategy {new_strategy_resource}")
         return {"status": "dry_run", "campaign": campaign_resource_name, "new_strategy": new_strategy_resource}
 
-    customer_id = _resolve_customer_id(country)
+    customer_id = _customer_id_from_resource(campaign_resource_name) or _resolve_customer_id(country)
     client = _get_client()
     campaign_service = client.get_service("CampaignService")
 
@@ -314,31 +391,44 @@ def change_bid_strategy(campaign_resource_name: str, new_strategy_resource: str,
 def get_level_stats(country: str = DEFAULT_COUNTRY) -> Dict[str, Any]:
     """
     Get campaign counts per DMA bid strategy level + full campaign list.
+    Counts are the country total across all its accounts; level_counts_by_account
+    breaks the same numbers down per account.
     """
-    level_to_strategy_id, strategy_id_to_level = get_bid_strategies(country=country)
-    campaigns = get_campaigns_with_strategies(country=country)
-
+    accounts = _resolve_customer_ids(country)
     level_counts = {1: 0, 2: 0, 3: 0}
+    level_counts_by_account: Dict[str, Dict[int, int]] = {}
     campaign_list = []
 
-    for c in campaigns:
-        strategy_resource = c.get("accessible_bidding_strategy", "")
-        if strategy_resource:
-            strategy_id = strategy_resource.split("/")[-1]
-            level = strategy_id_to_level.get(strategy_id)
-            if level:
-                level_counts[level] += 1
-                campaign_list.append({
-                    "campaign_name": c["campaign_name"],
-                    "resource_name": c["resource_name"],
-                    "level": level,
-                    "strategy_name": BID_STRATEGIES.get(level, "Unknown"),
-                })
+    for cid in accounts:
+        _, strategy_id_to_level = get_bid_strategies(country=country, customer_id=cid)
+        campaigns = get_campaigns_with_strategies(country=country, customer_id=cid)
+        per_account = {1: 0, 2: 0, 3: 0}
+
+        for c in campaigns:
+            strategy_resource = c.get("accessible_bidding_strategy", "")
+            if strategy_resource:
+                strategy_id = strategy_resource.split("/")[-1]
+                level = strategy_id_to_level.get(strategy_id)
+                if level:
+                    level_counts[level] += 1
+                    per_account[level] += 1
+                    campaign_list.append({
+                        "campaign_name": c["campaign_name"],
+                        "resource_name": c["resource_name"],
+                        "account": cid,
+                        "account_name": ACCOUNT_NAMES.get(cid, cid),
+                        "level": level,
+                        "strategy_name": BID_STRATEGIES.get(level, "Unknown"),
+                    })
+
+        level_counts_by_account[cid] = per_account
 
     total = sum(level_counts.values())
 
     return {
         "level_counts": level_counts,
+        "level_counts_by_account": level_counts_by_account,
+        "accounts": [{"customer_id": cid, "name": ACCOUNT_NAMES.get(cid, cid)} for cid in accounts],
         "total": total,
         "campaigns": campaign_list,
     }
@@ -361,13 +451,17 @@ def run_dma_bidding(
     run_id = len(_run_history) + 1
     start_time = datetime.now()
 
-    logger.info(f"Starting DMA bidding run #{run_id} (country={country}, dry_run={dry_run}, range={start_days_ago}-{end_days_ago})")
+    logger.info(f"Starting DMA bidding run #{run_id} (country={country}, "
+                f"accounts={COUNTRY_ACCOUNT_IDS.get(country.upper())}, dry_run={dry_run}, "
+                f"range={start_days_ago}-{end_days_ago})")
 
-    # Step 1: Gather data
-    level_to_strategy_id, strategy_id_to_level = get_bid_strategies(country=country)
-    campaigns = get_campaigns_with_strategies(country=country)
-    metrics = get_campaign_metrics(start_days_ago, end_days_ago, country=country)
-    dma_cla_omzet = get_dma_cla_omzet(start_days_ago, end_days_ago, country=country)
+    # Step 1: Gather data — PER ACCOUNT. A country can span several accounts (NL
+    # runs on 3800751597 + "DMA NL 2" 4089798584), and everything below is keyed
+    # by campaign name, so each account is fetched and evaluated on its own pass.
+    # That also keeps the bid strategies account-scoped and means a name that
+    # ever existed in both accounts can't have one account's metrics judged
+    # against the other's campaign.
+    accounts = _resolve_customer_ids(country)
 
     # Step 2: Process campaigns
     changes = {
@@ -380,109 +474,134 @@ def run_dma_bidding(
     skipped = []
     no_data = []
     unchanged = []
+    account_summaries = []
 
     exclude_list = [e.lower().strip() for e in (exclude_campaigns or []) if e.strip()]
     include_list = [e.lower().strip() for e in (include_campaigns or []) if e.strip()]
 
-    for c in campaigns:
-        campaign_name = c["campaign_name"]
-        resource_name = c["resource_name"]
-        strategy_resource = c.get("accessible_bidding_strategy", "")
+    for cid in accounts:
+        account_name = ACCOUNT_NAMES.get(cid, cid)
+        level_to_strategy_id, strategy_id_to_level = get_bid_strategies(country=country, customer_id=cid)
+        campaigns = get_campaigns_with_strategies(country=country, customer_id=cid)
+        metrics = get_campaign_metrics(start_days_ago, end_days_ago, country=country, customer_id=cid)
+        dma_cla_omzet = get_dma_cla_omzet(start_days_ago, end_days_ago, country=country, customer_id=cid)
+        evaluated = 0
 
-        if not strategy_resource:
-            continue
+        for c in campaigns:
+            campaign_name = c["campaign_name"]
+            resource_name = c["resource_name"]
+            strategy_resource = c.get("accessible_bidding_strategy", "")
 
-        strategy_id = strategy_resource.split("/")[-1]
-        current_level = strategy_id_to_level.get(strategy_id)
+            if not strategy_resource:
+                continue
 
-        if current_level is None:
-            continue  # Not a DMA campaign
+            strategy_id = strategy_resource.split("/")[-1]
+            current_level = strategy_id_to_level.get(strategy_id)
 
-        # Check include filter (if set, only process matching campaigns)
-        if include_list and not any(incl in campaign_name.lower() for incl in include_list):
-            skipped.append({"campaign_name": campaign_name, "level": current_level, "reason": "not included"})
-            continue
+            if current_level is None:
+                continue  # Not a DMA campaign
 
-        # Check exclusions (case-insensitive substring)
-        if exclude_list and any(excl in campaign_name.lower() for excl in exclude_list):
-            skipped.append({"campaign_name": campaign_name, "level": current_level, "reason": "excluded"})
-            continue
+            evaluated += 1
 
-        # Get metrics
-        m = metrics.get(campaign_name)
-        omzet = dma_cla_omzet.get(campaign_name, 0.0)
+            # Check include filter (if set, only process matching campaigns)
+            if include_list and not any(incl in campaign_name.lower() for incl in include_list):
+                skipped.append({"campaign_name": campaign_name, "account": cid,
+                                "account_name": account_name, "level": current_level,
+                                "reason": "not included"})
+                continue
 
-        if not m or m["clicks"] == 0:
-            no_data.append({"campaign_name": campaign_name, "level": current_level})
-            continue
+            # Check exclusions (case-insensitive substring)
+            if exclude_list and any(excl in campaign_name.lower() for excl in exclude_list):
+                skipped.append({"campaign_name": campaign_name, "account": cid,
+                                "account_name": account_name, "level": current_level,
+                                "reason": "excluded"})
+                continue
 
-        cost = m["cost"]
-        clicks = m["clicks"]
-        conversions_value = m["conversions_value"]
-        opb = m["opb"]
-        marge = omzet - cost
-        roas = omzet / cost if cost > 0 else 0.0
+            # Get metrics
+            m = metrics.get(campaign_name)
+            omzet = dma_cla_omzet.get(campaign_name, 0.0)
 
-        campaign_info = {
-            "campaign_name": campaign_name,
-            "resource_name": resource_name,
-            "current_level": current_level,
-            "marge": round(marge, 2),
-            "opb": round(opb, 4),
-            "clicks": clicks,
-            "roas": round(roas, 2),
-            "cost": round(cost, 2),
-            "dma_cla_omzet": round(omzet, 2),
-        }
+            if not m or m["clicks"] == 0:
+                no_data.append({"campaign_name": campaign_name, "account": cid,
+                                "account_name": account_name, "level": current_level})
+                continue
 
-        new_level = current_level
+            cost = m["cost"]
+            clicks = m["clicks"]
+            conversions_value = m["conversions_value"]
+            opb = m["opb"]
+            marge = omzet - cost
+            roas = omzet / cost if cost > 0 else 0.0
 
-        # Rule: Decrease if marge < -10
-        if marge < -10:
-            if current_level == 3:
-                new_level = 2
-                campaign_info["change"] = "3_to_2"
-                changes["3_to_2"].append(campaign_info)
-            elif current_level == 2:
-                new_level = 1
-                campaign_info["change"] = "2_to_1"
-                changes["2_to_1"].append(campaign_info)
-            elif current_level == 1:
-                campaign_info["change"] = "stuck_l1"
-                changes["stuck_l1"].append(campaign_info)
-                continue  # No strategy change possible
+            campaign_info = {
+                "campaign_name": campaign_name,
+                "resource_name": resource_name,
+                "account": cid,
+                "account_name": account_name,
+                "current_level": current_level,
+                "marge": round(marge, 2),
+                "opb": round(opb, 4),
+                "clicks": clicks,
+                "roas": round(roas, 2),
+                "cost": round(cost, 2),
+                "dma_cla_omzet": round(omzet, 2),
+            }
 
-        # Rule: Increase if marge > 10 AND clicks > 39 AND roas >= 1.30
-        elif marge > 10 and clicks > 39 and roas >= 1.30:
-            if current_level == 1 and opb > 0.15:
-                new_level = 2
-                campaign_info["change"] = "1_to_2"
-                changes["1_to_2"].append(campaign_info)
-            elif current_level == 2 and opb > 0.20:
-                new_level = 3
-                campaign_info["change"] = "2_to_3"
-                changes["2_to_3"].append(campaign_info)
+            new_level = current_level
+
+            # Rule: Decrease if marge < -10
+            if marge < -10:
+                if current_level == 3:
+                    new_level = 2
+                    campaign_info["change"] = "3_to_2"
+                    changes["3_to_2"].append(campaign_info)
+                elif current_level == 2:
+                    new_level = 1
+                    campaign_info["change"] = "2_to_1"
+                    changes["2_to_1"].append(campaign_info)
+                elif current_level == 1:
+                    campaign_info["change"] = "stuck_l1"
+                    changes["stuck_l1"].append(campaign_info)
+                    continue  # No strategy change possible
+
+            # Rule: Increase if marge > 10 AND clicks > 39 AND roas >= 1.30
+            elif marge > 10 and clicks > 39 and roas >= 1.30:
+                if current_level == 1 and opb > 0.15:
+                    new_level = 2
+                    campaign_info["change"] = "1_to_2"
+                    changes["1_to_2"].append(campaign_info)
+                elif current_level == 2 and opb > 0.20:
+                    new_level = 3
+                    campaign_info["change"] = "2_to_3"
+                    changes["2_to_3"].append(campaign_info)
+                else:
+                    unchanged.append(campaign_info)
+                    continue
             else:
                 unchanged.append(campaign_info)
                 continue
-        else:
-            unchanged.append(campaign_info)
-            continue
 
-        # Apply bid strategy change
-        if new_level != current_level:
-            new_strategy_resource = level_to_strategy_id.get(new_level)
-            if new_strategy_resource:
-                result = change_bid_strategy(resource_name, new_strategy_resource, dry_run=dry_run, country=country)
-                campaign_info["mutation_result"] = result
-            else:
-                # Strategy for target level not configured — record as not-applied
-                # so the campaign row isn't silently claimed as moved.
-                campaign_info["mutation_result"] = {
-                    "success": False,
-                    "skipped": True,
-                    "reason": f"No bid strategy configured for level {new_level}",
-                }
+            # Apply bid strategy change
+            if new_level != current_level:
+                new_strategy_resource = level_to_strategy_id.get(new_level)
+                if new_strategy_resource:
+                    result = change_bid_strategy(resource_name, new_strategy_resource, dry_run=dry_run, country=country)
+                    campaign_info["mutation_result"] = result
+                else:
+                    # Strategy for target level not configured — record as not-applied
+                    # so the campaign row isn't silently claimed as moved.
+                    campaign_info["mutation_result"] = {
+                        "success": False,
+                        "skipped": True,
+                        "reason": f"No bid strategy configured for level {new_level}",
+                    }
+
+        account_summaries.append({
+            "customer_id": cid,
+            "name": account_name,
+            "enabled_campaigns": len(campaigns),
+            "on_dma_level": evaluated,
+        })
 
     # Step 3: Build summary
     end_time = datetime.now()
@@ -507,6 +626,7 @@ def run_dma_bidding(
     run_result = {
         "run_id": run_id,
         "country": country,
+        "accounts": account_summaries,
         "dry_run": dry_run,
         "start_days_ago": start_days_ago,
         "end_days_ago": end_days_ago,

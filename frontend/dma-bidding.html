@@ -148,6 +148,9 @@
                         <div class="detail" id="statTotalDetail"></div>
                     </div>
                 </div>
+                <!-- Per-account split: NL runs on two accounts (DMA NL + DMA NL 2),
+                     so the totals above are a sum. Hidden for single-account markets. -->
+                <div class="text-center small mb-4" id="statsAccounts" style="display: none; color: #5e4a90;"></div>
 
                 <!-- Run Section -->
                 <div class="card mb-4">
@@ -347,6 +350,22 @@
                 document.getElementById('statL3').textContent = counts[3] || 0;
                 document.getElementById('statTotal').textContent = data.total || 0;
                 document.getElementById('statTotalDetail').textContent = `${counts[1] || 0} + ${counts[2] || 0} + ${counts[3] || 0}`;
+
+                // Per-account split — only worth showing when the market has >1 account.
+                const byAcct = data.level_counts_by_account || {};
+                const accts = data.accounts || [];
+                const acctEl = document.getElementById('statsAccounts');
+                if (accts.length > 1) {
+                    acctEl.innerHTML = accts.map(a => {
+                        const c = byAcct[a.customer_id] || {};
+                        const tot = (c[1] || 0) + (c[2] || 0) + (c[3] || 0);
+                        return `<strong>${escHtml(a.name)}</strong>: ${tot} `
+                             + `<span class="text-muted">(L1 ${c[1] || 0} / L2 ${c[2] || 0} / L3 ${c[3] || 0})</span>`;
+                    }).join(' &nbsp;·&nbsp; ');
+                    acctEl.style.display = '';
+                } else {
+                    acctEl.style.display = 'none';
+                }
             } catch (err) {
                 console.error('Failed to load stats:', err);
             }
@@ -420,6 +439,7 @@
             meta.innerHTML = `
                 <small class="text-muted">
                     Run #${data.run_id} | <strong>${data.country || 'NL'}</strong>
+                    ${(data.accounts || []).length > 1 ? '| ' + escHtml((data.accounts || []).map(a => a.name).join(' + ')) : ''}
                     | ${data.dry_run ? '<span class="badge bg-info">DRY RUN</span>' : '<span class="badge bg-danger">LIVE</span>'}
                     | Range: ${data.date_range.start} to ${data.date_range.end}
                     | Duration: ${data.duration_seconds}s
@@ -441,6 +461,8 @@
 
             const tables = document.getElementById('resultTables');
             let html = '';
+            // Only show the account column when there is something to distinguish.
+            const multiAccount = (data.accounts || []).length > 1;
 
             const categories = [
                 { key: '1_to_2', label: 'Level 1 &rarr; Level 2 (Verhogingen)' },
@@ -456,12 +478,13 @@
 
                 html += `<h6 class="mt-3" style="color: #5e4a90;">${cat.label} (${items.length})</h6>`;
                 html += `<div class="table-responsive"><table class="table table-sm result-table"><thead><tr>
-                    <th class="col-campaign">Campagne</th><th class="col-metric">Marge</th><th class="col-metric">OPB</th><th class="col-metric">Klikken</th><th class="col-metric">ROAS</th>
+                    <th class="col-campaign">Campagne</th>${multiAccount ? '<th class="col-metric">Account</th>' : ''}<th class="col-metric">Marge</th><th class="col-metric">OPB</th><th class="col-metric">Klikken</th><th class="col-metric">ROAS</th>
                 </tr></thead><tbody>`;
                 for (const item of items) {
                     const margeClass = item.marge >= 0 ? 'text-success' : 'text-danger';
                     html += `<tr>
                         <td>${escHtml(item.campaign_name)}</td>
+                        ${multiAccount ? `<td>${escHtml(item.account_name || item.account || '')}</td>` : ''}
                         <td class="${margeClass}">&euro;${item.marge.toFixed(2)}</td>
                         <td>&euro;${item.opb.toFixed(4)}</td>
                         <td>${item.clicks}</td>
@@ -490,11 +513,12 @@
         }
 
         function exportRunToExcel(runData) {
-            const rows = [['Categorie', 'Campagne', 'Marge', 'OPB', 'Klikken', 'ROAS', 'Kosten', 'DMA/CLA Omzet']];
+            const rows = [['Categorie', 'Campagne', 'Account', 'Marge', 'OPB', 'Klikken', 'ROAS', 'Kosten', 'DMA/CLA Omzet']];
 
             for (const [key, label] of Object.entries(labelMap)) {
                 for (const item of (runData.changes[key] || [])) {
-                    rows.push([label, item.campaign_name, item.marge, item.opb, item.clicks, item.roas, item.cost, item.dma_cla_omzet]);
+                    rows.push([label, item.campaign_name, item.account_name || item.account || '',
+                               item.marge, item.opb, item.clicks, item.roas, item.cost, item.dma_cla_omzet]);
                 }
             }
 
