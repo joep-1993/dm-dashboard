@@ -1,6 +1,78 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Eén market op twee Google Ads accounts: drie plekken waar `country` stil fout is (2026-08-20)
+
+DMA bidding en DMA exclusions moesten voor NL naast `3800751597` ook `4089798584` ("DMA NL 2")
+pakken. Dat is niet "een tweede id in de dict": op drie plekken was het land de impliciete
+sleutel naar één account, en twee daarvan falen stil.
+
+**1. Name-keyed metrics.** Bidding haalt `metrics` en `dma_cla_omzet` op als `{campagnenaam:
+…}` en beoordeelt daar de regels op. Voeg je een tweede account toe aan dezelfde query-serie,
+dan tellen twee gelijknamige campagnes bij elkaar op en beslist de ladder over de verkeerde
+cijfers. Gemeten: 9863 namen in het oude account, 2112 in het nieuwe, **nul overlap** — dus
+vandaag was het samenvoegen toevallig veilig. De structuur mag daar niet van afhangen, dus nu
+één pass per account (strategieën, campagnes, metrics, omzet) en `account` op elke rij.
+
+**2. De mutatie ging naar het primaire account.** `change_bid_strategy()` bepaalde zijn
+`customer_id` met `_resolve_customer_id(country)`. Met een land op meerdere accounts stuurt dat
+élke write naar het eerste — inclusief de revert-knop, die dus campagnes in account B in
+account A probeert te wijzigen. De campagne draagt het antwoord zelf al mee:
+`customers/<cid>/campaigns/<id>`. Regel: leid het account af uit het OBJECT (resource name, of
+een opgeslagen `customer_id` per target), nooit uit de market.
+
+**3. De per-ad-group lock.** In exclusions serialiseert `_ad_group_lock(ad_group_id)` twee
+schrijvers op dezelfde criterion-boom. Die sleutel is nu `(account, ad group)`: een boom is
+alleen binnen zijn eigen account gedeeld, en een id-collisie over accounts zou anders twee
+onafhankelijke writes onnodig achter elkaar zetten (of erger, valse veiligheid geven als je de
+sleutel ooit andersom leest).
+
+**Twee naamconventies in één market.** DMA NL 2 heet `PLA/<cat>_<tier>_limit` en
+`PLA/<cat>_<tier>_label`, het oude account `PLA/<cat>_<tier>`. De categorie-regex is daarom per
+account (`ACCOUNT_CATEGORY_RES`), en omdat de twee patronen elkaar uitsluiten — `PLA/X_a`
+matcht de suffix-variant nooit en omgekeerd — mag een caller die alléén een naam heeft
+(`_campaign_family()`, dat uit een serving-rij komt) de unie van alle patronen gebruiken zonder
+dubbelzinnigheid. Zonder dat stond de hele nieuwe familie als `other` in `uncovered_campaigns`
+terwijl exclusions ze wél dekt.
+
+**`_` is een wildcard in GAQL LIKE, en er is geen ontsnapping.** `campaign.name LIKE '%_label%'`
+gaf in het oude account vier hits: `PLA/Onbekend_label` én `PLA/Postlabels_a/b/c` — "Pos**t** +
+label" matcht, want `_` staat voor één willekeurig teken. De Redshift-truc `LIKE … ESCAPE '!'`
+(zie de `dm_tools`-audit) bestaat hier niet: `query_error: UNEXPECTED_INPUT` op ESCAPE. En een
+WHERE met haakjes of `OR` ook niet: `BAD_FIELD_NAME: invalid field name '('`. Filter dus breed
+in GAQL en precies in Python (`"_label" in name`), of match met een regex.
+
+**Portfolio-strategieën zijn MCC-eigendom, dus een nieuw account zit er direct op.**
+`accessible_bidding_strategy` in 4089798584 gaf dezelfde drie Level-ids met
+`owner_customer_id = 3011145605`, en de mutatie zet `campaign.bidding_strategy =
+customers/3011145605/biddingStrategies/<id>` — die verwijzing is account-overstijgend geldig.
+Daarom kan een campagne in het nieuwe account zonder extra inrichting op de ladder. Wél per
+account resolven en niet één keer voor het land: een account-eigen strategie met dezelfde naam
+zou anders de gedeelde verdringen (nu `setdefault`, primair account wint).
+
+**De twee tools zien hetzelfde account NIET hetzelfde.** Bidding filtert
+`campaign.status = 'ENABLED'`, exclusions `!= 'REMOVED'`. Alle 2112 campagnes in DMA NL 2 staan
+nu PAUSED, dus bidding ziet er nul en exclusions alle. Dat is de goede kant op: een exclusion
+landt er al vóórdat de campagnes aangaan, zodat de negative er staat als ze live gaan, en de
+bidding-ladder begint pas te bewegen zodra er echt geadverteerd wordt.
+
+**Een live schrijfpad testen zonder risico: doe het op een PAUSED campagne.** Voor de
+cross-account write was één echte mutatie de enige overtuigende test. Recept: scope met
+`campaign_filter` naar precies één paused campagne (assert dat de plan-lijst 1 target is en het
+juiste `customer_id` draagt), lees het blad vóór (`type/index/value/bid`), `apply()`, lees na
+(SUBDIVISION + negative op de item-id), `enable()`, lees opnieuw en vergelijk veld voor veld met
+de beginstand. Hier kwam de boom exact terug op `UNIT INDEX3 '' bid 200000` en bleef er geen
+negative achter. Ruim daarna het testrecord in `dma_exclusions` op, anders staat je test in de
+Saved-lijst van de tool.
+
+**De asymmetrie tussen de twee tools is een keuze, geen slordigheid.** Bidding negeert `_label`
+(die campagnes horen niet op de ladder), exclusions sluit `_limit` én `_label` uit (een OOS-item
+mag nergens adverteren, en een negative verandert de bidding niet). En de skip in bidding is
+per account: `3800751597` heeft zelf een ENABLED `PLA/Onbekend_label` op Level 2 die de tool al
+beheert, dus een globale naamregel zou die stil laten vallen. Prijs van de brede dekking: een
+exclusion in NL raakt ~2x zoveel ad groups (11 i.p.v. 5 op het testitem), dus een bulk-OOS-run
+schrijft ongeveer het dubbele.
+
 ## Een gedeelde regel die drie andere staten moet laten staan: `:not()`, niet volgorde (2026-08-20)
 
 Outline-knoppen app-breed transparant maken in een kaartkop is één declaratie, maar hij moet

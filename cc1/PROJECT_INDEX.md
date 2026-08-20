@@ -85,6 +85,30 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   │                            #   a summary DM via Slack chat.postMessage.
 │   ├── dma_plus_router.py       # DMA+ APIRouter
 │   ├── dma_plus_service.py      # DMA+ service: wrapper for campaign_processor with progress + history
+│   ├── dma_bidding_router.py    # DMA Bidding APIRouter (stats / run / history / revert)
+│   ├── dma_bidding_service.py   # DMA Bidding: moves campaigns between the portfolio
+│   │                            #   strategies DMA Level 1/2/3 on marge/OPB/ROAS rules.
+│   │                            #   A country can span SEVERAL accounts
+│   │                            #   (COUNTRY_ACCOUNT_IDS: NL = 3800751597 + 4089798584
+│   │                            #   "DMA NL 2", BE = 9920951707) and is walked one pass
+│   │                            #   per account because metrics are keyed by campaign
+│   │                            #   name. ACCOUNT_CAMPAIGN_SKIP drops DMA NL 2's
+│   │                            #   `_label` set (those run on DMA: Label A/B/C, not the
+│   │                            #   ladder); the mutation account comes from
+│   │                            #   campaign.resource_name, never from `country`.
+│   │                            #   Only looks at campaign.status = ENABLED.
+│   │                            #   History in backend/data/dma_bidding_history.json.
+│   ├── dma_exclusions_router.py # DMA Exclusions APIRouter (lookup/preview/apply/enable, OOS)
+│   ├── dma_exclusions_service.py # DMA Exclusions: negative product_item_id UNIT in the
+│   │                            #   listing tree of the category trio + Amazon bestsellers
+│   │                            #   + APlus, and the reverse (remove & prune). Same
+│   │                            #   multi-account map (ACCOUNTS), per-account category
+│   │                            #   naming (ACCOUNT_CATEGORY_RES: `PLA/<cat>_<tier>` in
+│   │                            #   DMA NL, `_limit` AND `_label` in DMA NL 2 — both get
+│   │                            #   excluded). Every target stores its own customer_id;
+│   │                            #   records predating the 2nd account fall back to the
+│   │                            #   market's primary. Uses status != REMOVED, so PAUSED
+│   │                            #   campaigns are included. Table: dma_exclusions.
 │   ├── campaign_processor.py    # DMA campaign processor (8.5K lines, copied from dma_script)
 │   ├── google_ads_helpers.py    # Google Ads helper functions (listing trees, campaigns, ad groups)
 │   ├── category_forms.json     # Pre-computed Dutch singular/plural forms (3,564 entries)
@@ -123,6 +147,10 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   │                      #   with Slack DM + per-check tables, run-history hydrated
 │   │                      #   from GET /api/seo-rulings/last on page load)
 │   ├── dma-plus.html      # DMA+ (include/exclude shops, validate CL1/ads/trees)
+│   ├── dma-bidding.html   # DMA Bidding (level stat cards + per-account split, dry-run
+│   │                      #   toggle, result tables with Account column, run history)
+│   ├── dma-exclusions.html # DMA Exclusions (item-id preview/apply, OOS scan + bulk
+│   │                      #   exclude/re-enable, saved list with per-target campaigns)
 │   ├── css/style.css     # Custom theme (#059CDF blue, #9C3095 purple, #A0D168 green)
 │   └── js/
 │       ├── app.js        # SEO content frontend logic
@@ -563,6 +591,36 @@ Check 4 (title variables) now samples 3 URLs each for `!!DISCOUNT!!`, `!!NR!!`, 
 - `GET /api/dma-plus/countries` - Available countries (NL/BE)
 - `GET /api/dma-plus/cat-cache-status` - Category index cache status
 - `POST /api/dma-plus/warm-cat-cache` - Pre-load category index from Taxonomy API v2 (~5 min)
+
+### DMA Bidding
+- `GET /api/dma-bidding/health` - Health check
+- `GET /api/dma-bidding/stats?country=NL|BE` - Campaign counts per DMA level, plus
+  `level_counts_by_account` + `accounts` (NL spans 3800751597 and 4089798584)
+- `POST /api/dma-bidding/run?country=NL|BE&dry_run=true&start_days_ago=9&end_days_ago=3&exclude_campaigns=&include_campaigns=` -
+  Evaluate every account of the country and (unless dry_run) move campaigns between
+  DMA Level 1/2/3. Result carries `accounts` (enabled + on-ladder counts) and an
+  `account`/`account_name` on every campaign row.
+- `GET /api/dma-bidding/history` / `GET /api/dma-bidding/history/{run_id}` / `DELETE /api/dma-bidding/history`
+- `POST /api/dma-bidding/revert?country=NL|BE` - Body `[{campaign_name, target_level}]`;
+  looks the campaign up across all accounts of the country and writes in its own account.
+
+### DMA Exclusions
+- `GET /api/dma-exclusions/health` - Health check
+- `GET /api/dma-exclusions/lookup?item_id=&market=NL|BE` - Resolve category/CL0/shop from
+  shopping_performance_view (one query per account, run concurrently)
+- `GET /api/dma-exclusions/preview?item_id=&market=&shop=&campaign_filter=` - Read-only plan;
+  each target carries `customer_id` (the account) + `action`
+- `POST /api/dma-exclusions/apply?item_id=&market=&shop=&campaign_filter=` - Apply live and
+  persist for re-enable
+- `POST /api/dma-exclusions/enable/{record_id}` - Remove the negative and prune the tree back
+- `GET /api/dma-exclusions/list` / `GET /api/dma-exclusions/exclusion/{record_id}/targets` /
+  `GET /api/dma-exclusions/export/xlsx`
+- `POST /api/dma-exclusions/backfill-headline-shops` - Fill missing headline_shop from ES
+- `GET /api/dma-exclusions/oos/scan?market=&limit=` - OOS candidates live in DMA with 30d
+  spend/clicks summed over the accounts
+- `POST /api/dma-exclusions/oos/exclude` - Bulk exclude (grouped per account + ad group)
+- `GET /api/dma-exclusions/oos/recovered?market=` / `POST /api/dma-exclusions/oos/reenable?market=`
+- `POST /api/dma-exclusions/cleanup-enabled?market=` - Delete resolved records (bookkeeping)
 
 ### Labels Applied by Thema Ads
 **Ad Groups get labeled with:**

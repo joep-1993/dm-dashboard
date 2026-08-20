@@ -4,6 +4,42 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-20 — DMA bidding + exclusions kijken ook naar account 4089798584 (DMA NL 2)
+
+Commit `7f9422f` op `main` (2 services + 2 pagina's). Leerpunten in LEARNINGS (zelfde datum);
+het account en de `_label`-asymmetrie staan ook in auto-memory.
+
+- [x] **NL loopt in beide tools op twee accounts** — `3800751597` + `4089798584`. Bidding:
+      `COUNTRY_ACCOUNT_IDS`, één pass per account (strategieën/campagnes/metrics/omzet) omdat
+      alles name-keyed is. Exclusions: `ACCOUNTS` als lijst, `lookup`/`resolve_targets`/
+      `oos_scan` lopen over alle accounts. BE ongewijzigd.
+- [x] **`_label` overslaan in bidding, alleen in 4089798584** (`ACCOUNT_CAMPAIGN_SKIP`). Per
+      account en niet globaal: het oude account heeft een ENABLED `PLA/Onbekend_label` op
+      Level 2 die de tool al beheert. Gemeten over de paused set: 1056 `_label` geskipt,
+      1056 `_limit` gemapt op L1 670 / L2 152 / L3 234.
+- [x] **Exclusions pakt `_limit` én `_label`** (keuze van Joep) via een account-eigen
+      categorie-regex. Preview op `nl-nl-gold-8716096010459`: 11 targets, 5 in DMA NL
+      (trio + bestsellers + APlus) en 6 in DMA NL 2, geen warnings.
+- [x] **Mutaties gaan naar het account van het object.** Bidding leidt het af uit
+      `campaign.resource_name` (ook de revert-knop), exclusions bewaart `customer_id` per
+      target in de record; oude records zonder dat veld vallen terug op het primaire account.
+      Ad-group-lock en de `oos_exclude`-groepering zijn nu per (account, ad group).
+- [x] Live schrijftest op de paused `PLA/Dartborden_c_label`: negative in
+      `customers/4089798584/...`, `enable` klapte de boom terug naar exact
+      `UNIT INDEX3 '' bid 200000`. Testrecord daarna uit `dma_exclusions` verwijderd.
+- [x] Frontend: per-account regel onder de statkaarten (DMA Bidding) en een Account-kolom in
+      resultaat/export/preview/saved-detail — alleen zichtbaar bij >1 account, dus BE ziet
+      er hetzelfde uit als eerst.
+- [ ] **Nakijken zodra DMA NL 2 aangaat.** Alle 2112 campagnes staan nu PAUSED en bidding
+      filtert op ENABLED, dus die kant is nog niet met echte data gelopen: eerste run in dry
+      run bekijken (verwacht ~1056 `_limit`-campagnes op de ladder, nul `_label`).
+- [ ] **Bulk-OOS in NL schrijft nu ~2x zoveel criteria** (11 i.p.v. 5 ad groups op het
+      testitem). Als een run daardoor te lang duurt: de accounts binnen `_ga_batch_agg` /
+      de apply-fase parallel trekken i.p.v. serieel per account.
+- [ ] Geen `PLA/APlus` en geen `PLA/Amazon bestsellers` in DMA NL 2 — die branches zijn daar
+      een stille no-op. Komen ze er later, dan pakt de tool ze automatisch; geen actie, alleen
+      weten.
+
 ### 2026-08-19 — Healthscore-console herzien op ~20 punten van Joep
 
 Commit `6dee44b` op `main` (frontend + backend). Leerpunten in LEARNINGS (zelfde datum),
