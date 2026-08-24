@@ -39,6 +39,14 @@ SEARCH_LOCALE = "nl-nl"
 MAX_WORKERS = 12
 HTTP_TIMEOUT = 30
 
+# V61: de loader had geen enkele rem. 12 threads tegen een endpoint van ~250 ms is
+# ~48 req/s, terwijl search_derived 20 QPS documenteert als de proces-globale cap
+# die "met IT afgestemd moet worden" voordat je 'm verhoogt. Met de V60-tweede-pas
+# erbij ging een rebuild van ~3,5k naar ~16,6k calls, en `start_optimize` trapt die
+# rebuild automatisch af zodra de cache 7 dagen oud is — dus vlak voor een run van
+# een gebruiker. Zelfde token bucket als de rest, env-tunebaar.
+FACETS_QPS = float(os.getenv("RURL_FACETS_QPS", "20"))
+
 # V60: an unfiltered /search/products call truncates every facet's value list to
 # the N values with the most products. N is per facet, not exposed by the API and
 # not settable by any query param (probed: facetValueLimit, facetLimit,
@@ -70,11 +78,16 @@ def _atomic_to_csv(df: pd.DataFrame, cache_path: Path) -> None:
     os.replace(tmp, cache_path)
 
 
-def _fetch_json(url: str, retries: int = 2) -> dict | list:
-    """GET JSON with a small retry. Raises on final failure."""
+def _fetch_json(url: str, retries: int = 2, bucket=None) -> dict | list:
+    """GET JSON with a small retry. Raises on final failure.
+
+    `bucket` paces the call against FACETS_QPS; a rebuild fans out over 12
+    threads and would otherwise hammer the live Search API."""
     last_exc: Exception | None = None
     for _ in range(retries + 1):
         try:
+            if bucket is not None:
+                bucket.acquire()
             req = urllib.request.Request(url, headers={"Accept": "application/json"})
             with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
                 return json.loads(resp.read().decode("utf-8"))
@@ -99,6 +112,10 @@ class DataLoader:
 
     def __init__(self, use_cache: bool = True):
         self.use_cache = use_cache
+        # Gedeeld over alle threads van deze loader, zodat pass 1 en de V60
+        # tweede pas samen onder FACETS_QPS blijven.
+        from src.search_derived import _TokenBucket
+        self._bucket = _TokenBucket(FACETS_QPS)
         self._tree_cache: dict | None = None
         self._facet_meta_cache: dict[int, str] | None = None
 
@@ -144,7 +161,7 @@ class DataLoader:
         def fetch_detail(cid: int):
             url = f"{TAXV2_BASE_URL}/api/Categories/{cid}?includeSubCategories=true&includeFacets=false"
             try:
-                return cid, _fetch_json(url)
+                return cid, _fetch_json(url, bucket=self._bucket)
             except Exception as e:
                 return cid, {"__error__": str(e)}
 
@@ -254,8 +271,7 @@ class DataLoader:
         _atomic_to_csv(df, cache_path)
         return df
 
-    @staticmethod
-    def _search_category_facets(slug: str, filter_facet: str = "",
+    def _search_category_facets(self, slug: str, filter_facet: str = "",
                                 filter_value=None) -> list:
         """Return the `facets` block for a category. With `filter_facet` set,
         THAT facet's value list comes back complete instead of truncated to its
@@ -270,7 +286,7 @@ class DataLoader:
         if filter_facet and filter_value is not None:
             params[f"filters[{filter_facet}][0]"] = str(filter_value)
         url = f"{SEARCH_BASE_URL}/search/products?{urllib.parse.urlencode(params)}"
-        data = _fetch_json(url)
+        data = _fetch_json(url, bucket=getattr(self, '_bucket', None))
         return data.get("facets") or []
 
     def _reprobe_truncated_facet_values(self, pair_values: dict, pair_ctx: dict,

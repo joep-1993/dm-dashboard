@@ -3656,7 +3656,8 @@ def process_url_v2(args):
             _ps_rmain = ''
         if _ps_rmain and _ps_rmain != parsed.main_category:  # cross-maincat jump
             from src.facet_probe import derive_insubcat_facet as _derive_insub_ps
-            _ps_picks = _derive_insub_ps(parsed.subcategory_name, parsed.keyword)[:3]
+            _ps_picks = _derive_insub_ps(parsed.subcategory_name, parsed.keyword,
+                                         cache_only=True)[:3]
             if _ps_picks:
                 _ps_frags = [f"{p['facet_name']}~{p['value_id']}" for p in _ps_picks]
                 final_redirect_url = (f"https://www.beslist.nl/products/"
@@ -3702,7 +3703,7 @@ def process_url_v2(args):
             _r4_slug = ''
         if _r4_slug:
             from src.facet_probe import derive_insubcat_facet as _derive_insub
-            _r4_picks = _derive_insub(_r4_slug, parsed.keyword)[:3]
+            _r4_picks = _derive_insub(_r4_slug, parsed.keyword, cache_only=True)[:3]
             if _r4_picks:
                 _r4_frags = [f"{p['facet_name']}~{p['value_id']}" for p in _r4_picks]
                 final_redirect_url = (final_redirect_url.rstrip('/')
@@ -4303,6 +4304,21 @@ def main():
                 from src import facet_probe as _fp
                 fp_stats = _fp.prefetch_facet_probes(_pairs)
                 print(f"[V29 facet-probe] Prefetch done: {fp_stats}")
+
+                # V61 (RC4): the two in-subcat enrichment sites used to fetch
+                # live from inside the pool. Only the first one's key is
+                # derivable from the input — (parsed.subcategory_name, keyword) —
+                # so prefetch those here; the second site keys on the subcat the
+                # cascade lands on and is now cache-only, i.e. it enriches when
+                # this pass (or an earlier run) happened to cover that pair.
+                _rc4_pairs = []
+                for u in urls_to_process:
+                    p = _parser.parse(u)
+                    if p.is_valid and p.subcategory_name and p.keyword:
+                        _rc4_pairs.append((p.subcategory_name, p.keyword))
+                if _rc4_pairs:
+                    rc4_stats = _fp.prefetch_insubcat_facets(_rc4_pairs)
+                    print(f"[RC4] Prefetch done: {rc4_stats}")
 
             # Fix E: cross-main-category verification probes. For each URL whose
             # head noun names a subcategory in ANOTHER main category, prefetch a

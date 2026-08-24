@@ -439,8 +439,41 @@ def _extract_enrichment_facets(api_facets, keyword: str) -> list[dict]:
     return picks
 
 
+def prefetch_insubcat_facets(pairs, max_workers: int = MAX_PREFETCH_WORKERS) -> dict:
+    """V61: fill the rc4: cache from the MAIN process, the way V28 and the facet
+    probe already do. Workers call derive_insubcat_facet(cache_only=True), so this
+    is the only place that issues those requests — one shared token bucket instead
+    of a brand-new one per worker per call."""
+    todo = []
+    seen = set()
+    for slug, kw in pairs:
+        if not slug or not kw:
+            continue
+        key = (slug, "rc4:" + kw.strip().lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        if _probe_get(key[0], key[1]) is None:
+            todo.append((slug, kw))
+    if not todo:
+        return {"pairs": len(seen), "fetched": 0, "cached": len(seen)}
+
+    bucket = _TokenBucket(SEARCH_QPS)
+    done = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futs = [ex.submit(derive_insubcat_facet, slug, kw, bucket) for slug, kw in todo]
+        for f in as_completed(futs):
+            try:
+                f.result()
+            except Exception as e:
+                logger.debug("rc4 prefetch failed: %s", e)
+            done += 1
+    return {"pairs": len(seen), "fetched": done, "cached": len(seen) - len(todo)}
+
+
 def derive_insubcat_facet(subcat_slug: str, keyword: str,
-                          bucket: "Optional[_TokenBucket]" = None) -> list[dict]:
+                          bucket: "Optional[_TokenBucket]" = None,
+                          cache_only: bool = False) -> list[dict]:
     """RC4: probe INSIDE an already-resolved subcategory for a distinctive
     non-brand facet the query names, with query relaxation (full query, then each
     significant token longest-first — the exact multi-token query often has ~0
@@ -453,6 +486,15 @@ def derive_insubcat_facet(subcat_slug: str, keyword: str,
     cached = _probe_get(subcat_slug, ck)
     if cached is not None:
         return cached.get("rc4_picks", [])
+    # V61: never fetch from a pool worker. `bucket is None` used to mean "make a
+    # fresh _TokenBucket", whose _next_slot starts at 0 — so the first request of
+    # every call skipped the wait entirely and N worker processes each ran their
+    # own unthrottled 20-QPS budget against the live Search API, while also
+    # writing to the sqlite cache the other workers were reading. A threading
+    # lock cannot span processes, so this path could never honour the cap;
+    # prefetch_insubcat_facets does it once, up front, with one bucket.
+    if cache_only:
+        return []
     from src.validation_rules import STOPWORDS as _SW, SHOP_NAMES as _SN
     toks = [t for t in _re.split(r"[\s\-_]+", keyword.lower())
             if len(t) >= 3 and t not in _SW and t not in _SN and not t.isdigit()]

@@ -54,6 +54,12 @@ def _load_history_from_disk() -> deque:
                 return deque(data, maxlen=200)
         except Exception as e:
             logger.warning(f"Failed to load rurl history from {_HISTORY_FILE}: {e}")
+            # V61: leg het kapotte bestand opzij in plaats van het door de
+            # eerstvolgende append te laten overschrijven.
+            try:
+                _HISTORY_FILE.rename(_HISTORY_FILE.with_suffix(".json.corrupt"))
+            except Exception:
+                pass
     return deque(maxlen=200)
 
 
@@ -61,10 +67,16 @@ def _save_history_to_disk():
     try:
         import json as _json
         _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _HISTORY_FILE.write_text(
+        # V61: schrijf ernaast en hernoem. Een kill tijdens deze write liet
+        # afgekapte JSON achter; bij de volgende start faalde de parse, kwam
+        # _HISTORY leeg op, en schreef de eerstvolgende append die lege deque
+        # over het enige exemplaar van maximaal 200 runs heen.
+        _tmp = _HISTORY_FILE.with_suffix(".json.tmp")
+        _tmp.write_text(
             _json.dumps(list(_HISTORY), default=str, ensure_ascii=False),
             encoding="utf-8",
         )
+        os.replace(_tmp, _HISTORY_FILE)
     except Exception as e:
         logger.warning(f"Failed to save rurl history to {_HISTORY_FILE}: {e}")
 
@@ -143,6 +155,9 @@ def _run_subprocess(task_id: str, argv: list[str], output_path: Path, script: st
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            # V61: eigen procesgroep, zodat een deploy die uvicorn kilt de
+            # optimizer niet meeneemt. Zie de toelichting bij de chunk-Popen.
+            start_new_session=True,
             # Force UTF-8 decode on the parent side too (subprocess already
             # writes UTF-8 via PYTHONIOENCODING). Without this, the parent
             # uses the system default — cp1252 on Windows — and a single
@@ -240,6 +255,9 @@ def _history_append(task_id: str) -> None:
         "error": t.get("error"),
         "output_path": t.get("output_path"),
         "params": t.get("params"),
+        # V61: de pid van het draaiende subprocess, zodat een proces dat een
+        # restart heeft overleefd terug te vinden en te stoppen is.
+        "pid": t.get("pid"),
     }
     with _HISTORY_LOCK:
         # Dedupe by task_id: a single user-initiated run can hit this
@@ -659,6 +677,7 @@ def _do_refresh_facets(log_cb=None) -> None:
         argv, cwd=str(PKG_DIR), env=env,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, bufsize=1, encoding="utf-8", errors="replace",
+        start_new_session=True,   # V61: zie de Popen in _run_script
     )
     assert proc.stdout is not None
     for raw_line in proc.stdout:
@@ -715,6 +734,16 @@ def _refresh_facets_guarded(log_cb=None) -> bool:
         raise
 
 
+def _a_run_is_active() -> bool:
+    """V61: is er een run bezig? De facets-refresh overschrijft facets.csv en
+    gooit de gedeelde pickle weg; een Tier-A-loop leest dat bestand bij elke
+    chunk opnieuw, dus midden in een run vernieuwen levert de volgende chunk een
+    half geschreven CSV op — zichtbaar als niets meer dan "[warn] chunk N
+    produced no output", terwijl de loop vrolijk 20k URL's laat vallen."""
+    with _TASKS_LOCK:
+        return any(t.get("status") == "running" for t in _TASKS.values())
+
+
 def start_facets_refresh() -> Dict[str, Any]:
     """Kick off a background facets.csv refresh (Refresh facets button).
 
@@ -724,6 +753,12 @@ def start_facets_refresh() -> Dict[str, Any]:
         if _FACETS_REFRESH["running"]:
             return {"started": False, "already_running": True,
                     **_facets_status_locked()}
+    # V61: het slot bewaakte alleen refresh-vs-refresh. Een refresh tijdens een
+    # lopende optimizer-run trekt facets.csv onder de volgende chunk vandaan.
+    if _a_run_is_active():
+        return {"started": False, "already_running": False,
+                "reason": "Er loopt een optimizer-run; ververs de facets daarna.",
+                **get_facets_status()}
     threading.Thread(
         target=_refresh_facets_guarded, name="facets-refresh", daemon=True
     ).start()
@@ -749,6 +784,13 @@ def _run_optimizer_chunk(task_id: str, argv: list[str], output_path: Path,
             argv, cwd=str(PKG_DIR), env=env,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, bufsize=1, encoding="utf-8", errors="replace",
+            # V61: eigen procesgroep. Zonder dit zit de optimizer in de
+            # procesgroep van uvicorn en neemt een deploy (`fuser -k 8003/tcp`)
+            # hem mee; het kind stierf dan op de eerstvolgende print omdat de
+            # leeskant van de pipe weg was — precies de "Tier-A run overleeft
+            # geen restart". De pid staat in de historie-rij, zodat een
+            # achtergebleven proces vindbaar en te stoppen is.
+            start_new_session=True,
         )
     except FileNotFoundError as e:
         _append_log(task_id, f"[error] chunk {round_no} failed to start: {e}")
@@ -810,6 +852,11 @@ def _run_tier_a_loop(task_id: str, ts: str, output_path: Path, tier_a_limit: int
 
     _set(task_id, {"status": "running", "progress": 1,
                    "message": f"Tier A 0/{tier_a_limit:,} (0 URLs processed)"})
+    # V61: schrijf de historie-rij METEEN. _history_append vuurde alleen op een
+    # eindstatus, dus een run die door een uvicorn-restart verdween liet geen
+    # spoor na: _TASKS is weg, /status kent het id niet meer en "Recent runs"
+    # toont niets. De dedupe in _history_append werkt de rij later bij.
+    _history_append(task_id)
     _append_log(task_id,
                 f"--- Tier A mode: target {tier_a_limit:,} tier-A redirects "
                 f"(cap {_TIER_A_MAX_URLS:,} URLs) ---")
@@ -902,6 +949,19 @@ def _run_tier_a_loop(task_id: str, ts: str, output_path: Path, tier_a_limit: int
                     a = cdf[cdf["reliability_tier"].astype(str).str.upper() == "A"]
                     if len(a):
                         tier_a_frames.append(a)
+                        # V61: ook meteen naar schijf. De hele opbrengst van een
+                        # Tier-A-run stond tot nu toe alleen in tier_a_frames en
+                        # werd pas na de laatste chunk weggeschreven — een
+                        # uvicorn-restart na drie uur draaien liet niets over.
+                        # De rijen staan wel in rurl_processed, maar een retry
+                        # met force_reprocess=False filtert juist die URL's eruit,
+                        # dus ze konden nooit meer in een output belanden.
+                        try:
+                            _first = not os.path.exists(output_path)
+                            a.to_csv(output_path, index=False,
+                                     mode="w" if _first else "a", header=_first)
+                        except Exception as e:
+                            _append_log(task_id, f"[warn] partial write failed: {e}")
                     added = len(a)
                     tier_a_count += added
             except Exception as e:
@@ -939,6 +999,12 @@ def _run_tier_a_loop(task_id: str, ts: str, output_path: Path, tier_a_limit: int
     # Combine + cap the collected Tier-A rows and write the output.
     if tier_a_frames:
         allA = _pd.concat(tier_a_frames, ignore_index=True).head(tier_a_limit)
+    elif os.path.exists(output_path):
+        # Niets in het geheugen maar wel op schijf: de per-chunk writes hierboven.
+        try:
+            allA = _pd.read_csv(output_path).head(tier_a_limit)
+        except Exception:
+            allA = _pd.DataFrame()
     else:
         allA = _pd.DataFrame()
     stop_reason = ("target reached" if tier_a_count >= tier_a_limit
@@ -1352,10 +1418,18 @@ def _sweep_stale_tasks() -> None:
             continue
         out_path = t.get("output_path") or ""
         if out_path and Path(out_path).exists():
+            # V61: 'interrupted', niet 'completed'. Het bestaan van een
+            # outputbestand zegt niets over de stappen die na het schrijven
+            # komen — upsert, de globale pass, de xlsx-conversie en
+            # save_run_output zijn allemaal overgeslagen, dus een "Recovered"-rij
+            # meldde succes met een kale CSV en een dode Export-knop. Sinds de
+            # Tier-A-rijen per chunk worden weggeschreven kan dit bestand
+            # bovendien een half afgemaakte run zijn.
             _set(tid, {
-                "status": "completed",
+                "status": "interrupted",
                 "progress": 100,
-                "message": t.get("message") or f"Recovered. Output: {Path(out_path).name}",
+                "message": (t.get("message")
+                            or f"Onderbroken; ruwe output staat er: {Path(out_path).name}"),
                 "finished_at": t.get("finished_at") or datetime.now().isoformat(),
             })
         else:

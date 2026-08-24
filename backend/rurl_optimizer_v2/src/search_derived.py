@@ -96,6 +96,13 @@ def _connect(readonly: bool = False) -> sqlite3.Connection:
         conn = sqlite3.connect(uri, uri=True, timeout=5)
     else:
         conn = sqlite3.connect(_CACHE_DB_PATH, timeout=10)
+        # V61: WAL, zodat een schrijver de lezers niet blokkeert. Met de default
+        # (journal_mode=delete) neemt één writer een EXCLUSIVE lock op het hele
+        # bestand terwijl elke worker leest.
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            pass
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS search_cache (
@@ -359,6 +366,14 @@ def _cache_get(maincat_norm: str, keyword_norm: str) -> Optional[dict]:
         if payload.get("mode") == "error":
             return None
         return payload
+    except sqlite3.OperationalError:
+        # V61: sqlite3.connect() is lazy — het opent en lockt het bestand niet, dus
+        # SQLITE_BUSY ("database is locked") komt pas uit conn.execute(). De guard
+        # stond alleen om _connect() heen, waardoor de fout uit de worker ontsnapte,
+        # door imap_unordered opnieuw werd opgegooid en de hele chunk (20k URL's)
+        # sneuvelde — in Tier-A-modus zichtbaar als een enkele "[warn] chunk N
+        # produced no output". facet_probe._probe_get had deze guard al wel.
+        return None
     finally:
         conn.close()
 

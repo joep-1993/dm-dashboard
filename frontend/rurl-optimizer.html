@@ -388,7 +388,7 @@
                 if (!r.ok) return;
                 const t = await r.json();
                 renderStatus(t);
-                if (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled') {
+                if (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled' || t.status === 'interrupted') {
                     clearInterval(pollTimer);
                     pollTimer = null;
                     document.getElementById('runBtn').disabled = false;
@@ -406,7 +406,11 @@
             const badge = document.getElementById('statusBadge');
             const color = {
                 queued: 'secondary', running: 'primary',
-                completed: 'success', failed: 'danger'
+                completed: 'success', failed: 'danger',
+                // V61: een run waarvan de thread weg is maar die wel ruwe output
+                // op schijf heeft. Niet 'completed' (upsert/xlsx/save_run_output
+                // zijn nooit gelopen) en niet 'failed' (de rijen staan er wel).
+                interrupted: 'warning'
             }[t.status] || 'secondary';
             // 'cancelled' is orange here too — same state as the Recent runs
             // Status column, so it must not be yellow in one place and orange in
