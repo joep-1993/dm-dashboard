@@ -151,6 +151,13 @@
         .lbl { background: transparent; font-weight: 700; border: 1px solid currentColor;
                text-transform: uppercase; letter-spacing: .03em; font-size: 0.7rem;
                padding: 0.2em 0.55em; border-radius: 0.375rem; display: inline-block; }
+        /* Ja/nee in "In pa.urls": groen = staat in pa.urls, rood = door een crawler
+           zelf samengesteld. Eén kleurregel per kleur; de border volgt currentColor. */
+        .lbl-green { color: #198754; }
+        .lbl-red   { color: #b02a37; }
+        /* Gecentreerde kolom. Als .num.mid zodat hij het text-align: right van .num
+           wint zonder van de volgorde in dit blok af te hangen. */
+        .mid, .num.mid { text-align: center; }
 
         /* Hover-blok van de grafieken — zelfde donkere paneel als SEO Stats. */
         .chart-tooltip {
@@ -557,14 +564,16 @@
                                          verschil is de SEO-vraag zelf: staat deze URL in
                                          pa.urls (indexeerbaar) of heeft een crawler hem zelf
                                          in elkaar gezet? -->
-                                    <th class="sortable" data-k="source">In pa.urls</th>
+                                    <th class="sortable mid" data-k="source">In pa.urls</th>
                                     <th class="sortable" data-k="url_type">Type</th>
-                                    <th class="sortable num" data-k="facet_depth">Facets</th>
-                                    <th class="sortable num" data-k="hits">Hits</th>
-                                    <th class="sortable num" data-k="days">Dagen</th>
-                                    <th class="sortable num" data-k="per_day">Per dag</th>
+                                    <th class="sortable num mid" data-k="facet_depth">Facets</th>
+                                    <th class="sortable num mid" data-k="hits">Hits</th>
+                                    <!-- Dagen is eruit (Joep, 2026-08-24): per_day zegt
+                                         hetzelfde in één getal en gebruikt days nog steeds
+                                         in de berekening hieronder. -->
+                                    <th class="sortable num mid" data-k="per_day">Per dag</th>
                                 </tr></thead>
-                                <tbody><tr><td colspan="7" class="text-muted p-3">Laden…</td></tr></tbody>
+                                <tbody><tr><td colspan="6" class="text-muted p-3">Laden…</td></tr></tbody>
                             </table>
                         </div>
                     </div>
@@ -1780,18 +1789,18 @@
             const types = checked('typeFilter');
             const plpOnly = types.length > 0 && types.every(t => t === 'PLP');
             tb.innerHTML = plpOnly
-                ? `<tr><td colspan="7" class="p-3 text-muted">Productpagina's staan <strong>niet</strong>
+                ? `<tr><td colspan="6" class="p-3 text-muted">Productpagina's staan <strong>niet</strong>
                      in deze lijst. Ze zitten niet in <code>pa.urls</code> en worden ook niet als
                      "onbekende" URL bewaard — een top-N over pagina's die vrijwel uniek zijn per hit
                      zegt niets. Hun hits tellen wél volledig mee in het Overzicht.</td></tr>`
                 : urlQuery
-                ? `<tr><td colspan="7" class="p-3 text-muted">Geen URL in deze selectie bevat
+                ? `<tr><td colspan="6" class="p-3 text-muted">Geen URL in deze selectie bevat
                      <strong>${escapeHtml(urlQuery)}</strong>. Let op: URL's búiten <code>pa.urls</code>
                      komen uit de dagelijkse top-500 per bot-familie, dus zo'n URL die die grens nooit
                      haalde staat er niet in — ook niet als hij wel gecrawld is. URL's ín
                      <code>pa.urls</code> zijn wél uitputtend geteld. Een ruimere periode of een kortere
                      zoekterm vergroot de kans.</td></tr>`
-                : '<tr><td colspan="7" class="p-3 text-muted">Geen resultaten in deze selectie.</td></tr>';
+                : '<tr><td colspan="6" class="p-3 text-muted">Geen resultaten in deze selectie.</td></tr>';
             return;
         }
         // Zelfde vorm als Per bot-familie: caret vooraan, rij klikbaar, paneel eronder.
@@ -1801,14 +1810,13 @@
         tb.innerHTML = urlRows.map((r, i) => `
             <tr class="url-row" data-i="${i}">
               <td class="url-cell" title="${escapeHtml(urlPath(r))}"><span class="bot-caret">▸</span><a href="${escapeHtml(urlHref(r))}" target="_blank" rel="noopener">${escapeHtml(urlPath(r))}</a></td>
-              <td>${r.source === 'pa.urls'
-                    ? '<span class="lbl" style="color:#5e4a90">ja</span>'
-                    : '<span class="lbl" style="color:#b8860b" title="Door een crawler zelf samengestelde URL. Deze kant van de lijst is de dagelijkse top-500 per bot-familie, dus niet uitputtend.">nee</span>'}</td>
+              <td class="mid">${r.source === 'pa.urls'
+                    ? '<span class="lbl lbl-green">ja</span>'
+                    : '<span class="lbl lbl-red" title="Door een crawler zelf samengestelde URL. Deze kant van de lijst is de dagelijkse top-500 per bot-familie, dus niet uitputtend.">nee</span>'}</td>
               <td>${escapeHtml(r.url_type || '')}</td>
-              <td class="num">${r.facet_depth}</td>
-              <td class="num">${fmt(r.hits)}</td>
-              <td class="num">${fmt(r.days)}</td>
-              <td class="num">${fmt(r.per_day)}</td>
+              <td class="num mid">${r.facet_depth}</td>
+              <td class="num mid">${fmt(r.hits)}</td>
+              <td class="num mid">${fmt(r.per_day)}</td>
             </tr>`).join('');
         tb.querySelectorAll('tr.url-row').forEach(tr => {
             tr.onclick = () => toggleUrlDetail(tr);
@@ -1830,7 +1838,7 @@
         tr.classList.add('is-open');
         const det = document.createElement('tr');
         det.className = 'bot-detail url-detail';
-        det.innerHTML = `<td colspan="7">
+        det.innerHTML = `<td colspan="6">
             <div id="urlStatus" class="muted-note mb-2"></div>
             <div class="row g-3">
               <div class="col-md-4"><div class="chart-title mb-1">Per bot-familie</div>
