@@ -61,6 +61,14 @@ class FacetFilter:
         """
         self.facets_df = facets_df
         self._detect_columns()
+        # V61 memo. A worker filters the same ~3.5k subcategories and ~30 main
+        # categories over and over (73 ms per filter_by_subcategory, 46-318 ms
+        # per get_facet_values, several times per URL), while the frame itself
+        # never changes for the process's lifetime. Cache both halves keyed on
+        # what the caller asked for; frames handed out by these filters carry a
+        # marker in .attrs so get_facet_values knows it may memoize on them.
+        self._df_cache: dict = {}
+        self._values_cache: dict = {}
 
     def _detect_columns(self):
         """Detect column names with flexibility for naming variations."""
@@ -118,6 +126,20 @@ class FacetFilter:
             self._url_lower_cache = self.facets_df[url_col].astype(str).str.lower()
         return self._url_lower_cache
 
+    def _memo_df(self, key: tuple, df: pd.DataFrame) -> pd.DataFrame:
+        """Store a filtered frame under `key` and stamp it so get_facet_values
+        can memoize on it. Boolean masking already returns an independent frame;
+        only the degenerate 'whole frame' fallbacks are copied, so a caller can
+        never reach self.facets_df through one of these."""
+        if df is self.facets_df:
+            df = df.copy()
+        try:
+            df.attrs['rurl_cache_key'] = key
+        except Exception:
+            pass
+        self._df_cache[key] = df
+        return df
+
     def filter_by_subcategory(self, subcategory_id: str) -> pd.DataFrame:
         """
         Filter facets to only those valid for a subcategory.
@@ -130,44 +152,34 @@ class FacetFilter:
         Returns:
             Filtered DataFrame with facets for this subcategory
         """
+        key = ('subcat', str(subcategory_id))
+        cached = self._df_cache.get(key)
+        if cached is not None:
+            return cached
+
         url_col = self.col_mapping.get('url')
 
         if url_col is None:
             # Fallback: try to match on category_id column if available
             if 'category_id' in self.facets_df.columns:
-                return self.facets_df[
+                out = self.facets_df[
                     self.facets_df['category_id'].astype(str) == str(subcategory_id)
-                ].copy()
-            # Return all facets if no filtering possible
-            return self.facets_df.copy()
+                ]
+            else:
+                # Return all facets if no filtering possible
+                out = self.facets_df
+        else:
+            # Filter where URL contains the subcategory ID (lowercased col cached).
+            # regex=False: the needle is a bare numeric id, so the regex engine
+            # bought nothing and cost ~2x on a 625k-row scan.
+            mask = self._url_lower().str.contains(
+                str(subcategory_id).lower(),
+                na=False,
+                regex=False,
+            )
+            out = self.facets_df[mask]
 
-        # Filter where URL contains the subcategory ID (lowercased col cached)
-        mask = self._url_lower().str.contains(
-            str(subcategory_id).lower(),
-            na=False
-        )
-        return self.facets_df[mask].copy()
-
-    def filter_by_subcategory_name(self, subcategory_name: str) -> pd.DataFrame:
-        """
-        Alternative filter using subcategory name instead of ID.
-
-        Args:
-            subcategory_name: The subcategory name (e.g., "tuin_accessoires_504063")
-
-        Returns:
-            Filtered DataFrame with facets for this subcategory
-        """
-        url_col = self.col_mapping.get('url')
-
-        if url_col is None:
-            return self.facets_df.copy()
-
-        mask = self._url_lower().str.contains(
-            str(subcategory_name).lower(),
-            na=False
-        )
-        return self.facets_df[mask].copy()
+        return self._memo_df(key, out)
 
     def extract_parent_subcategory_id(self, subcategory_name: str) -> Optional[str]:
         """
@@ -220,6 +232,11 @@ class FacetFilter:
         Returns:
             Filtered DataFrame with all facets in this main category
         """
+        key = ('maincat', main_category_name)
+        cached = self._df_cache.get(key)
+        if cached is not None:
+            return cached
+
         url_col = self.col_mapping.get('url')
         main_cat_col = self.col_mapping.get('main_category_name')
 
@@ -228,10 +245,11 @@ class FacetFilter:
         if url_col:
             mask = self._url_lower().str.contains(
                 f"/products/{main_category_name}/".lower(),
-                na=False
+                na=False,
+                regex=False,
             )
             if mask.any():
-                return self.facets_df[mask].copy()
+                return self._memo_df(key, self.facets_df[mask])
 
         # Fallback to main_category_name column
         if main_cat_col and main_cat_col in self.facets_df.columns:
@@ -241,29 +259,9 @@ class FacetFilter:
                 na=False
             )
             if mask.any():
-                return self.facets_df[mask].copy()
+                return self._memo_df(key, self.facets_df[mask])
 
-        return pd.DataFrame()
-
-    def get_type_facets_only(self, filtered_df: pd.DataFrame) -> list[FacetValue]:
-        """
-        v5: Get only type facets (type_*, kleur, materiaal, etc.) from filtered DataFrame.
-
-        Args:
-            filtered_df: Filtered facets DataFrame
-
-        Returns:
-            List of FacetValue objects for type facets only
-        """
-        facet_name_col = self.col_mapping.get('facet_name')
-        if not facet_name_col:
-            return []
-
-        # Filter for type facets
-        type_prefixes = ('type_', 'kleur', 'materiaal', 'maat', 'vorm')
-        type_df = filtered_df[filtered_df[facet_name_col].astype(str).str.lower().str.startswith(type_prefixes)]
-
-        return self.get_facet_values(type_df)
+        return self._memo_df(key, pd.DataFrame())
 
     def get_all_type_facets(self) -> list[FacetValue]:
         """
@@ -299,24 +297,59 @@ class FacetFilter:
         Returns:
             List of FacetValue objects
         """
+        # V61 memo — only for frames this filter handed out (they carry a marker
+        # in .attrs). An arbitrary caller-built frame is not memoized: id() gets
+        # recycled after garbage collection, which would serve another frame's
+        # values. The stored list is copied out so a caller can never mutate the
+        # cache; the FacetValue objects themselves are read-only by convention
+        # (nothing in the tree assigns to their fields).
+        memo_key = None
+        try:
+            _ck = filtered_df.attrs.get('rurl_cache_key')
+        except Exception:
+            _ck = None
+        if _ck is not None:
+            memo_key = (_ck, bool(deduplicate_to_highest_level), exclude_subcat_slugs)
+            hit = self._values_cache.get(memo_key)
+            if hit is not None:
+                return list(hit)
+
         facet_values = []
 
-        for row in filtered_df.to_dict("records"):
+        # Column lookups and the count column are loop-invariant; zip over the
+        # raw column arrays instead of materialising a dict per row
+        # (to_dict("records") was 145 ms of a 306 ms call on an 82k-row frame).
+        cm = self.col_mapping
+        count_col = cm.get('count')
+        n = len(filtered_df)
+        blanks = [None] * n
+
+        def _col(name, default=None):
+            c = cm.get(name)
+            if c is None or c not in filtered_df.columns:
+                return [default] * n
+            return filtered_df[c].values
+
+        for _fid, _fname, _vid, _vname, _url, _cnt in zip(
+            _col('facet_id', 0), _col('facet_name', ''), _col('facet_value_id', 0),
+            _col('facet_value_name', ''), _col('url', ''),
+            (filtered_df[count_col].values if count_col and count_col in filtered_df.columns
+             else blanks),
+        ):
             try:
-                count_col = self.col_mapping.get('count')
                 count_val = 0
                 if count_col:
-                    raw = row.get(count_col, 0)
                     try:
-                        count_val = int(raw) if raw is not None and str(raw) != 'nan' else 0
+                        count_val = (int(_cnt) if _cnt is not None and str(_cnt) != 'nan'
+                                     else 0)
                     except (ValueError, TypeError):
                         count_val = 0
                 fv = FacetValue(
-                    facet_id=int(row.get(self.col_mapping['facet_id'], 0)),
-                    facet_name=str(row.get(self.col_mapping['facet_name'], '')),
-                    facet_value_id=int(row.get(self.col_mapping['facet_value_id'], 0)),
-                    facet_value_name=str(row.get(self.col_mapping['facet_value_name'], '')),
-                    url=str(row.get(self.col_mapping['url'], '')),
+                    facet_id=int(_fid if _fid is not None else 0),
+                    facet_name=str(_fname if _fname is not None else ''),
+                    facet_value_id=int(_vid if _vid is not None else 0),
+                    facet_value_name=str(_vname if _vname is not None else ''),
+                    url=str(_url if _url is not None else ''),
                     count=count_val,
                 )
                 facet_values.append(fv)
@@ -335,6 +368,9 @@ class FacetFilter:
         if deduplicate_to_highest_level and facet_values:
             facet_values = self._deduplicate_to_highest_level(facet_values)
 
+        if memo_key is not None:
+            self._values_cache[memo_key] = facet_values
+            return list(facet_values)
         return facet_values
 
     def _deduplicate_to_highest_level(self, facet_values: list[FacetValue]) -> list[FacetValue]:
@@ -391,10 +427,16 @@ class FacetFilter:
 
             # Step 1: highest count wins, ties broken by shallower depth.
             #         Sort key: (count desc, depth asc).
+            # V61: `fv.url` is the tie-break of last resort at all three
+            # picks below. Without it the winner was whichever row `facets.csv`
+            # happened to list first, so rebuilding the facet cache silently
+            # moved redirects to a different category depth with no code change
+            # — measured at ~6% of duplicate-value groups, every one of them
+            # pointing at a different destination.
             def _rank(fv):
                 c = getattr(fv, 'count', 0) or 0
                 d = self._count_subcategory_depth(fv.url)
-                return (-c, d)
+                return (-c, d, fv.url)
             leader = min(fvs, key=_rank)
             leader_count = getattr(leader, 'count', 0) or 0
 
@@ -404,8 +446,9 @@ class FacetFilter:
                            if fv is not leader
                            and self._is_strict_descendant(fv.url, leader.url)]
             if descendants and leader_count > 0:
-                best_desc = max(descendants,
-                                key=lambda fv: getattr(fv, 'count', 0) or 0)
+                best_desc = min(descendants,
+                                key=lambda fv: (-(getattr(fv, 'count', 0) or 0),
+                                                fv.url))
                 bd_count = getattr(best_desc, 'count', 0) or 0
                 if bd_count >= self.CHILD_DOMINANCE_THRESHOLD * leader_count:
                     result.append(best_desc)
@@ -418,7 +461,9 @@ class FacetFilter:
                          and self._is_strict_descendant(leader.url, fv.url)]
             if ancestors:
                 # Closest ancestor = deepest ancestor (most specific shared parent)
-                closest = max(ancestors, key=lambda fv: self._count_subcategory_depth(fv.url))
+                closest = min(ancestors,
+                              key=lambda fv: (-self._count_subcategory_depth(fv.url),
+                                              fv.url))
                 anc_count = getattr(closest, 'count', 0) or 0
                 if anc_count > 0 and leader_count < self.CHILD_DOMINANCE_THRESHOLD * anc_count:
                     result.append(closest)
@@ -482,13 +527,6 @@ class FacetFilter:
             pass
 
         return 999
-
-    def get_unique_facet_names(self, filtered_df: pd.DataFrame) -> list[str]:
-        """Get list of unique facet names in the filtered set."""
-        facet_name_col = self.col_mapping.get('facet_name')
-        if facet_name_col:
-            return filtered_df[facet_name_col].unique().tolist()
-        return []
 
     def get_facet_summary(self, filtered_df: pd.DataFrame) -> dict:
         """

@@ -30,6 +30,7 @@ from src.search_derived import (
     SEARCH_BASE_URL, COUNTRY_LANG, TIMEOUT,
     SEARCH_QPS, MAX_PREFETCH_WORKERS,
     _CACHE_DB_PATH, _normalize, _is_fresh, _cache_get, _TokenBucket,
+    _SESSION,
 )
 
 logger = logging.getLogger(__name__)
@@ -345,21 +346,13 @@ def _fetch_subcat_facets(dom_slug: str, keyword: str,
             "countryLanguage": COUNTRY_LANG, "isBot": "true", "limit": "1",
         }
         url = f"{SEARCH_BASE_URL}/search/products?{urllib.parse.urlencode(params)}"
-        r = requests.get(url, timeout=TIMEOUT)
+        r = _SESSION.get(url, timeout=TIMEOUT)
         if r.status_code != 200:
             return None
         return (r.json() or {}).get("facets")
     except Exception as e:
         logger.debug(f"subcat facet fetch failed ({dom_slug}, {keyword!r}): {e}")
         return None
-
-
-def _derive_multi_facets(dom_slug: str, keyword: str,
-                         bucket: "_TokenBucket") -> list[dict]:
-    """Convenience wrapper: fetch + _extract_multi_facets. Returns [] on any
-    error (the multi-facet rescue is strictly additive — a failure just
-    leaves the existing single-facet / reject behaviour in place)."""
-    return _extract_multi_facets(_fetch_subcat_facets(dom_slug, keyword, bucket), keyword)
 
 
 # --- RC4 (V49): in-subcat ENRICHMENT probe -----------------------------------
@@ -522,6 +515,14 @@ def _probe_get(mn: str, kn: str) -> Optional[dict]:
         # Ignore picks cached under older selection logic so they re-derive.
         if payload.get("probe_schema") != PROBE_SCHEMA_VERSION:
             return None
+        # V61: a transient failure is not an answer. _probe_put stores
+        # {"mode": "error"} when the worker raises, and serving that back as a
+        # fresh hit pinned the pair to "no facet" for the whole 7-day TTL — one
+        # bad minute on the API, or one "database is locked", silently shipped
+        # bare category pages for a week. search_derived._cache_get has done
+        # this since V54; the two had drifted.
+        if payload.get("mode") == "error":
+            return None
         return payload
     except sqlite3.OperationalError:
         return None
@@ -558,7 +559,7 @@ def _probe_one(category_slug: str, keyword: str, base_total: int,
     }
     url = f"{SEARCH_BASE_URL}/search/products?{urllib.parse.urlencode(params)}"
     try:
-        r = requests.get(url, timeout=TIMEOUT)
+        r = _SESSION.get(url, timeout=TIMEOUT)
         r.raise_for_status()
         data = r.json()
         c = data.get("total") or 0
@@ -670,7 +671,7 @@ def _subcat_keyword_facet(dom_slug: str, keyword: str, bucket: _TokenBucket) -> 
             "countryLanguage": COUNTRY_LANG, "isBot": "true", "limit": "1",
         }
         url = f"{SEARCH_BASE_URL}/search/products?{urllib.parse.urlencode(params)}"
-        r = requests.get(url, timeout=TIMEOUT)
+        r = _SESSION.get(url, timeout=TIMEOUT)
         if r.status_code != 200:
             return None
         data = r.json()

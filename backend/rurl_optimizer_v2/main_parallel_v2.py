@@ -104,8 +104,17 @@ def _facet_value_name_lookup(facet_filter):
     if _FACET_VALUE_NAME_LOOKUP is None:
         try:
             _fdf = facet_filter.facets_df
+            # V61: go through col_mapping like every other consumer does.
+            # FacetFilter._detect_columns exists because the value-name column
+            # can also be called `facet_value`; hardcoding the names meant a
+            # differently-shaped cache silently emptied this lookup, which
+            # shifts V55's H1 similarity and therefore the score — with no log
+            # line and nothing in the output to show it.
+            _cm = getattr(facet_filter, 'col_mapping', {}) or {}
+            _id_col = _cm.get('facet_value_id') or 'facet_value_id'
+            _name_col = _cm.get('facet_value_name') or 'facet_value_name'
             _FACET_VALUE_NAME_LOOKUP = {}
-            for _k, _v in zip(_fdf['facet_value_id'], _fdf['facet_value_name']):
+            for _k, _v in zip(_fdf[_id_col], _fdf[_name_col]):
                 if _v is None or str(_v) == 'nan':
                     continue  # 13 values in the snapshot carry no label
                 # a NaN anywhere in the column would make it float dtype, and
@@ -115,7 +124,12 @@ def _facet_value_name_lookup(facet_filter):
                 except (TypeError, ValueError):
                     _key = str(_k)
                 _FACET_VALUE_NAME_LOOKUP[_key] = _v
-        except Exception:
+        except Exception as _e:
+            # An empty dict is a valid cache entry, so this worker never retries
+            # — say so once instead of degrading silently for the whole run.
+            logging.getLogger(__name__).warning(
+                "V55 facet-value-name lookup unavailable (%s); H1 similarity "
+                "will be computed without appended value names", _e)
             _FACET_VALUE_NAME_LOOKUP = {}
     return _FACET_VALUE_NAME_LOOKUP
 
@@ -223,6 +237,32 @@ def init_worker_v2(cache_file, fuzzy_threshold, use_token_coverage=True,
         'all_type_facets': data['all_type_facets'],
         'categories_df': data['categories_df']  # V14: For subcategory name matching
     }
+
+
+def _ok(res) -> bool:
+    """A cascade step succeeded. `RedirectResult` is a plain dataclass with no
+    __bool__, so a REJECTION (success=False, redirect_url=None) is truthy —
+    build_multi_facet returns one for "No matching facets found", the V26
+    cross-maincat block, "[V16]" and the V18 no-valid-facets case. Every gate
+    below used to test the object itself, so a rejection at step 1 short-
+    circuited steps 1c..6 AND the category-only fallback at the end, and the row
+    shipped with no redirect at all: 352 rows in `rurl_processed` carry
+    match_type='cross_maincat_blocked' with an empty redirect_url. Three later
+    blocks already guarded with getattr(res, 'success', False); this is that
+    test, named.
+
+    V61 scope decision, measured. Putting this on ALL twelve cascade gates
+    rescued 255 of the 352 affected rows (36 of them tier A/B) but broke 4 of an
+    ordinary 150-row sample: once a rejection stops suppressing the rest of the
+    cascade, a later step can produce the cross-maincat match that the step-1
+    rejection was blocking — "philips airfryer" landed on huis_tuin
+    Binnenverlichting /c/merk~Philips instead of the Airfryers page. So only the
+    FINAL fallback uses it: rows that shipped with no redirect at all now get
+    the category page they were always supposed to fall back to (247 of 352, no
+    regressions), and the cascade's step order is untouched. Letting the cascade
+    continue past a rejection needs the V26 cross-maincat block carried forward
+    with it — that is its own change, with its own measurement."""
+    return bool(res and getattr(res, 'success', False))
 
 
 def extract_subcategory_id_from_url(url):
@@ -353,7 +393,10 @@ def _maybe_promote_to_specific_subcat(
             continue
 
         key = (hits, url_name.count('_'))
-        if best is None or key > (best[0], best[1]):
+        # V61: url_name closes the tie so the winner doesn't depend on the row
+        # order of categories.csv.
+        if best is None or key > (best[0], best[1]) or (
+                key == (best[0], best[1]) and url_name < best[2]['url_name']):
             new_match = {
                 'matched_category': display,
                 'url_name': url_name,
@@ -467,9 +510,11 @@ def _collect_longest_per_axis_from_leftover(leftover_tokens, facet_values, match
                 fv.facet_value_name, fv_tokens, leftover_tokens, subcat_tokens, matcher):
             continue
         existing = by_axis.get(axis)
+        # V61: longest name wins; on equal length the url breaks the tie, so an
+        # axis with two same-length candidates doesn't follow facets.csv order.
         if (existing is None
-                or len(fv.facet_value_name)
-                > len(existing.facet_value.facet_value_name)):
+                or (len(fv.facet_value_name), existing.facet_value.url)
+                > (len(existing.facet_value.facet_value_name), fv.url)):
             by_axis[axis] = MatchResult(
                 keyword=' '.join(leftover_tokens),
                 facet_value=fv,
@@ -621,9 +666,14 @@ def _append_facet_to_subcat_redirect(result, parsed, subcategory_match, facet_fi
 
     # Order the non-merk axes by facet value length descending (most specific
     # first, stable for stable output), then append merk last.
+    # V61: equal-length values on different axes tied here and fell back to
+    # dict order, i.e. facets.csv row order. The final URL is canonicalised
+    # anyway, but facet_names / facet_value_names / the reason string are not —
+    # so two runs on the same data described the same redirect differently.
     appends = sorted(
         matches_by_axis.values(),
-        key=lambda m: -len(m.facet_value.facet_value_name),
+        key=lambda m: (-len(m.facet_value.facet_value_name),
+                       m.facet_value.facet_name, m.facet_value.facet_value_id),
     )
     if merk_match:
         appends.append(merk_match)
@@ -656,6 +706,32 @@ def _append_facet_to_subcat_redirect(result, parsed, subcategory_match, facet_fi
                         score=90,
                         matched_text=size_fv.facet_value_name,
                     ))
+
+    # V61: only append a facet that actually EXISTS on the target page.
+    # filter_by_subcategory matches the id anywhere in the URL, so the candidate
+    # pool is the whole subtree, and get_facet_values' dedup can even promote a
+    # value to a descendant — the fragment was then glued onto the target subcat
+    # page regardless. Measured on the live catalogue: for target klussen_486172
+    # 2,249 of 2,482 pool values assemble to a /c/ URL that does not exist, and
+    # of 12 such rows sampled from rurl_processed, 6 return 0 products and 4
+    # return HTTP 400. The predicate is already wired for the builder
+    # (init_worker_v2 sets builder.facet_url_exists); this path just never used it.
+    _url_set = facet_filter.facet_url_set()
+    if _url_set:
+        _base_path = (result.redirect_url or '').split('/c/', 1)[0]
+        if '://' in _base_path:
+            _base_path = '/' + _base_path.split('/', 3)[-1] if _base_path.count('/') > 2 else _base_path
+        _base_path = _base_path.rstrip('/')
+        _kept, _dropped = [], []
+        for m in appends:
+            if f"{_base_path}/c/{m.facet_value.url_fragment}" in _url_set:
+                _kept.append(m)
+            else:
+                _dropped.append(m.facet_value.url_fragment)
+        if _dropped:
+            result.reason = ((result.reason or '')
+                             + f"; skipped {', '.join(_dropped)} (not present on the target page)")
+        appends = _kept
 
     if not appends:
         return result
@@ -781,9 +857,23 @@ def _is_bare_category_noun(tok: str, cat_name: str) -> bool:
     substring containment over-absorbs, equality does not."""
     if not tok or not cat_name:
         return False
+    # NOTE: str.rstrip takes a CHARACTER SET, so this collapses 'pennen' -> 'p',
+    # 'bonen' -> 'bo' and 'kannen' -> 'ka', and any token stemming to that stub
+    # then reads as the bare category noun and is dropped from the keyword
+    # ('bonnen' for category "Bonen"). Replacing it with proper suffix stripping
+    # was tried (V61) and measured NET NEGATIVE on a 150-row sample: it moved
+    # /r/airfryer/ and /r/philips_airfryer/ off the Airfryers page onto a
+    # huis_tuin category fallback. Left as-is deliberately; the bug is real but a
+    # fix needs its own measured pass.
+    def _stem(w: str) -> str:
+        for suf in ('en', 's'):
+            if w.endswith(suf) and len(w) - len(suf) >= 4:
+                return w[:-len(suf)]
+        return w
+
     c = cat_name.lower()
-    cstem = c.rstrip('s').rstrip('en')
-    tstem = tok.rstrip('s').rstrip('en')
+    cstem = _stem(c)
+    tstem = _stem(tok)
     return tok == c or tok == cstem or tstem == c or tstem == cstem
 
 
@@ -872,31 +962,35 @@ def _canonicalize_facet_order(redirect_url: str) -> str:
     return f"{base}/c/{'~~'.join(ordered)}{trailing}"
 
 
+# V61: hoisted out of _adj_norm / _qualifier_matches_value, which run once per
+# qualifier token x per candidate facet value (hundreds to thousands per URL).
+_ADJ_DBL_VOWEL_RE = re.compile(r'([aeiou])\1')
+_ADJ_WORD_RE = re.compile(r'[a-zà-ž]+')
+
+
 def _adj_norm(w: str) -> str:
     """RC4: normalise a Dutch size/shape adjective for descriptor-facet matching.
     Strips an inflection suffix and collapses double vowels so the query token
     and the facet value land on the same stem:
         ronde -> rond,  kleine -> klein,  grote -> grot  (Groot -> grot too).
     """
-    import re as _re
     w = (w or '').lower()
     for suf in ('ere', 'er', 'en', 'e'):
         if w.endswith(suf) and len(w) - len(suf) >= 3:
             w = w[:-len(suf)]
             break
-    return _re.sub(r'([aeiou])\1', r'\1', w)
+    return _ADJ_DBL_VOWEL_RE.sub(r'\1', w)
 
 
 def _qualifier_matches_value(tok: str, value_name: str) -> bool:
     """RC4: True when a qualifier token equals (modulo inflection/double-vowel)
     a whole token of the descriptor value name. Whole-token equality keeps
     'ronde' on 'Rond' rather than 'Halfrond'."""
-    import re as _re
     n = _adj_norm(tok)
     if len(n) < 3:
         return False
     return any(_adj_norm(t) == n
-               for t in _re.findall(r'[a-zà-ž]+', value_name.lower()))
+               for t in _ADJ_WORD_RE.findall(value_name.lower()))
 
 
 def _spurious_brand_facet(pf_name, pf_value_name, keyword, dom_cat_name, matcher) -> bool:
@@ -1069,7 +1163,12 @@ def _derive_facets_in_subtree(parsed, anchor_subcat_id, anchor_cat_name,
             require_type_for_merk=True,
             current_main_category=parsed.main_category) or []) if m.facet_value]
         if type_matches:
-            best = max(type_matches, key=lambda m: m.score)
+            # V61: this pick decides the destination subcategory (disc below),
+            # and max() kept the first on a tie — i.e. facets.csv row order.
+            best = min(type_matches,
+                       key=lambda m: (-m.score,
+                                      -(getattr(m.facet_value, 'count', 0) or 0),
+                                      m.facet_value.url))
             disc = _facet_url_parts(best.facet_value.url)
             if disc and disc.get('subcategory_id'):
                 dfacets = facet_filter.get_facet_values(
@@ -2135,7 +2234,15 @@ def process_url_v2(args):
     # fallback flag is what makes this safe — a bare name match (zink->Zink
     # supplements, olie->Visolie) returns OR-fallback and is rejected, while
     # driewielers->speelgoed Driewielers returns mode=and share=1.0.
-    if d.get('categories_df') is not None and parsed.keyword:
+    # V61: skip entirely when the source URL pins a facet. Fix E's result is a
+    # cross-maincat jump by construction, and the V40 guard a few lines below
+    # nulls exactly that for facet-pinned URLs — but by then Fix E has already
+    # overwritten the cascade's good same-maincat result, so the row lands on
+    # build_category_only (score 50) instead of the multi-facet page steps 1-6
+    # found. Fix E also passed existing_facet into a foreign maincat, which is
+    # what V40's own comment calls invalid.
+    if (d.get('categories_df') is not None and parsed.keyword
+            and not parsed.existing_facet):
         _cand = _cross_maincat_candidate(parsed, d['categories_df'], matcher)
         if _cand:
             _tgt_main, _xm = _cand
@@ -2190,7 +2297,14 @@ def process_url_v2(args):
             result = None  # drop cross-maincat jump; preserve the facet below
 
     if not result:
+        # Carry the builder's rejection forward: it explains WHY the cascade
+        # produced nothing, and before _ok() that text was the whole output row.
+        _blocked = result if result is not None else None
+        _blocked_reason = (getattr(_blocked, 'reason', '') or '') if _blocked else ''
         result = builder.build_category_only(parsed)
+        if _blocked_reason:
+            result.reason = ((result.reason or '')
+                             + f" (cascade rejection: {_blocked_reason})")
 
     # Build output
     r = result
@@ -2686,7 +2800,14 @@ def process_url_v2(args):
                 flag_for_review = ''
                 # V36: this hard-reject would ship the row with NO redirect —
                 # exactly the case the cross-maincat fallback exists for.
-                _xfb = _cross_maincat_fallback_fields(
+                # V61: except when the source URL pins a facet. This branch
+                # RETURNS immediately, so it skips the V41 guard further down —
+                # and the fallback is a cross-maincat jump that drops the pinned
+                # facet (`_cross_maincat_fallback_fields` builds with
+                # existing_facet=''), which is exactly the pair V41 forbids. Let
+                # those rows fall through to the no-redirect return instead of
+                # shipping a destination V41 would have reverted.
+                _xfb = None if parsed.existing_facet else _cross_maincat_fallback_fields(
                     url, parsed, d.get('categories_df'), matcher, facet_filter,
                     builder, category_lookup)
                 if _xfb:
@@ -3012,10 +3133,14 @@ def process_url_v2(args):
                          and fv.facet_name.lower() not in _ex_axes
                          and fv.facet_name.lower().startswith(_DESCRIPTOR_PREFIXES)]
                 for _tok in _qual:
-                    _hit = next((fv for fv in _cand
-                                 if fv.facet_name.lower() not in _ex_axes
-                                 and _qualifier_matches_value(_tok, fv.facet_value_name)),
-                                None)
+                    # V61: was next(...) over row order; pick the most-stocked
+                    # matching value, url as the stable last resort.
+                    _hits = [fv for fv in _cand
+                             if fv.facet_name.lower() not in _ex_axes
+                             and _qualifier_matches_value(_tok, fv.facet_value_name)]
+                    _hit = min(_hits,
+                               key=lambda fv: (-(getattr(fv, 'count', 0) or 0), fv.url)
+                               ) if _hits else None
                     if _hit is not None:
                         _ax = _hit.facet_name
                         _frag = f"{_ax}~{_hit.facet_value_id}"
@@ -3719,11 +3844,11 @@ def process_url_v2(args):
                 # probe matched via that synonym also reads as covered here.
                 _cands = [_cv(_w)] + [_cv(_syn) for _k, _syn in _ESYN.items()
                                       if _esyn_stem(_k) == _esyn_stem(_w)]
-                _ok = any(_wc == t or (len(_wc) >= 4 and (_wc in t or t in _wc))
-                          for _wc in _cands for t in _tgt_toks)
+                _covered = any(_wc == t or (len(_wc) >= 4 and (_wc in t or t in _wc))
+                               for _wc in _cands for t in _tgt_toks)
                 # a generic size/colour adjective the facet covers counts as
                 # matched but doesn't otherwise drive intent
-                (_m2 if (_ok or _w in matched_keywords) else _u2).append(_w)
+                (_m2 if (_covered or _w in matched_keywords) else _u2).append(_w)
             if _denom:
                 _recomputed = round(100 * len(_m2) / len(_denom), 1)
                 if _recomputed > _v45_cov:
@@ -3940,6 +4065,30 @@ def process_url_v2(args):
                             + f" vs '{r.keyword}'): {final_score} -> {_v55_lifted}")
             final_score = _v55_lifted
             final_tier = get_reliability_tier(final_score)
+
+    # V61 last resort. A builder REJECTION is truthy (RedirectResult has no
+    # __bool__), so `if not result` above never fired for one and the row shipped
+    # with no redirect at all — 352 rows in rurl_processed sit at
+    # match_type='cross_maincat_blocked' with an empty redirect_url. Doing this
+    # at the cascade's fallback instead pre-empts the later last-resort paths:
+    # filling in a category page there stops the V36 cross-maincat fallback from
+    # firing, which measurably moved /r/airfryer/ off the Airfryers page. So it
+    # runs here, after every other route has had its turn.
+    if not final_redirect_url:
+        _last = builder.build_category_only(parsed)
+        if _last and _last.redirect_url:
+            _rej = (getattr(result, 'reason', '') or '') if not _ok(result) else ''
+            final_redirect_url = _last.redirect_url
+            final_redirect_cat_name = original_cat_name
+            final_match_type = 'category_fallback'
+            final_score = _last.match_score
+            final_tier = get_reliability_tier(final_score)
+            out_facet_fragment = _last.facet_fragment
+            out_facet_count = _last.facet_count
+            out_facet_names = ''
+            out_facet_value_names = ''
+            final_reason = ((final_reason or _last.reason or '')
+                            + (f" (cascade rejection: {_rej})" if _rej else ''))
 
     return {
         'original_url': r.original_url,
@@ -4202,6 +4351,15 @@ def main():
     # Batch save interval
     SAVE_INTERVAL = 5000  # Save every 5000 URLs
     last_save_count = 0
+    # Column order the appended checkpoint batches must follow. On a resume the
+    # progress file already exists, so take it from that file's header.
+    _progress_cols = []
+    if os.path.exists(progress_file):
+        try:
+            _progress_cols = list(pd.read_csv(progress_file, nrows=0).columns)
+        except Exception as e:
+            print(f"  [warn] could not read progress header ({e}); checkpoints will restart the file")
+            os.remove(progress_file)
 
     with mp.Pool(
         processes=num_workers,
@@ -4225,14 +4383,27 @@ def main():
                     # tracked for exactly this — it just was not used to slice.
                     # The duplicates also flow into the final CSV, because the
                     # resume path concatenates this file with the new batch.
+                    # V61: append the batch instead of read+concat+rewrite. The
+                    # row count was already fixed by the slice above, but every
+                    # checkpoint still re-parsed and re-wrote the whole file, so
+                    # checkpoint k did k*SAVE_INTERVAL row-writes — ~9M for a
+                    # 300k-URL run, on the main process while the pool waits.
                     batch_df = pd.DataFrame(results[last_save_count:])
-                    if os.path.exists(progress_file):
-                        # Append to existing
-                        existing_df = pd.read_csv(progress_file)
-                        combined_df = pd.concat([existing_df, batch_df], ignore_index=True)
-                        combined_df.to_csv(progress_file, index=False)
+                    _first_write = not os.path.exists(progress_file)
+                    if _first_write:
+                        _progress_cols = list(batch_df.columns)
                     else:
-                        batch_df.to_csv(progress_file, index=False)
+                        # A CSV append aligns by POSITION, and process_url_v2 has
+                        # several early-return dicts whose key sets differ from
+                        # the main one — so pin the column order of the first
+                        # batch. pd.concat used to do this alignment for us.
+                        _extra = [c for c in batch_df.columns if c not in _progress_cols]
+                        if _extra:
+                            tqdm.write(f"  [warn] checkpoint: unexpected columns dropped: {_extra}")
+                        batch_df = batch_df.reindex(columns=_progress_cols)
+                    batch_df.to_csv(progress_file, index=False,
+                                    mode='w' if _first_write else 'a',
+                                    header=_first_write)
                     last_save_count = len(results)
                     tqdm.write(f"  [Checkpoint] Saved {len(results):,} URLs to {progress_file}")
 

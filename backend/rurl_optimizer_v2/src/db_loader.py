@@ -15,6 +15,7 @@ The three DataFrames returned keep the same shape the matcher expects:
 from __future__ import annotations
 
 import json
+import os
 import logging
 import sys
 import time
@@ -55,6 +56,18 @@ FACET_VALUE_REPROBE = True
 # cache) enough to deserve its own evaluation, and it isn't what the truncation
 # actually costs us: the misses are attribute facets.
 REPROBE_SKIP_FACETS = {"merk", "winkel"}
+
+
+def _atomic_to_csv(df: pd.DataFrame, cache_path: Path) -> None:
+    """Write a cache CSV atomically. A killed rebuild (OOM, disk full, the
+    subprocess dying with uvicorn) used to leave a truncated file that pandas
+    parses happily — and because the service's staleness test is mtime-based,
+    that half-file reads as 0 days old and the 7-day auto-refresh will not
+    repair it. Write beside the target, then rename: the previous good cache
+    survives any crash before the rename."""
+    tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
+    df.to_csv(tmp, index=False)
+    os.replace(tmp, cache_path)
 
 
 def _fetch_json(url: str, retries: int = 2) -> dict | list:
@@ -215,7 +228,7 @@ class DataLoader:
                 "table_name": slug,  # legacy column — use slug as stand-in
             })
         df = pd.DataFrame(rows)
-        df.to_csv(cache_path, index=False)
+        _atomic_to_csv(df, cache_path)
         return df
 
     def load_categories(self) -> pd.DataFrame:
@@ -238,7 +251,7 @@ class DataLoader:
                 "display_name": tree["id_to_name"][cid],
             })
         df = pd.DataFrame(rows)
-        df.to_csv(cache_path, index=False)
+        _atomic_to_csv(df, cache_path)
         return df
 
     @staticmethod
@@ -460,16 +473,8 @@ class DataLoader:
         # so the cached CSV is reproducible run-to-run.
         rows.sort(key=lambda r: (r["category_id"], r["facet_id"], r["facet_value_id"]))
         df = pd.DataFrame(rows)
-        df.to_csv(cache_path, index=False)
+        _atomic_to_csv(df, cache_path)
         return df
-
-    def load_r_urls(self, filepath: str) -> pd.DataFrame:
-        return pd.read_csv(filepath)
-
-    def save_to_cache(self, df: pd.DataFrame, filename: str) -> Path:
-        cache_path = config.CACHE_DIR / filename
-        df.to_csv(cache_path, index=False)
-        return cache_path
 
     def close(self):
         pass

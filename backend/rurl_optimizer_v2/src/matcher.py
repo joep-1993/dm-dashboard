@@ -61,6 +61,10 @@ _NUM_RE = re.compile(r'\d+(?:[.,]\d+)?')
 # per-facet-value hot functions run millions of times across a 300k-URL run).
 _ALNUM_RUN_RE = re.compile(r"[a-zÀ-ž0-9]+")
 _ALPHA_RUN_RE = re.compile(r"[a-zÀ-ž]+")
+# V61: _collapse_double_vowels is the innermost comparison helper (~70k calls per
+# match_by_token_coverage on a large pool) and re-compiled its pattern by cache
+# lookup on every call, plus an `import re` per call.
+_DBL_VOWEL_RE = re.compile(r'([aeouAEOU])\1+')
 
 
 def _numeric_signature(text: str) -> set:
@@ -92,7 +96,20 @@ def _strip_plural_suffix(s: str) -> str:
     Replaces the old `s.rstrip('s').rstrip('en')`, which stripped the CHARACTER
     SET {e,n} and so over-stripped multi-letter stems (e.g. 'tuinen' -> 'tui'
     instead of 'tuin', 'groen' -> 'gro')."""
-    return re.sub(r'(?:en|s)$', '', s)
+    # V61: keep a minimum stem. Without it 'gas' -> 'ga', 'mes' -> 'me',
+    # 'been' -> 'be', and words_in_category then treats the word as already
+    # covered by the category name via a 2-char substring ('ga' in 'games',
+    # 'me' in 'systemen') — 842 false drops measured across the real category
+    # names, each one a word that can never reach a facet. Mirrors the
+    # len > len(suffix) + 2 rule _is_semantic_match already uses.
+    # V61: keep a minimum stem of 4. Without it 'gas' -> 'ga', 'mes' -> 'me',
+    # 'groen' -> 'gro', and words_in_category reads those words as already
+    # covered by any category name containing the stub ('ga' in 'games'), which
+    # silently removes them from every matching pass.
+    for suffix in ('en', 's'):
+        if s.endswith(suffix) and len(s) - len(suffix) >= 4:
+            return s[:-len(suffix)]
+    return s
 
 
 def extract_category_path_from_url(facet_url: str) -> Optional[str]:
@@ -263,14 +280,16 @@ class KeywordMatcher:
             normalized = self._normalize(fv.facet_value_name)
             fv_count = getattr(fv, "count", 0) or 0
             existing = facet_lookup.get(normalized)
-            if existing is None or fv_count > (getattr(existing, "count", 0) or 0):
+            if existing is None or (fv_count, existing.url) > (
+                    (getattr(existing, "count", 0) or 0), fv.url):
                 facet_lookup[normalized] = fv
             # V23.2: Pre-compute measurement-normalized version
             if re.search(r'\d', normalized):
                 measurement_normalized = self._normalize_measurement_in_text(normalized)
                 if measurement_normalized != normalized:
                     existing_m = facet_lookup_measurement.get(measurement_normalized)
-                    if existing_m is None or fv_count > (getattr(existing_m, "count", 0) or 0):
+                    if existing_m is None or (fv_count, existing_m.url) > (
+                            (getattr(existing_m, "count", 0) or 0), fv.url):
                         facet_lookup_measurement[measurement_normalized] = fv
 
         if not facet_lookup:
@@ -597,8 +616,12 @@ class KeywordMatcher:
                 continue
 
             count = getattr(fv, "count", 0) or 0
+            # V61: `fv.url` closes the tie. (matched_kw, score, count) leaves
+            # equal-ranking values to be decided by facets.csv row order.
             cand = (matched_kw, score, count, fv)
-            if best is None or cand[:3] > best[:3]:
+            if (best is None
+                    or cand[:3] > best[:3]
+                    or (cand[:3] == best[:3] and fv.url < best[3].url)):
                 best = cand
 
         if best is None:
@@ -662,7 +685,26 @@ class KeywordMatcher:
         Molly"), so it can't rescue the brand.
         """
         bt = self._coverage_tokens(brand_value)
+        # V61: _coverage_tokens drops SHOP_NAMES and sub-3-char tokens, so a brand
+        # whose name IS a shop name tokenizes to [] — 396 of 32,464 merk values,
+        # 37 of them because of the shop list (vidaXL, IKEA, Hema, Intratuin).
+        # `not bt` then returned False = "not distinctive", and the two V57
+        # callers in main_parallel_v2 read that as "spurious" and dropped the
+        # facet even for the query "vidaxl bureau". Fall back to the raw words of
+        # the brand VALUE; the keyword side keeps the shop filter, so a query
+        # that only names a shop still can't rescue a brand.
         kt = self._coverage_tokens(keyword)
+        if not bt:
+            # Compare raw words on BOTH sides in this branch — the keyword's
+            # copy of the brand name is dropped by the same shop filter, so
+            # filtering only the brand side would still never match. The strict
+            # token test below (exact / Dutch suffix / double vowel, no fuzz)
+            # keeps the classic false positive out: "wc papier" still does not
+            # reach "Paper Dreams".
+            _raw = lambda t: [w for w in _ALPHA_RUN_RE.findall((t or '').lower())
+                              if len(w) >= 2]
+            bt = _raw(brand_value)
+            kt = _raw(keyword)
         ct = self._coverage_tokens(category_name) if category_name else []
         if not bt or not kt:
             return False
@@ -723,7 +765,8 @@ class KeywordMatcher:
             key = self._normalize(fv.facet_value_name)
             fv_count = getattr(fv, "count", 0) or 0
             existing = facet_lookup.get(key)
-            if existing is None or fv_count > (getattr(existing, "count", 0) or 0):
+            if existing is None or (fv_count, existing.url) > (
+                    (getattr(existing, "count", 0) or 0), fv.url):
                 facet_lookup[key] = fv
 
         if not facet_lookup:
@@ -795,7 +838,12 @@ class KeywordMatcher:
             keyword: Multi-word search keyword
             facet_values: List of FacetValue objects from current subcategory
             all_type_facets: All type facets for cross-category lookup
-            require_type_for_merk: If True, only allow merk matches if there's also a type match
+            require_type_for_merk: NOT ENFORCED. Every call site passes True in
+                the belief that a lone brand match is gated on a type match, but
+                no branch reads this flag — the merk pass below runs regardless.
+                The V39/V57 spurious-brand guards downstream are what actually
+                filter lone brand matches. Implementing it would change results;
+                see the audit's phase 3.
             current_main_category: Current main category (e.g., "huis_tuin") for prioritizing same-category matches
             category_name: Category display name (e.g., "Tuintafels") - words matching this are skipped
 
@@ -871,15 +919,13 @@ class KeywordMatcher:
             # If full keyword matches, add it as primary result
             results.append(full_match)
             has_type_match = full_match.is_priority_facet
-            # For EXACT matches on priority facets, we can skip individual word matching
-            # for OTHER priority facets (to prevent "bloembakken" overriding "Balkon bloembakken")
-            # But we still want to try winkel/merk matches for other words
-            if full_match.match_type == 'exact' and full_match.is_priority_facet:
-                # Skip to winkel/merk matching (don't try more priority facets)
-                pass  # Continue to winkel/merk passes below
-            elif full_match.match_type in ('exact', 'synonym'):
-                # For exact/synonym, skip individual priority matching but allow winkel/merk
-                pass
+            # NOTE: the V5 rule described here — an exact hit on a priority
+            # facet should skip individual-word matching for OTHER priority
+            # facets, so "bloembakken" can't override "Balkon bloembakken" — was
+            # never implemented. Both branches were empty `pass` bodies and the
+            # priority pass below ran regardless, so the rule is NOT enforced.
+            # Left as a comment rather than dead branches; enabling it changes
+            # results and belongs in a measured pass.
 
         # v6: Try word pair synonyms BEFORE individual word matching
         # This catches "extra groot" -> "XXL" before "extra" matches something else
@@ -1025,17 +1071,47 @@ class KeywordMatcher:
                 return _re_dim.sub(r'\s+', '', (s or '').lower())
             _matched_axes = {r.facet_value.facet_name.lower()
                              for r in results if r.facet_value}
+            # V61: collect per axis and pick explicitly. This used to take the
+            # FIRST row-order hit per axis at a hard-coded score of 100 — for
+            # "gordijn 200 cm" three a_parasol values contain "200cm" ("200cm",
+            # "200x200cm", "300x200cm") and which one won was decided by the
+            # order of facets.csv, so a cache rebuild moved the redirect. Prefer
+            # the value whose numeric signature IS the query's, then the one with
+            # more products, then the url as a stable last resort.
+            _dim_by_axis: dict = {}
             for fv in facet_values:
-                if fv.facet_name.lower() in _matched_axes:
+                axis = fv.facet_name.lower()
+                if axis in _matched_axes:
                     continue
                 fv_norm = _norm_dim(fv.facet_value_name)
-                if any(_norm_dim(dt) and _norm_dim(dt) in fv_norm for dt in _dim_tokens):
-                    results.append(MatchResult(
-                        keyword=keyword, facet_value=fv,
-                        match_type='exact', score=100,
-                        matched_text=fv.facet_value_name,
-                    ))
-                    _matched_axes.add(fv.facet_name.lower())
+                if not any(_norm_dim(dt) and _norm_dim(dt) in fv_norm for dt in _dim_tokens):
+                    continue
+                rank = (
+                    0 if _numeric_signature(fv.facet_value_name) == _numeric_signature(keyword) else 1,
+                    -(getattr(fv, 'count', 0) or 0),
+                    fv.url,
+                )
+                cur = _dim_by_axis.get(axis)
+                if cur is None or rank < cur[0]:
+                    _dim_by_axis[axis] = (rank, fv)
+            # Axes the query actually names come first. Plain alphabetical
+            # sent "vaatwasser diepte 50 cm" to breedte_vaatw ('b' < 'd') where
+            # row order used to land on diepte by luck; when the query names no
+            # axis at all ("smalle kast 30 cm") the name decides, which was
+            # arbitrary before and is at least reproducible now.
+            _kw_axis_toks = [t for t in _ALNUM_RUN_RE.findall(keyword.lower())
+                             if len(t) >= 4]
+            def _axis_rank(item):
+                axis = item[0]
+                named = any(t in axis or axis in t for t in _kw_axis_toks)
+                return (0 if named else 1, axis)
+            for axis, (_rank, fv) in sorted(_dim_by_axis.items(), key=_axis_rank):
+                results.append(MatchResult(
+                    keyword=keyword, facet_value=fv,
+                    match_type='exact', score=100,
+                    matched_text=fv.facet_value_name,
+                ))
+                _matched_axes.add(axis)
 
         # RC6 (2026-06-19): collapse redundant numeric/dimension-axis over-matches.
         # When the query carries a dimension/number ("30 cm") that matched several
@@ -1056,11 +1132,17 @@ class KeywordMatcher:
                     results = [r for r in results if id(r) not in _drop]
 
         # Deduplicate by facet name (keep best score per facet)
+        # V61: equal-scoring values on one axis used to keep whichever arrived
+        # first, i.e. facets.csv row order; more products then url decide now.
+        def _dedup_rank(r):
+            return (-r.score, -(getattr(r.facet_value, 'count', 0) or 0),
+                    r.facet_value.url)
         seen_facets = {}
         for r in results:
             if r.facet_value:
                 facet_name = r.facet_value.facet_name
-                if facet_name not in seen_facets or r.score > seen_facets[facet_name].score:
+                cur = seen_facets.get(facet_name)
+                if cur is None or _dedup_rank(r) < _dedup_rank(cur):
                     seen_facets[facet_name] = r
 
         # V30: Als kleurtint gematcht is, verwijder kleur (kleurtint is specifieker)
@@ -1069,9 +1151,15 @@ class KeywordMatcher:
             del seen_facets['kleur']
 
         # v5: Sort results: priority facets first, then non-strict, then strict, by score
+        # V61: `url` closes the sort. Everything downstream takes "the first"
+        # of this list as the strongest hit — url_builder.build_multi_facet
+        # picks primary_match with max(score), which keeps the first on a tie,
+        # and that match's url IS the landing subcategory. Without a total order
+        # the destination followed facets.csv row order.
         sorted_results = sorted(
             seen_facets.values(),
-            key=lambda r: (not r.is_priority_facet, r.is_strict_facet, -r.score)
+            key=lambda r: (not r.is_priority_facet, r.is_strict_facet, -r.score,
+                           r.facet_value.url if r.facet_value else '')
         )
 
         # Q3: cross-axis dedup by matched VALUE text. If one concept matched
@@ -1086,6 +1174,31 @@ class KeywordMatcher:
             s = _ud.normalize('NFKD', (s or '')).encode('ascii', 'ignore').decode().lower().strip()
             return s[:-1] if s.endswith('s') else s
 
+        # V61: when the SAME value text sits on several axes, prefer the axis the
+        # query actually names. "vaatwasser diepte 50 cm" matches '50 cm' on both
+        # breedte_vaatw and diepte_vaatw; which one survived used to depend on
+        # facets.csv row order (diepte won by luck), and any total order that
+        # ignores the query — alphabetical included — silently sends it to
+        # breedte. Only the axes carrying an identical value text are compared,
+        # so nothing else in the ranking moves.
+        _kw_axis_toks = [t for t in _ALNUM_RUN_RE.findall((keyword or '').lower())
+                         if len(t) >= 4]
+
+        def _axis_named_by_query(r):
+            axis = (r.facet_value.facet_name or '').lower() if r.facet_value else ''
+            if not axis:
+                return False
+            return any(t in axis or axis in t for t in _kw_axis_toks)
+
+        _best_for_val = {}
+        for _i, r in enumerate(sorted_results):
+            key = _norm_val(getattr(r, 'matched_text', ''))
+            if not key:
+                continue
+            rank = (0 if _axis_named_by_query(r) else 1, _i)
+            if key not in _best_for_val or rank < _best_for_val[key][0]:
+                _best_for_val[key] = (rank, id(r))
+
         _seen_vals = set()
         deduped = []
         for r in sorted_results:
@@ -1093,6 +1206,8 @@ class KeywordMatcher:
             if key and key in _seen_vals:
                 continue
             if key:
+                if _best_for_val.get(key, (None, id(r)))[1] != id(r):
+                    continue
                 _seen_vals.add(key)
             deduped.append(r)
 
@@ -1109,8 +1224,7 @@ class KeywordMatcher:
         Collapsing 'aa','ee','oo','uu' -> single letter makes the two forms
         comparable after '-en' is stripped.
         """
-        import re as _re
-        return _re.sub(r'([aeouAEOU])\1+', r'\1', s)
+        return _DBL_VOWEL_RE.sub(r'\1', s)
 
     def _is_semantic_match(self, keyword: str, facet_value_name: str) -> bool:
         """
@@ -1390,33 +1504,6 @@ class KeywordMatcher:
         text = ' '.join(text.split())
         return text
 
-    def _normalize_measurement(self, text: str) -> tuple:
-        """
-        V23.2: Normalize measurements for comparison.
-        Handles: '120cm' -> ('120', 'cm'), '12 cm' -> ('12', 'cm'), '120 CM' -> ('120', 'cm')
-        Returns (number, unit) tuple or None if not a measurement.
-        """
-        text = text.lower().strip()
-        # Pattern: number followed by optional space and unit
-        match = re.match(r'^(\d+(?:[.,]\d+)?)\s*(cm|mm|m|kg|g|l|ml|w|v|a|inch|")?$', text)
-        if match:
-            number = match.group(1).replace(',', '.')
-            unit = match.group(2) or ''
-            return (number, unit)
-        return None
-
-    def _measurements_match(self, word1: str, word2: str) -> bool:
-        """
-        V23.2: Check if two words represent the same measurement.
-        '120cm' matches '120 cm' but NOT '12 cm'.
-        """
-        m1 = self._normalize_measurement(word1)
-        m2 = self._normalize_measurement(word2)
-        if m1 and m2:
-            # Both are measurements - compare number and unit
-            return m1[0] == m2[0] and m1[1] == m2[1]
-        return False
-
     def _normalize_measurement_in_text(self, text: str) -> str:
         """
         V23.2: Normalize measurements in text by adding space between number and unit.
@@ -1470,23 +1557,41 @@ class KeywordMatcher:
         keyword_lower = keyword.lower().strip()
         keyword_normalized = self._normalize(keyword)
 
-        # Filter categories by main_category if provided
-        if main_category:
-            # url_name starts with main_category (e.g., "klussen_486170")
-            filtered_cats = categories_df[
-                categories_df['url_name'].str.startswith(main_category + '_', na=False)
-            ]
-        else:
-            filtered_cats = categories_df
+        # V61 memo. This is called 10+ times per URL (and unscoped — all 3,543
+        # categories — from the two cross-maincat helpers), always against the
+        # same frame inside a worker, and it is a pure function of
+        # (keyword, main_category). The cache is dropped if a different frame
+        # ever arrives, so a second caller with its own taxonomy is still correct.
+        cache_key = (keyword_lower, main_category or '')
+        if getattr(self, '_subcat_name_df', None) is not categories_df:
+            self._subcat_name_df = categories_df
+            self._subcat_name_cache = {}
+            self._subcat_name_rows = {}
+        cached = self._subcat_name_cache.get(cache_key)
+        if cached is not None:
+            return dict(cached) if cached else None
+
+        # Filter categories by main_category if provided, and keep the plain
+        # (display_name, url_name) pairs — .iterrows() built a Series per row and
+        # was ~45 ms of a 63 ms unscoped call.
+        rows = self._subcat_name_rows.get(main_category or '')
+        if rows is None:
+            if main_category:
+                # url_name starts with main_category (e.g., "klussen_486170")
+                filtered_cats = categories_df[
+                    categories_df['url_name'].str.startswith(main_category + '_', na=False)
+                ]
+            else:
+                filtered_cats = categories_df
+            rows = list(zip(filtered_cats['display_name'].values,
+                            filtered_cats['url_name'].values))
+            self._subcat_name_rows[main_category or ''] = rows
 
         best_match = None
         best_score = 0
         best_is_exact = False  # Track if best match is exact (full word match)
 
-        for _, row in filtered_cats.iterrows():
-            display_name = row.get('display_name', '')
-            url_name = row.get('url_name', '')
-
+        for display_name, url_name in rows:
             if not display_name or not url_name:
                 continue
 
@@ -1580,6 +1685,9 @@ class KeywordMatcher:
                     'match_type': 'subcategory_name'
                 }
 
+        # Cache a copy: callers mutate the dict they get back
+        # (_maybe_promote_to_specific_subcat rewrites it in place).
+        self._subcat_name_cache[cache_key] = dict(best_match) if best_match else {}
         return best_match
 
 
