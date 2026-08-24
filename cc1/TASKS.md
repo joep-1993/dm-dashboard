@@ -4,6 +4,43 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-24 — SEO titles: dedup op de live store, en een placeholder-bug die IT moet beoordelen
+
+Aanleiding was één cat/facet-vraag over `9001451 / merk~type_plantenbakken`. Mechaniek, de
+metingen en het GET-endpoint staan in LEARNINGS (zelfde datum). Code gepusht als `1e01075`,
+backend herstart.
+
+- [x] **`!!type_plantenbak!!` gecorrigeerd** naar `!!type_plantenbakken!!` (9001451,
+      `merk~type_plantenbakken`). Enige rij van de 539.214 met die typo; staging + productie
+      geüpsert, live geverifieerd als `CLP Plantenrekken`.
+- [x] **Dedup vraagt nu de store** i.p.v. de juli-snapshot: `load_existing_combos()` →
+      `load_local_combos()` (alleen `pa.seo_titles_blueprints`) + `store_has_combos()` op
+      `GET /page-titles/{catId}/record?key=`, gecachet in de nieuwe tabel
+      `pa.page_titles_api_cache`. Plus `get_store_record()` als losse read.
+- [x] **De drie scripts die op `beslist.tblPageTitles` leunden** (die tabel bestaat niet meer):
+      `pagetitles_blueprint_from_urls.py`, `pagetitles_blueprint_from_seo_traffic.py` en
+      `pagetitles_from_unique.py` vragen nu de store ná de scan (stdlib urllib). De eerste twee
+      hebben daardoor geen MySQL meer nodig — ze draaien onder de repo-venv i.p.v.
+      `~/.mysql-venv`. `pagetitles_top5_allchannel_combos.py` idem.
+- [ ] **Wacht op IT: is "een placeholder vult maar één keer" by design of een bug?** Joep kaart
+      het aan. Reproductie:
+      `/products/horloge/c/horloge_stijl~23590956~~kleur~5798159~~serie_horloge~10474515` →
+      "Shop met 71% korting online!". Repareren zij het, dan hoeven wij niets.
+- [ ] **Zo niet: description-template fixen en 84.881 rijen herpushen.** Het tweede `<phrase>`
+      in `Zoek je <phrase>? … Shop <phrase> met !!DISCOUNT!! korting online!` vervangen door
+      alleen `!!sub_category!!` (of de zin herschrijven zonder herhaling), in
+      `backend/seo_titles_service.py` én `scripts/pagetitles_blueprint_from_urls.py`. Is één
+      batch-upsert, geen hergeneratie. Eerst een handvol op staging/prod testen en met de GET
+      terugverifiëren.
+- [ ] **Aan IT vragen wat de canonieke store is.** `beslist.tblPageTitleImport` (41.394 rijen) is
+      een dode kopie die een push niet bijwerkt. Zolang dat onduidelijk is, is de GET onze enige
+      leesweg — en die kan alleen per combo, geen list-endpoint.
+- [ ] **Overweeg `pa.page_titles_existing` uit te faseren.** Nu alleen nog de bron van het
+      "existing"-tabblad en van de teller `existing_blueprints` in `get_stats()` (een
+      snapshot-rijtelling, geen live totaal). De helft van de rijen is bovendien de
+      shifted layout.
+
+
 ### 2026-08-24 — V59: facetwaarden die het categorienoun herhalen zijn nu wél matchbaar
 
 Uit twee rijen van `Downloads\redirects_global_828a73ad_20260820_094234.xlsx`. Mechaniek,

@@ -1,6 +1,82 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## `/page-titles` heeft wél een GET, `tblPageTitles` bestaat niet meer, en een placeholder vult maar één keer (2026-08-24)
+
+Aanleiding: "staat deze cat/facet-combi in SEO titles?" voor
+`.../tuin_accessoires_504058/c/merk~23819058~~type_plantenbakken~23807762`. De rij bestond
+(9001451 Plantenbakken, key `merk~type_plantenbakken`) maar de titel stond niet live. Daaronder
+lag een hele reeks dingen die niet meer klopten.
+
+**De rij droeg `!!type_plantenbak!!`, enkelvoud** — de enige van de 539.214 rijen met die
+spelling; 172 andere gebruiken `!!type_plantenbakken!!`. Een placeholder die geen bestaande
+facet-slug is, rendert leeg, dus de H1 was alleen het merk. Gecorrigeerd met een upsert van één
+record; live sindsdien `CLP Plantenrekken`.
+
+**MySQL `beslist.tblPageTitles` bestaat niet meer** op dbs-htz-001. Er staat nu
+`beslist.tblPageTitleImport` (dezelfde kolommen, 41.394 rijen, 41.392 NL + 2 BE) en dat is géén
+vervanging: een `200 OK` van `/page-titles` verandert die tabel niet, en **0 van onze 200 laatst
+gepushte blueprints** (van 85.167 met status `pushed`) staan erin. Het is een dode legacy-kopie.
+Drie scripts leunden op `SELECT … FROM tblPageTitles` en waren dus stuk:
+`pagetitles_blueprint_from_urls.py`, `pagetitles_blueprint_from_seo_traffic.py` en
+`pagetitles_from_unique.py`.
+
+**Er is wél een read-endpoint** (door Joep aangewezen; in dit bestand stond jarenlang "geen GET"):
+`GET /page-titles/{catId}/record?key=<key>` met dezelfde `X-Api-Key`, en het geeft
+`{cat_id, key, title, description, h1_title, country_code}`. Gedrag geprobeerd: zonder `key` een
+400 `"Query parameter key is required"`, onbekend record of cat_id 404 `"Record not found"`, geen
+key 401. **De key wordt letterlijk en op volgorde gematcht** — `merk~type_plantenbakken` geeft
+200, `type_plantenbakken~merk` 404 — dus altijd `canon_key()` sturen. Een `country_code`-param
+wordt geslikt maar genegeerd (`BE` gaf de NL-rij). Hiermee is een push voor het eerst
+verifieerbaar in plaats van "200 OK en hopen".
+
+**Een `!!facet!!` vult zich alleen bij de EERSTE keer dat hij in een veld staat; herhalingen
+renderen leeg.** `!!sub_category!!` is de uitzondering en vult elke keer. Live geverifieerd op
+vier onafhankelijke pagina's. Onze description-template herhaalt de hele facetfrase ("Zoek je X?
+… Shop X met korting"), dus die tweede helft is verminkt op **84.881 van de 85.167** gepushte
+blueprints:
+
+| onze description | live |
+|---|---|
+| `… Shop !!merk!! !!materiaal!! !!sub_category!! met …` | "Shop **Klussen** met 58% korting" |
+| `… Shop !!horloge_stijl!! !!kleur!! !!serie_horloge!! met …` | "Shop **met** 76% korting" |
+
+De variant zonder `!!sub_category!!` (de noun is een type-facet) is het ergst: daar valt de frase
+compleet weg. Titles en H1's zijn wél goed — alleen de description. Reproduceerbaar op
+`/products/horloge/c/horloge_stijl~23590956~~kleur~5798159~~serie_horloge~10474515`.
+
+**Een per-URL unique title wint van de blueprint.** Kostte een half onderzoek: de eerste vier
+testpagina's die ik koos hadden allemaal een rij in `pa.unique_titles_content`, dus die testten
+de blueprint helemaal niet. In een unique title zijn de facetwaarden al letterlijke tekst, dus
+daar speelt de herhaling niet. Kies testpagina's zonder unique-title-rij. En let op:
+**`pa.urls.url` bevat RELATIEVE paden** — zoeken met de volledige `https://...`-URL geeft stille
+valse negatieven; join op
+`regexp_replace(source_url, '^https?://[^/]+', '')`.
+
+**Live pagina's ophalen kan gewoon**, met de whitelisted user-agent (Joep noemt dit "de SEOuser
+agent"): `curl -s -A "Beslist script voor SEO" <url>`. Zonder die UA geeft beslist.nl een AWS-WAF
+`Human Verification`-pagina (405 op kale curl, ook via Windows-Chrome headless). Dit is de
+snelste grond-waarheid voor elke title/H1/meta-vraag.
+
+**`pa.page_titles_existing` draagt TWEE layouts en is als dedup-bron onbruikbaar.** 387.277 van
+de 539.214 rijen zijn "shifted": de `key`-kolom houdt een CATEGORIENAAM vast (`Braadsledes`) en de
+echte facetkey staat in `title`. Gestratificeerd tegen de store gemeten: echte facetkeys (met `~`,
+of een enkel token dat een bekende facet-slug is) **100/100 aanwezig**, shifted-keys **0/50**. Die
+385k rijen matchten dus nooit een combo — ruis, geen suppressie. Nagegaan of we ooit iets
+waardevols overschreven: 54.735 van onze gepushte combo's vallen samen met een shifted rij,
+waarvan **51.697 byte-identiek** en de 3.038 verschillen precies de volgordefix van 31 juli. De
+shifted rijen zijn een oudere generatie van onze eigen blueprints, geen handwerk — geen schade.
+De 285.725 shifted-combo's die we nooit pushten geven allemaal 404: die stonden nooit in de store.
+
+**Dedup draait nu op de store zelf** (`store_has_combos`, `backend/seo_titles_service.py`): één
+GET per combo, 12 threads, gememoïseerd in de nieuwe tabel `pa.page_titles_api_cache`. Een
+`found` verloopt nooit (geen delete-verb, dus een record kan niet verdwijnen), een miss wordt na
+7 dagen herchecked. Gemeten **41 combo's/s**, dus ~4 min per 10.000 verse combo's en daarna
+gratis. Een GET die geen antwoord geeft telt als BESTAAND — de veilige richting, want een record
+ten onrechte "nieuw" noemen betekent het bij de volgende push overschrijven. `_run()` is daarom
+drie passes: `scanning_urls` (nul HTTP) → `checking_store` → `building_blueprints`; de store
+wordt pas bevraagd over de distinct overlevers, niet over 100k URL-duplicaten.
+
 ## Twee redenen waarom een facet niet aan een `/r/`-redirect geplakt wordt, en maar één ervan zit in de matcher (2026-08-24)
 
 Aanleiding: twee rijen uit `Downloads\redirects_global_828a73ad_20260820_094234.xlsx` waar het
