@@ -38,6 +38,24 @@ SEARCH_LOCALE = "nl-nl"
 MAX_WORKERS = 12
 HTTP_TIMEOUT = 30
 
+# V60: an unfiltered /search/products call truncates every facet's value list to
+# the N values with the most products. N is per facet, not exposed by the API and
+# not settable by any query param (probed: facetValueLimit, facetLimit,
+# maxFacetValues, … all ignored) — 8 for `ruimte`, 16 for `kleur`, 100 for `merk`.
+# Everything below the cut simply isn't in the response, so the optimizer never
+# saw e.g. ruimte~4945789 (Balkon, 21 products) in Opbergkasten and could never
+# append it. Re-requesting the SAME category with a filter on that facet returns
+# the facet's FULL value list, with counts identical to the unfiltered ones
+# (the API computes a facet excluding its own filter), so a second pass repairs
+# the cache without introducing a second, possibly disagreeing, source.
+FACET_VALUE_REPROBE = True
+# Brand/shop are deliberately left truncated. `winkel` is excluded from matching
+# everywhere, and lifting `merk` off its 100-value cap would add thousands of
+# tail brands per category — that changes brand matching (and the size of this
+# cache) enough to deserve its own evaluation, and it isn't what the truncation
+# actually costs us: the misses are attribute facets.
+REPROBE_SKIP_FACETS = {"merk", "winkel"}
+
 
 def _fetch_json(url: str, retries: int = 2) -> dict | list:
     """GET JSON with a small retry. Raises on final failure."""
@@ -223,6 +241,125 @@ class DataLoader:
         df.to_csv(cache_path, index=False)
         return df
 
+    @staticmethod
+    def _search_category_facets(slug: str, filter_facet: str = "",
+                                filter_value=None) -> list:
+        """Return the `facets` block for a category. With `filter_facet` set,
+        THAT facet's value list comes back complete instead of truncated to its
+        top-N (see FACET_VALUE_REPROBE); every other facet in the response is
+        narrowed to the filtered product set and must be ignored."""
+        params = {
+            "category": slug,
+            "countryLanguage": SEARCH_LOCALE,
+            "isBot": "true",
+            "limit": "1",
+        }
+        if filter_facet and filter_value is not None:
+            params[f"filters[{filter_facet}][0]"] = str(filter_value)
+        url = f"{SEARCH_BASE_URL}/search/products?{urllib.parse.urlencode(params)}"
+        data = _fetch_json(url)
+        return data.get("facets") or []
+
+    def _reprobe_truncated_facet_values(self, pair_values: dict, pair_ctx: dict,
+                                        facet_meta: dict) -> list[dict]:
+        """V60 second pass: refetch the (category, facet) pairs whose value list
+        looks truncated and return the rows the first pass could not see.
+
+        A facet's cap is invisible per response, so it's derived from the data:
+        the cap can only be the highest value count that facet reaches across all
+        categories, and a pair sitting at that number is exactly the pair that
+        may have been cut off. Pairs below it showed everything they had. That
+        over-probes facets which are simply small (a 3-value facet is "at its
+        max" in every category) — those calls just come back with nothing new,
+        which is the cheap side of the trade.
+        """
+        max_per_facet: dict[int, int] = {}
+        for (_cid, fid), vids in pair_values.items():
+            if len(vids) > max_per_facet.get(fid, 0):
+                max_per_facet[fid] = len(vids)
+
+        candidates = []
+        for pair, vids in pair_values.items():
+            fname = pair_ctx[pair]["facet_name"]
+            # The filter param takes the facet's url slug. When the first pass
+            # fell back to the response label we don't have one, so we can't
+            # address the facet and have to leave the pair as it is.
+            if not vids or fname in REPROBE_SKIP_FACETS:
+                continue
+            if facet_meta.get(pair[1]) != fname:
+                continue
+            if len(vids) >= max_per_facet.get(pair[1], 0):
+                candidates.append(pair)
+
+        if not candidates:
+            return []
+        logger.info("V60: re-probing %d of %d (category, facet) pairs for "
+                    "truncated value lists...", len(candidates), len(pair_values))
+
+        def probe(pair):
+            ctx = pair_ctx[pair]
+            # Any value of this facet unlocks the full list; take the lowest id
+            # so a rebuild issues byte-identical requests.
+            seed = min(pair_values[pair])
+            try:
+                return pair, self._search_category_facets(
+                    ctx["slug"], ctx["facet_name"], seed)
+            except Exception as e:
+                return pair, {"__error__": str(e)}
+
+        extra: list[dict] = []
+        errors = 0
+        error_samples: dict[str, int] = {}
+        t0 = time.time()
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+            futures = [ex.submit(probe, p) for p in candidates]
+            done = 0
+            for fut in as_completed(futures):
+                pair, result = fut.result()
+                done += 1
+                if done % 2000 == 0:
+                    logger.info("  ...%d/%d pairs (%.1fs elapsed)",
+                                done, len(candidates), time.time() - t0)
+                if isinstance(result, dict) and "__error__" in result:
+                    errors += 1
+                    msg = str(result["__error__"])[:120]
+                    error_samples[msg] = error_samples.get(msg, 0) + 1
+                    continue
+
+                cid, fid = pair
+                ctx = pair_ctx[pair]
+                known = pair_values[pair]
+                for f in result:
+                    if f.get("id") != fid:
+                        continue
+                    for v in f.get("values") or []:
+                        vid = v.get("id")
+                        if vid is None or vid in known:
+                            continue
+                        known.add(vid)
+                        extra.append({
+                            "facet_id": fid,
+                            "facet_name": ctx["facet_name"],
+                            "facet_value_id": vid,
+                            "facet_value_name": v.get("facetValue") or "",
+                            "url": f"/products/{ctx['root_slug']}/{ctx['slug']}"
+                                   f"/c/{ctx['facet_name']}~{vid}",
+                            "main_category_id": ctx["root"],
+                            "main_category_name": ctx["root_name"],
+                            "category_id": cid,
+                            "category_url_slug": ctx["slug"],
+                            "count": v.get("count") or 0,
+                        })
+
+        logger.info("V60 re-probe complete: +%d values on %d pairs in %.1fs "
+                    "(errors=%d)", len(extra), len(candidates),
+                    time.time() - t0, errors)
+        # A failed probe silently leaves a pair truncated, which is invisible in
+        # the output — so say what went wrong, not just how often.
+        for msg, n in sorted(error_samples.items(), key=lambda kv: -kv[1])[:5]:
+            logger.warning("  probe error x%d: %s", n, msg)
+        return extra
+
     def load_facets(self) -> pd.DataFrame:
         """
         Return DataFrame: facet_id, facet_name, facet_value_id, facet_value_name,
@@ -246,19 +383,16 @@ class DataLoader:
         logger.info("Fetching facets for %d subcategories via Search API...", len(sub_ids))
 
         def fetch_cat_facets(cid: int):
-            slug = tree["id_to_url_slug"][cid]
-            url = (
-                f"{SEARCH_BASE_URL}/search/products"
-                f"?category={urllib.parse.quote(slug)}"
-                f"&countryLanguage={SEARCH_LOCALE}&isBot=true&limit=1"
-            )
             try:
-                data = _fetch_json(url)
-                return cid, data.get("facets") or []
+                return cid, self._search_category_facets(tree["id_to_url_slug"][cid])
             except Exception as e:
                 return cid, {"__error__": str(e)}
 
         rows: list[dict] = []
+        # V60 bookkeeping: which values we saw per (category, facet), plus the
+        # context needed to build a row for a value the second pass discovers.
+        pair_values: dict[tuple[int, int], set] = {}
+        pair_ctx: dict[tuple[int, int], dict] = {}
         errors = 0
         t0 = time.time()
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
@@ -284,10 +418,20 @@ class DataLoader:
                     fname = facet_meta.get(fid) or f.get("label") or ""
                     if not fid or not fname:
                         continue
+                    pair = (cid, fid)
+                    pair_ctx[pair] = {
+                        "facet_name": fname,
+                        "slug": slug,
+                        "root": root,
+                        "root_slug": root_slug,
+                        "root_name": root_name,
+                    }
+                    seen = pair_values.setdefault(pair, set())
                     for v in f.get("values") or []:
                         vid = v.get("id")
                         if vid is None:
                             continue
+                        seen.add(vid)
                         rows.append({
                             "facet_id": fid,
                             "facet_name": fname,
@@ -305,6 +449,11 @@ class DataLoader:
             "Facet fetch complete: %d rows in %.1fs (errors=%d)",
             len(rows), time.time() - t0, errors,
         )
+
+        if FACET_VALUE_REPROBE:
+            rows.extend(self._reprobe_truncated_facet_values(
+                pair_values, pair_ctx, facet_meta))
+
         # Deterministic row order: rows were appended in thread-completion
         # (as_completed) order, so a cache rebuild could reshuffle them and flip
         # "first matching row wins" tie-breaks downstream. Sort by a stable key
