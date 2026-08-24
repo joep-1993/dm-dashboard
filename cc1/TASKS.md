@@ -4,6 +4,67 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-24 — Audit Auto-Redirects: fase 0-3 (V61)
+
+Vijf parallelle reviews over `rurl_optimizer_v2` + de service, daarna zelf geverifieerd. Volledige
+bevindingenlijst en de gefaseerde aanpak staan in de sessie; mechaniek en de twee foute
+verdachten in LEARNINGS (zelfde datum). Poorten: 150 echte R-URL's met productie-vlaggen, een
+geschudde `facets.csv`, en per fix de populatie die de bug raakt.
+
+**Fase 0 — gemeten op `rurl_processed` (41.472 URL's)**
+- [x] 352 rijen met `match_type='cross_maincat_blocked'` en lege `redirect_url`.
+- [x] 1.343 van 24.155 facet-fragmenten (5,6%) staan niet in de catalogus; 114 daarvan op het
+      subcat-append-pad. Live steekproef van 12: 6x 0 producten, 4x HTTP 400 — echt dood.
+
+**Fase 1 — gedrag-behoudend (47,1s -> 14,4s op 150 URL's, 3,3x)**
+- [x] Memo per worker op `filter_by_subcategory` / `filter_by_main_category` / `get_facet_values`
+      (82 -> 53 ms koud, ~0 warm), `regex=False`, `to_dict("records")` -> `zip`.
+- [x] `match_subcategory_name`: `iterrows()` eruit + memo (71,8 -> 3,7 ms koud, ~0 warm).
+- [x] Identiteit bewezen door oud en nieuw naast elkaar te laden: 0 mismatches op 60 subcats x2 +
+      8 maincats + het exclude-pad, en 0 op 1.445 `match_subcategory_name`-aanroepen.
+- [x] Checkpoint schrijft append met vaste kolomvolgorde; caches atomair (`.tmp` + `os.replace`);
+      `facet_probe` serveert geen gecachete `mode:"error"` meer en hergebruikt `_SESSION`;
+      regex-patronen naar module-scope; `_facet_value_name_lookup` via `col_mapping` + warning.
+- [x] Dode code weg (elk met een tree-brede grep bevestigd): `_measurements_match`,
+      `_normalize_measurement`, `filter_by_subcategory_name`, `get_type_facets_only`,
+      `get_unique_facet_names`, `load_r_urls`, `save_to_cache`, `_derive_multi_facets`.
+      `require_type_for_merk` en de twee lege `pass`-takken kregen een eerlijke comment.
+
+**Fase 2 — determinisme: identiek op alle 35 kolommen met een geschudde cache**
+- [x] Tien tie-breaks gesloten (dedup naar categoriediepte 3x, dimensiepas, token-coverage,
+      axis-dedup, `sorted_results`, drie naam-dedups, `max(type_matches)`, qualifier-`next`,
+      de leftover-collector, `_maybe_promote_to_specific_subcat`).
+- [x] Q3 cross-axis-dedup: bij gelijke waardetekst wint de as die de query noemt
+      (`vaatwasser diepte 50 cm` bleef anders op `breedte_vaatw` hangen).
+
+**Fase 3 — gedrag-veranderend, elk apart gemeten**
+- [x] **#1** laatste redmiddel aan het EIND van de functie (247/352 gered, 0 verloren, tier C).
+- [x] **#2** geen facet aanplakken dat niet op de doelpagina bestaat (dode fragmenten 66 -> 16 op
+      de 114-rij-populatie; tiers zakken A 14->9 / B 29->25, en dat is de bedoeling).
+- [x] **#10** Fix E slaat over bij een facet-gepinde bron-URL. **#11** idem voor de
+      cross-maincat-fallback in de V28-afwijzing.
+- [x] **#13** merk dat ook winkelnaam is (vidaXL/IKEA/Hema, 396 waarden) niet meer weggegooid als
+      de query het letterlijk noemt; `wc papier` -> `Paper Dreams` blijft geblokkeerd.
+- [x] **#14** minimumlengte op `_strip_plural_suffix` + echte suffix-strip in
+      `_is_bare_category_noun`. Bleek onschuldig aan de airfryer-regressie; blijft erin.
+- [ ] **Cascade-poorten op `_ok`** — 8 extra reddingen en 36 tier-A/B, maar brak 4 van 150. Kan
+      pas als de V26-blokkade meeschuift met de cascade. Eigen meting nodig.
+- [ ] **16 resterende dode fragmenten**: dezelfde ontbrekende bestaanscheck op `multi`,
+      `search_derived_samecat` en de probe-fallback.
+- [ ] **2 rijen** in de 114-populatie verliezen hun redirect i.p.v. terug te vallen op de kale
+      categorie — uitzoeken waarom de skip niet tot een fallback leidt.
+
+**Fase 4 — ops, NOG NIET GEDAAN** (raakt de live service op :8003)
+- [ ] RC4 doet live Search-API-calls vanuit de pool-workers met een verse `_TokenBucket` per call
+      (slaapt dus nooit): naar de prefetch-fase, cache-only in de workers.
+- [ ] Run-state leeft alleen in RAM (`_TASKS`), `Popen` zonder `start_new_session`, Tier-A-output
+      pas aan het eind weggeschreven — dit is de "Tier-A run overleeft geen uvicorn-restart".
+- [ ] Facets-refresh kan tijdens een lopende run de cache omgooien; lock ontbreekt.
+- [ ] `db_loader` heeft geen rate limiter; V60 bracht de rebuild van ~3,5k naar ~16,6k calls met
+      12 threads (~48 req/s) terwijl de rest van de codebase 20 QPS aanhoudt.
+- [ ] `search_derived._cache_get` mist `except OperationalError` om de query heen (en
+      `journal_mode=delete` betekent dat één schrijver alle lezers blokkeert).
+
 ### 2026-08-24 — V60: de facetpool was afgekapt op de top-N per facet
 
 Fix 2 uit de V59-sectie hierboven. Mechaniek, de meetopzet en de dunne-staart-cijfers staan in

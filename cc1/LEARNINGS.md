@@ -1,6 +1,66 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een fallback op de verkeerde plek is erger dan geen fallback (2026-08-24, V61)
+
+Uit de audit van `rurl_optimizer_v2`. De duurste les zat niet in het vinden van de bug maar in
+het **plaatsen van de fix**, en de weg ernaartoe liep via twee foute conclusies.
+
+**De bug.** `RedirectResult` is een kale dataclass zonder `__bool__`, dus een *afwijzing*
+(`success=False`, `redirect_url=None`) is truthy. `build_multi_facet` geeft die terug voor de
+V26 cross-maincat-blokkade, `[V16]`, `[V18]` en "No matching facets found". Alle twaalf
+cascade-poorten testten `if not result`, dus één afwijzing bij stap 1 sloeg de rest van de
+cascade **en** de category-only fallback over: 352 rijen in `rurl_processed` staan op
+`match_type='cross_maincat_blocked'` met een lege `redirect_url`.
+
+**Poging 1 — alle poorten op `_ok()`.** Redt 255 van de 352 (36 daarvan tier A/B), maar breekt
+**4 van 150** gewone rijen: zodra een afwijzing de cascade niet meer stillegt, maakt een latere
+stap juist de cross-maincat-match die de V26-blokkade tegenhield. `philips airfryer` belandde op
+huis_tuin *Binnenverlichting* `/c/merk~Philips`. De blokkade wás het signaal.
+
+**Poging 2 — alleen de eindfallback op `_ok()`.** Lijkt veilig en is het niet: door daar een
+categoriepagina in te vullen is `final_redirect_url` gevuld, en dan vuurt de **V36
+cross-maincat-fallback** verderop niet meer, want die eist "helemaal geen redirect". `/r/airfryer/`
+verhuisde van de Airfryers-pagina (tier B) naar een `huis_tuin`-fallback (tier D). Een goed
+laatste redmiddel vervangen door een slecht eerste.
+
+**Wat wél werkt:** het redmiddel helemaal aan het eind, ná V36/V41/V50/V55 — pas als élke route
+niets heeft opgeleverd. 247 van de 352 gered, **0 regressies**, en 3 gewijzigde redirects op de
+150-rij-poort (alle drie verantwoord). Les voor deze codebase: in een cascade met een stuk of
+zeven laatste-redmiddelen is "vul een default in" nooit lokaal — vraag altijd wie er ná jou nog
+op leegte test.
+
+**Twee foute verdachten, en hoe je ze uitsluit.** Ik weet zeker dat het aan `#14` (twee
+morfologie-fixes) lag → onjuist: met #14 aan én uit precies dezelfde 5 verschillen. Daarna: het
+zal cache-drift zijn → **draai de oude code opnieuw op dezelfde input**: 0 van 150 verschillen,
+40 minuten later. Toen pas de goedkope, beslissende stap: bisect op bestandsniveau
+(HEAD-`main_parallel` + mijn `src` = 2 diffs, geen airfryer; mijn `main_parallel` + HEAD-`src` =
+3 diffs, mét airfryer). Twee runs, klaar. Had ik daar mee moeten beginnen.
+
+**Determinisme meet je door de cache te schudden, niet door te lezen.** `facets.csv` (624.884
+rijen) in willekeurige volgorde zetten en dezelfde input draaien legde tie-breaks bloot op tien
+plekken — dedup naar categoriediepte, de dimensiepas, de axis-dedup, `sorted_results` (waar
+`url_builder.primary_match` z'n "eerste op gelijkspel" vandaan haalt), drie naam-dedups. Sinds
+alle sleutels totaal zijn: identiek op alle 35 kolommen. Dit was **urgent** omdat de V60-rebuild
+van diezelfde ochtend de rijvolgorde al had veranderd.
+
+**Waar de vinger wijst is niet waar de keuze valt.** `vaatwasser diepte 50 cm` ging naar
+`breedte_vaatw`. De dimensiepas leek de dader, maar die vindt `50 cm` op *beide* assen; de keuze
+viel pas in de Q3 cross-axis-dedup ("zelfde waardetekst, hou de eerste"). Elke totale ordening
+die de query negeert — alfabetisch incluis — kiest daar fout. Fix: bij gelijke waardetekst wint
+de as die de query zélf noemt.
+
+**`_ok` was al een lokale naam.** De helper heette `_ok`, en 1.500 regels verderop stond
+`_ok = any(...)` in dezelfde functie — Python maakt de naam dan lokaal voor de héle functie, dus
+de poorten bovenaan kregen `UnboundLocalError` en de hele run klapte eruit. Geen enkele test
+ving dat: de suite raakt `process_url_v2` niet end-to-end. In een functie van 2.600 regels is een
+korte helpernaam een aanslag op jezelf.
+
+**Meet op de populatie die de bug raakt.** Niet op een steekproef: `rurl_processed` (41.472
+URL's) leverde exact de 352 geblokkeerde rijen en de 114 rijen met een niet-bestaand facet. Van
+die 114 bleek bij live-controle 6× 0 producten en 4× HTTP 400 — dus geen catalogus-drift maar
+echt dode bestemmingen. Die twee lijsten waren de poort voor twee losse fixes.
+
 ## De cap op facetwaarden staat nergens in de respons, dus leid 'm af uit je eigen data (2026-08-24)
 
 Vervolg op de entry van vandaag over de afgekapte facetlijst: die is nu gerepareerd (V60,
