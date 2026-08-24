@@ -54,16 +54,20 @@ geschudde `facets.csv`, en per fix de populatie die de bug raakt.
 - [ ] **2 rijen** in de 114-populatie verliezen hun redirect i.p.v. terug te vallen op de kale
       categorie — uitzoeken waarom de skip niet tot een fallback leidt.
 
-**Fase 4 — ops, NOG NIET GEDAAN** (raakt de live service op :8003)
-- [ ] RC4 doet live Search-API-calls vanuit de pool-workers met een verse `_TokenBucket` per call
-      (slaapt dus nooit): naar de prefetch-fase, cache-only in de workers.
-- [ ] Run-state leeft alleen in RAM (`_TASKS`), `Popen` zonder `start_new_session`, Tier-A-output
-      pas aan het eind weggeschreven — dit is de "Tier-A run overleeft geen uvicorn-restart".
-- [ ] Facets-refresh kan tijdens een lopende run de cache omgooien; lock ontbreekt.
-- [ ] `db_loader` heeft geen rate limiter; V60 bracht de rebuild van ~3,5k naar ~16,6k calls met
-      12 threads (~48 req/s) terwijl de rest van de codebase 20 QPS aanhoudt.
-- [ ] `search_derived._cache_get` mist `except OperationalError` om de query heen (en
-      `journal_mode=delete` betekent dat één schrijver alle lezers blokkeert).
+**Fase 4 — ops (raakt de live service op :8003; 150-poort identiek op alle 35 kolommen)**
+- [x] RC4 uit de workers: `prefetch_insubcat_facets` doet het vooraf met één bucket, workers
+      draaien `cache_only=True`. Gemeten: 142 pairs vooraf, 0 gewijzigde redirects.
+- [x] Run-lifecycle: historie-rij bij runstart (met pid), Tier-A-rijen per chunk naar schijf,
+      `start_new_session=True` op alle drie de Popens, historie atomair + kapot bestand opzij.
+- [x] `_sweep_stale_tasks` markeert `interrupted` i.p.v. `completed` — en `rurl-optimizer.html`
+      kent die status nu, anders pollt de frontend eeuwig door (die lijst is
+      `completed|failed|cancelled`).
+- [x] Facets-refresh weigert zolang er een run draait (`_a_run_is_active`).
+- [x] Rate limiter op `db_loader` (`RURL_FACETS_QPS`, default 20) — **rebuild gaat van ~6 naar
+      ~14 min**. En `search_derived._cache_get` had zijn OperationalError-guard om `_connect()`
+      heen terwijl sqlite pas lockt bij `execute()`; plus `journal_mode=WAL`.
+- [ ] **Nog niet actief op :8003** — uvicorn draait zonder `--reload`, dus dit gaat pas mee bij
+      de volgende deploy (kill + relaunch).
 
 ### 2026-08-24 — V60: de facetpool was afgekapt op de top-N per facet
 

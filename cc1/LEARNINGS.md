@@ -1,6 +1,47 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een nieuwe status die de frontend niet kent, is een oneindige poll (2026-08-24, V61 fase 4)
+
+De ops-fase van de Auto-Redirects-audit. Vier dingen die verder gelden dan deze module.
+
+**Een token bucket per aanroep is geen rate limit.** `derive_insubcat_facet` deed
+`if bucket is None: bucket = _TokenBucket(SEARCH_QPS)` — en `_next_slot` begint op 0, dus het
+eerste verzoek van élke aanroep wachtte nooit. Met N worker-processen betekent dat N onafhankelijke
+20-QPS-budgetten tegen de live API, en een `threading.Lock` kan sowieso geen procesgrens over. Een
+limiet die per aanroep wordt aangemaakt is decoratie. Fix: één prefetch vooraf met één bucket, en
+de workers cache-only (`cache_only=True`) — gemeten op 150 URL's: 142 pairs vooraf opgehaald,
+**0 gewijzigde redirects**. Zelfde patroon zat in `db_loader`, dat helemaal geen rem had: 12
+threads tegen een endpoint van ~250 ms is ~48 req/s terwijl de codebase 20 QPS als afspraak
+hanteert. Prijs van de rem: de facets-rebuild gaat van ~6 naar ~14 minuten.
+
+**`sqlite3.connect()` is lazy, dus je `except` staat op de verkeerde regel.** In
+`search_derived._cache_get` stond de `OperationalError`-guard om `_connect()` heen, maar het
+bestand wordt pas geopend en gelockt bij `conn.execute()` — dus "database is locked" ontsnapte uit
+de worker, werd door `imap_unordered` opnieuw opgegooid en nam een hele chunk van 20k URL's mee.
+In Tier-A-modus zie je daar niets van behalve één regel "[warn] chunk N produced no output".
+`facet_probe._probe_get` had de guard wél op de execute — twee kopieën van dezelfde functie die
+uit elkaar gelopen zijn. Meteen ook `journal_mode=WAL`: met de default neemt één schrijver een
+EXCLUSIVE lock op het hele bestand terwijl elke worker leest.
+
+**Een nieuwe status is een frontendwijziging, ook als je alleen backend aanraakt.**
+`_sweep_stale_tasks` markeerde een run als `completed` zodra er een outputbestand bestond —
+terwijl upsert, de globale pass, de xlsx-conversie en `save_run_output` allemaal overgeslagen
+waren, dus "Recovered" meldde succes met een dode Export-knop. Ik veranderde dat in `interrupted`
+en had daarmee bijna een ergere bug geïntroduceerd: `frontend/rurl-optimizer.html` pollt tot
+`completed|failed|cancelled`, dus een onbekende status laat de poller eeuwig doordraaien met een
+uitgeschakelde run-knop. Grep de frontend op de terminale statuslijst vóór je er een toevoegt.
+
+**Werk dat alleen in geheugen staat, bestaat niet.** De hele opbrengst van een Tier-A-run zat in
+`tier_a_frames` tot na de laatste chunk. Drie uur draaien + een uvicorn-restart = niets, en een
+retry met `force_reprocess=False` filtert juist de al verwerkte URL's eruit, dus die rijen konden
+nooit meer in een output belanden. Nu schrijft elke chunk zijn tier-A-rijen meteen weg. Zelfde
+categorie: de historie-rij werd pas bij een eindstatus geschreven, dus een verdwenen run liet geen
+spoor na (`_TASKS` is RAM, `/status` kent het id niet meer, "Recent runs" toont niets) — die rij
+gaat nu bij runstart naar schijf, met de pid erin zodat een achtergebleven proces vindbaar is. En
+`Popen` zonder `start_new_session=True` zet het kind in de procesgroep van uvicorn, dus de
+gedocumenteerde deploy (`fuser -k 8003/tcp`) nam de optimizer mee.
+
 ## Een fallback op de verkeerde plek is erger dan geen fallback (2026-08-24, V61)
 
 Uit de audit van `rurl_optimizer_v2`. De duurste les zat niet in het vinden van de bug maar in
