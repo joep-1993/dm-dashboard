@@ -49,10 +49,17 @@ geschudde `facets.csv`, en per fix de populatie die de bug raakt.
       `_is_bare_category_noun`. Bleek onschuldig aan de airfryer-regressie; blijft erin.
 - [ ] **Cascade-poorten op `_ok`** — 8 extra reddingen en 36 tier-A/B, maar brak 4 van 150. Kan
       pas als de V26-blokkade meeschuift met de cascade. Eigen meting nodig.
-- [ ] **16 resterende dode fragmenten**: dezelfde ontbrekende bestaanscheck op `multi`,
-      `search_derived_samecat` en de probe-fallback.
-- [ ] **2 rijen** in de 114-populatie verliezen hun redirect i.p.v. terug te vallen op de kale
-      categorie — uitzoeken waarom de skip niet tot een fallback leidt.
+- [x] **16 resterende dode fragmenten**: opgelost met één centrale prune vlak vóór de output
+      i.p.v. per pad — 16 -> **0** op de getroffen populatie, tiers onveranderd, 1 wijziging op de
+      150-poort (`boxspring met tv lift` verliest een facet met live 0 producten). De uitzondering
+      geldt alleen voor het bronfacet én alleen op de origin-pagina; de twee lossere varianten
+      lieten respectievelijk 1 en 5 dode fragmenten staan.
+- [x] **2 rijen die hun redirect verloren**: bestaan niet meer — nagemeten tegen `df_old`, nul
+      rijen gaan van "wel een redirect" naar "geen".
+- [x] Dubbele Search-call weg: `_subcat_keyword_facet` en `_fetch_subcat_facets` bouwden een
+      identiek verzoek en vuurden allebei. 5 unit-tests in `tests/test_v61_subcat_probe_reuse.py`.
+- [x] Taxonomie-BFS: een mislukte node sloeg de hele subboom over. Nu verzamelen + één retry +
+      afbreken. Rooktest: 3.575 categorieën (= de cache) in 183s met de 20-QPS-rem.
 
 **Fase 4 — ops (raakt de live service op :8003; 150-poort identiek op alle 35 kolommen)**
 - [x] RC4 uit de workers: `prefetch_insubcat_facets` doet het vooraf met één bucket, workers

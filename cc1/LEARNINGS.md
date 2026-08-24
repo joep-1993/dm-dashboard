@@ -1,6 +1,50 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Eén uitzondering, twee condities: de prune die twee keer verkeerd stond (2026-08-24, V61)
+
+Sluitstuk van de Auto-Redirects-audit: van de 1.343 facet-fragmenten in `rurl_processed` die niet
+in de catalogus staan, kwam maar een deel van het subcat-append-pad. De check hoorde dus niet per
+pad maar **één keer, vlak vóór de output** — daar komt elk pad langs, ook een pad dat later wordt
+toegevoegd. Op de getroffen populatie ging het van 16 naar 0 dode fragmenten.
+
+De uitzondering was het lastige stuk, en ik had 'm twee keer mis:
+
+1. **De hele origin-pagina overslaan** (want V41 herbouwt die juist om het vastgezette bronfacet
+   te behouden) — te grof: een door de probe toegevoegde `merk~107176` overleefde op een pagina
+   die dat facet helemaal niet heeft.
+2. **Alleen het bronfacet uitzonderen, overal** — slechter, 5 dode fragmenten: een bron van de
+   vorm `/r/<kw>/c/<facet>` sleept dat facet mee naar een compleet andere bestemming, waar het
+   net zo goed moet bestaan.
+3. **Bronfacet én origin-pagina samen** — 0 dode fragmenten. De uitzondering geldt alleen daar
+   waar V41 hem garandeert.
+
+Controleer bij zo'n vergelijking wél of de twee strings dezelfde vorm hebben: `full_category_path`
+is `/products/horloge/horloge_6918306` en dat is precies het stuk dat je uit de redirect-URL knipt.
+Was dat niet zo geweest, dan was de uitzondering dode code en had V41's garantie stil kunnen
+sneuvelen — een uitzondering die nooit vuurt ziet er in een diff identiek uit aan eentje die werkt.
+
+**Twee functies die hetzelfde verzoek bouwen, doen het ook allebei.** `_subcat_keyword_facet` en
+`_fetch_subcat_facets` stelden een teken-voor-teken identieke Search-query samen, en `_do_probe`
+vuurde de tweede af direct nadat `_do_probe_inner` de eerste had gedaan. Elk paar met een
+leftover-token kostte dus twee calls tegen precies de token bucket die de bottleneck van een run
+is. Zoek bij een "waarom is dit zo traag"-vraag eerst naar identieke `params`-dicts.
+
+**Een live A/B is geen bewijs als je meetinstrument lekt.** Mijn eerste poging om dit te
+verifiëren telde 45.817 "calls" voor één probe: de monkeypatch op `requests.get` ving veel meer
+dan de functie die ik mat, en de twee modules gebruikten niet eens hetzelfde HTTP-object. Voor een
+refactor waarvan de claim "zelfde parsing, één fetch in plaats van twee" is, is een unit-test met
+een verzonnen facets-payload en een teller op de fetch sneller én harder bewijs dan een live run.
+
+**`continue` op een BFS-node slaat een subboom over, niet een node.** In de taxonomie-crawl werd
+bij een fout de `subCategories` van die node nooit gelezen, dus duizenden categorieën konden stil
+uit `categories.csv` én `facets.csv` verdwijnen — `load_facets` leest zijn `sub_ids` uit diezelfde
+boom — terwijl het bestand een plausibel regelaantal en een verse mtime had. Nu: verzamelen, één
+keer opnieuw proberen, en anders de rebuild afbreken; door de atomaire write blijft de vorige
+goede cache staan. Rooktest na de wijziging: 3.575 categorieën (32 roots + 3.543 subcats), gelijk
+aan de cache, in 183s — de nieuwe 20-QPS-rem maakt van een crawl van 20 seconden er een van drie
+minuten, en dat is de bedoelde prijs.
+
 ## Een nieuwe status die de frontend niet kent, is een oneindige poll (2026-08-24, V61 fase 4)
 
 De ops-fase van de Auto-Redirects-audit. Vier dingen die verder gelden dan deze module.
