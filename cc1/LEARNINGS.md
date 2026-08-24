@@ -1,6 +1,52 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## De cap op facetwaarden staat nergens in de respons, dus leid 'm af uit je eigen data (2026-08-24)
+
+Vervolg op de entry van vandaag over de afgekapte facetlijst: die is nu gerepareerd (V60,
+`src/db_loader.py`). Wat het oplossen leerde:
+
+**Er is geen knop om de cap op te tillen.** Dertien kandidaat-parameters geprobeerd
+(`facetValueLimit`, `facetLimit`, `maxFacetValues`, `facetValuesLimit`, `valueLimit`,
+`facetSize`, `numFacetValues`, `facetValueCount`, `topFacetValues`, `allFacetValues`,
+`includeAllFacetValues`, `showAllFacets`, `facetValueMax`) — allemaal genegeerd, `ruimte` blijft
+op 8 staan. `limit` en `isBot` doen er ook niets aan. En productsearch-v2 heeft geen swagger
+(`/swagger/v1/swagger.json`, `/openapi.json` → 404), dus er valt niets op te zoeken. Enige weg
+is de tweede call met een filter op dát facet.
+
+**Het filter-trucje geldt alleen voor het facet waarop je filtert.** Vraag je de categorie op met
+`filters[ruimte][0]=<waarde>`, dan komt `ruimte` compleet terug (19 i.p.v. 8) mét dezelfde
+counts als ongefilterd — de API rekent een facet uit zónder zijn eigen filter. Alle *andere*
+facetten in die respons zijn wél versmald tot de gefilterde productset en zijn dus onbruikbaar.
+Eén call per (categorie, facet), niet per categorie.
+
+**Welke paren afgekapt zijn, kun je afleiden zonder de cap te kennen.** De cap van een facet kan
+alleen het hoogste aantal waarden zijn dat dat facet érgens haalt; een paar dat daarop zit kán
+afgekapt zijn, een paar eronder heeft alles al laten zien. Dat over-probet facetten die gewoon
+klein zijn (een 3-waarden-facet zit in elke categorie op zijn max) — die calls komen leeg terug.
+Kosten: 11.772 paren, 247s, +91.166 waarden, 25 fouten (0,2%). De pool ging van 518.141 naar
+624.884 rijen. `merk` en `winkel` bewust overgeslagen: `winkel` doet niet mee in matching, en
+`merk` van 100 naar duizenden tail-merken per categorie verandert het merkmatchen én de omvang
+van de cache genoeg om een eigen evaluatie te verdienen.
+
+**Meet zo'n verandering tegen een controlebuild, niet tegen de oude cache.** De vorige
+`facets.csv` was van 18 augustus; elk verschil bevat dan zes dagen drift (counts lopen op,
+waarden komen en gaan) en je kunt niet zien wat de re-probe zelf doet. Een tweede build op
+dezelfde dag met `FACET_VALUE_REPROBE=False` kost 78s en geeft een schone A/B: 998 rijen,
+81 door het subcat-append-pad, **3 veranderd** — rij 94 en 109 (`ingr_shamp~Ketoconazol`) en
+rij 223 (`ruimte~Balkon`), alle drie winst.
+
+**De staart is dun, en dat is precies wat je ontsluit.** Van de 91.166 toegevoegde waarden heeft
+28% exact 1 product en de mediaan is 4. `ingr_shamp~Ketoconazol` is live 1 product tegen 12.748
+op de kale Shampoo-categorie. Volgens V56 en `feedback_thin_destination_not_a_score_signal` is
+dat correct — de producttelling van de bestemming zegt niets over de redirect — maar het is wel
+een nieuwe klasse bestemmingen. Of er een ondergrens op moet, is een beleidskeuze; staat als open
+punt in TASKS.
+
+**Een gefaalde probe is onzichtbaar in de output.** 25 paren bleven afgekapt zonder dat je dat
+aan `facets.csv` ziet. Daarom logt de tweede pass nu de foutmeldingen zelf (top-5 met aantallen),
+niet alleen een telling — dezelfde valkuil als bij pass 1, die z'n `errors` ook stil weggooit.
+
 ## `/page-titles` heeft wél een GET, `tblPageTitles` bestaat niet meer, en een placeholder vult maar één keer (2026-08-24)
 
 Aanleiding: "staat deze cat/facet-combi in SEO titles?" voor

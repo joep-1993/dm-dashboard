@@ -4,6 +4,35 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-24 — V60: de facetpool was afgekapt op de top-N per facet
+
+Fix 2 uit de V59-sectie hierboven. Mechaniek, de meetopzet en de dunne-staart-cijfers staan in
+LEARNINGS (zelfde datum). Nog niet in een echte Tier-A-run gedraaid.
+
+- [x] **Tweede pass in `load_facets`** (`backend/rurl_optimizer_v2/src/db_loader.py`):
+      `_search_category_facets(slug, filter_facet, filter_value)` bouwt de call (pass 1 gebruikt
+      'm ook), `_reprobe_truncated_facet_values` haalt de paren op die afgekapt kunnen zijn.
+      Welke dat zijn wordt uit de data afgeleid: de cap kan alleen het hoogste aantal waarden
+      zijn dat een facet ergens haalt. Schakelaar `FACET_VALUE_REPROBE`.
+- [x] **`merk` + `winkel` blijven afgekapt** (`REPROBE_SKIP_FACETS`). `winkel` doet niet mee in
+      matching, en `merk` van 100 naar duizenden tail-merken per categorie verandert het
+      merkmatchen én de omvang van de cache genoeg om een eigen evaluatie te verdienen.
+- [x] **Rebuild gedraaid**: 3.543 categorieën in 57s, 11.772 paren in 247s, +91.166 waarden,
+      25 fouten (0,2%). 624.884 rijen (was 518.141), totaal 349s. Backup:
+      `data/cache/facets.csv.bak-20260824`. `data/` staat in `.gitignore`, dus **de
+      productiemachine moet zelf een rebuild draaien** om hier iets aan te hebben.
+- [x] **Blast radius schoon gemeten** met een controlebuild (tweede pass uit, zelfde dag):
+      998 rijen, 81 via het subcat-append-pad, 3 veranderd — rij 94 en 109
+      (`ingr_shamp~Ketoconazol`) en rij 223 (`ruimte~Balkon`). Alle drie winst, geen regressies.
+- [x] **Tests**: `tests/test_v60_facet_value_reprobe.py` (7, met een stub voor de Search API);
+      hele suite 107 passed.
+- [ ] **Beleidsvraag voor Joep: ondergrens op dunne facetwaarden?** 28% van de 91.166 nieuwe
+      waarden heeft precies 1 product, de mediaan is 4. `ingr_shamp~Ketoconazol` is live 1
+      product tegen 12.748 op de kale Shampoo-categorie. Volgens V56 en
+      `feedback_thin_destination_not_a_score_signal` is dat correct gedrag, maar het is wel een
+      nieuwe klasse bestemmingen die deze fix ontsluit. Guard bouwen alleen op verzoek.
+- [ ] **Rebuild op productie inplannen** en daarna een echte run vergelijken met de vorige.
+
 ### 2026-08-24 — SEO titles: dedup op de live store, en een placeholder-bug die IT moet beoordelen
 
 Aanleiding was één cat/facet-vraag over `9001451 / merk~type_plantenbakken`. Mechaniek, de
@@ -61,15 +90,9 @@ de diagnose-truc voor de afgekapte facetlijst en de blast-radius-methode staan i
       (rij 222). Zonder de guard 2.
 - [x] **Tests**: `backend/rurl_optimizer_v2/tests/test_v59_subcat_noun_coverage.py` (10 tests);
       hele suite 100 passed.
-- [ ] **Fix 2 — de facetpool is incompleet.** `load_facets` (`src/db_loader.py:248`) leest per
-      categorie één ongefilterde Search-call en krijgt daar maar de top-8 facetwaarden op
-      productaantal. Long-tail waarden (`ruimte~4945789` Balkon, 21 producten in Opbergkasten)
-      bestaan dus niet voor de optimizer. Nodig: per facet een tweede call mét een waarde
-      geselecteerd (geeft de volledige lijst terug), of de waarden uit de Taxonomy API halen.
-      Raakt elke run en elke categorie — de duurdere maar impactvollere van de twee.
-- [ ] **Rij 223 opnieuw draaien zodra fix 2 er is**: `opbergkast voor balkon` hoort naar
-      `…/meubilair_389371_6383260/c/ruimte~4945789` (21 producten) te gaan, nu nog de kale
-      categorie.
+- [x] **Fix 2 — de facetpool is incompleet.** Gedaan als V60, zie de sectie hieronder.
+- [x] **Rij 223 opnieuw draaien zodra fix 2 er is**: levert nu
+      `…/meubilair_389371_6383260/c/ruimte~4945789` (68 producten live).
 
 ### 2026-08-20 — `/r/`-URL's met een slash in de zoekterm kunnen eindelijk redirects krijgen
 
