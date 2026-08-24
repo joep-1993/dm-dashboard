@@ -695,7 +695,8 @@ def _check_surfaced(v28_payload: dict, base_total: int,
     return kw_best or cov_best
 
 
-def _subcat_keyword_facet(dom_slug: str, keyword: str, bucket: _TokenBucket) -> Optional[tuple]:
+def _subcat_keyword_facet(dom_slug: str, keyword: str, bucket: _TokenBucket,
+                          facets: Optional[list] = None) -> Optional[tuple]:
     """Live subcat-level facet lookup for a keyword match.
 
     The maincat-level V28 query frequently OR-fallbacks (total in the
@@ -706,22 +707,17 @@ def _subcat_keyword_facet(dom_slug: str, keyword: str, bucket: _TokenBucket) -> 
     value_name, count) for the best keyword-matching surfaced value, or None.
     One throttled API call.
     """
-    bucket.acquire()
-    try:
-        params = {
-            "category": dom_slug, "query": keyword,
-            "countryLanguage": COUNTRY_LANG, "isBot": "true", "limit": "1",
-        }
-        url = f"{SEARCH_BASE_URL}/search/products?{urllib.parse.urlencode(params)}"
-        r = _SESSION.get(url, timeout=TIMEOUT)
-        if r.status_code != 200:
-            return None
-        data = r.json()
-    except Exception as e:
-        logger.debug(f"subcat keyword probe failed ({dom_slug}, {keyword!r}): {e}")
+    # V61: `facets` is the already-fetched facets[] of exactly this query — this
+    # function and _fetch_subcat_facets built a character-identical request, and
+    # _do_probe fired the second one right after _do_probe_inner had done the
+    # first, so every pair with a leftover token cost two calls against the
+    # bucket that is the run's bottleneck.
+    if facets is None:
+        facets = _fetch_subcat_facets(dom_slug, keyword, bucket)
+    if facets is None:
         return None
     best = None  # (count, facet_name, value_id, value_name)
-    for f in (data.get("facets") or []):
+    for f in (facets or []):
         fname = (f.get("urlName") or "").lower()
         if not fname or fname == "winkel" or fname in FACET_BLACKLIST:
             continue
@@ -747,11 +743,13 @@ def _do_probe(maincat: str, keyword: str, v28_payload: dict,
     list. The multi-facet assembly is cached alongside the single pick so
     the cache-only worker can fall back to it when its single appended facet
     would be hard-rejected for dropping a long product token."""
-    res = _do_probe_inner(maincat, keyword, v28_payload, bucket)
+    _fetched: list = []
+    res = _do_probe_inner(maincat, keyword, v28_payload, bucket, facets_out=_fetched)
     dom_slug = v28_payload.get("dom_cat_url_slug")
     if dom_slug and res.get("mode") != "no_probe":
         try:
-            facets = _fetch_subcat_facets(dom_slug, keyword, bucket)
+            # V61: hergebruik wat _do_probe_inner al ophaalde (identieke query).
+            facets = _fetched[0] if _fetched else _fetch_subcat_facets(dom_slug, keyword, bucket)
             res["multi_facets"] = _extract_multi_facets(facets, keyword)
             size = _extract_size_facet(facets, keyword)
             if size:
@@ -762,7 +760,8 @@ def _do_probe(maincat: str, keyword: str, v28_payload: dict,
 
 
 def _do_probe_inner(maincat: str, keyword: str, v28_payload: dict,
-                    bucket: _TokenBucket) -> dict:
+                    bucket: _TokenBucket,
+                    facets_out: Optional[list] = None) -> dict:
     """Find the best facet value for this (maincat, keyword) pair.
 
     Two-stage:
@@ -815,7 +814,10 @@ def _do_probe_inner(maincat: str, keyword: str, v28_payload: dict,
     dom_toks = _tokens(dom_name)
     leftover = [w for w in _tokens(keyword) if len(w) >= 4 and w not in dom_toks]
     if leftover:
-        kw_hit = _subcat_keyword_facet(dom_slug, keyword, bucket)
+        _sc_facets = _fetch_subcat_facets(dom_slug, keyword, bucket)
+        if facets_out is not None:
+            facets_out.append(_sc_facets)
+        kw_hit = _subcat_keyword_facet(dom_slug, keyword, bucket, facets=_sc_facets)
         if kw_hit:
             fname, vid, vname, cnt = kw_hit
             # cnt is a subcat-level count while base_total is the maincat-level

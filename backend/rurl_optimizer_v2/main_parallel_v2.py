@@ -4067,6 +4067,53 @@ def process_url_v2(args):
             final_score = _v55_lifted
             final_tier = get_reliability_tier(final_score)
 
+    # V61: prune facet pieces that do not exist on the destination page. The
+    # per-path check in _append_facet_to_subcat_redirect fixed the biggest
+    # producer, but a measurement on the affected population showed 16 dead
+    # fragments left over, spread across four other assembly sites
+    # (subcategory_name_with_probe_facet, subcategory_name, multi,
+    # search_derived_samecat_faceted). Doing it once here covers every path,
+    # including any added later. The origin category page is skipped: V41
+    # rebuilds it precisely to keep the source's own facet, which is valid there
+    # by construction.
+    if final_redirect_url and '/c/' in final_redirect_url:
+        _us = facet_filter.facet_url_set()
+        if _us:
+            # The source's own pinned facet is exempt: V41 rebuilds the origin
+            # category page precisely to keep it, and it is valid there by
+            # construction. Everything else has to be in the catalogue. Exempting
+            # the whole origin page instead was too coarse — it let a probe-added
+            # merk~107176 survive on a page that has no such facet.
+            _p = final_redirect_url.split('beslist.nl', 1)[-1].rstrip('/')
+            _pbase, _pfrag = _p.split('/c/', 1)
+            # ...and only ON that origin page. Carried onto any other
+            # destination the pinned facet is just another fragment that has to
+            # exist there — measured: 5 rows kept a dead `merk~...` purely
+            # because the SOURCE url pinned it.
+            _pinned = ({x for x in (parsed.existing_facet or '').split('~~') if '~' in x}
+                       if _pbase == (parsed.full_category_path or '').rstrip('/')
+                       else set())
+            _keep, _drop = [], []
+            for _piece in _pfrag.split('~~'):
+                if '~' not in _piece:
+                    continue
+                if _piece in _pinned or f"{_pbase}/c/{_piece}" in _us:
+                    _keep.append(_piece)
+                else:
+                    _drop.append(_piece)
+            if _drop:
+                final_redirect_url = (f"https://www.beslist.nl{_pbase}/c/"
+                                      + '~~'.join(_keep)) if _keep else \
+                                     f"https://www.beslist.nl{_pbase}/"
+                out_facet_fragment = '~~'.join(_keep)
+                out_facet_count = len(_keep)
+                if not _keep:
+                    out_facet_names = ''
+                    out_facet_value_names = ''
+                final_reason = ((final_reason or '')
+                                + f"; [V61] dropped {', '.join(_drop)} "
+                                  "(not present on the destination page)")
+
     # V61 last resort. A builder REJECTION is truthy (RedirectResult has no
     # __bool__), so `if not result` above never fired for one and the row shipped
     # with no redirect at all — 352 rows in rurl_processed sit at

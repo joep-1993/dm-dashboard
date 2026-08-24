@@ -167,26 +167,52 @@ class DataLoader:
 
         frontier = list(id_to_parent.keys())
         fetch_errors = 0
+        # V61: een mislukte node sloeg niet één categorie over maar de hele
+        # subboom eronder — de subCategories worden dan nooit gelezen, dus
+        # duizenden categorieën kunnen stil uit categories.csv EN facets.csv
+        # verdwijnen (load_facets leest `sub_ids` uit deze boom) terwijl het
+        # bestand een plausibel aantal rijen en een verse mtime heeft. Verzamel
+        # ze, probeer de hele verzameling daarna nog één keer, en breek af als er
+        # dan nog iets faalt: dankzij de atomaire write blijft de vorige goede
+        # cache dan gewoon staan.
+        failed: list[int] = []
+
+        def _expand(results) -> list[int]:
+            nxt: list[int] = []
+            for cid, detail in results:
+                if "__error__" in detail:
+                    failed.append(cid)
+                    continue
+                root = id_to_root.get(cid, cid)
+                for sub in detail.get("subCategories") or []:
+                    sid = sub.get("id")
+                    if sid is None or sid in id_to_parent:
+                        continue
+                    lab = _pick_label(sub.get("labels"))
+                    id_to_name[sid] = lab.get("name") or str(sid)
+                    id_to_url_slug[sid] = lab.get("urlSlug") or ""
+                    id_to_parent[sid] = sub.get("parentId", cid)
+                    id_to_root[sid] = root
+                    nxt.append(sid)
+            return nxt
+
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
             while frontier:
-                results = list(ex.map(fetch_detail, frontier))
-                nxt: list[int] = []
-                for cid, detail in results:
-                    if "__error__" in detail:
-                        fetch_errors += 1
-                        continue
-                    root = id_to_root.get(cid, cid)
-                    for sub in detail.get("subCategories") or []:
-                        sid = sub.get("id")
-                        if sid is None or sid in id_to_parent:
-                            continue
-                        lab = _pick_label(sub.get("labels"))
-                        id_to_name[sid] = lab.get("name") or str(sid)
-                        id_to_url_slug[sid] = lab.get("urlSlug") or ""
-                        id_to_parent[sid] = sub.get("parentId", cid)
-                        id_to_root[sid] = root
-                        nxt.append(sid)
-                frontier = nxt
+                frontier = _expand(ex.map(fetch_detail, frontier))
+            if failed:
+                fetch_errors = len(failed)
+                logger.warning("Taxv2 BFS: %d nodes failed, retrying once",
+                               len(failed))
+                frontier, failed = failed, []
+                while frontier:
+                    frontier = _expand(ex.map(fetch_detail, frontier))
+
+        if failed:
+            raise RuntimeError(
+                f"Taxv2 BFS: {len(failed)} category nodes still failed after a "
+                f"retry ({failed[:5]}); aborting the rebuild so the existing "
+                f"cache stays in place"
+            )
 
         logger.info(
             "Taxv2 BFS: %d cats crawled in %.1fs (errors=%d)",
