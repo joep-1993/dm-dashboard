@@ -384,14 +384,58 @@ def _leftover_token_matches_facet_token(kw_tok, fv_tok, matcher):
     return False
 
 
-def _collect_longest_per_axis_from_leftover(leftover_tokens, facet_values, matcher):
+def _value_has_no_unclaimed_fragment(value_name, coverage_tokens, leftover_tokens,
+                                     subcat_tokens, matcher):
+    """V59 guard, applied only when the category-noun forgiveness fired.
+
+    `_coverage_tokens` throws away everything under 3 chars plus bare numbers,
+    so a variant qualifier can be invisible to the coverage test: "philips
+    airfryer" in subcat "Airfryers" would tokenize productlijn~'Philips airfryer
+    XL' to ['philips','airfryer'] — both accounted for — and silently narrow the
+    page to the XL line. Without the forgiveness such values were rejected on
+    the category noun anyway, so demanding that every remaining word/number run
+    is named by the query (or is the category noun) keeps the new path from
+    inventing qualifiers. Stopwords and shop names carry no intent and are
+    ignored. Short runs can never be claimed (the leftover pipeline drops
+    tokens under 3 chars), which is deliberate: no evidence, no append.
+    """
+    from src.matcher import _ALNUM_RUN_RE
+    from src.validation_rules import STOPWORDS, SHOP_NAMES
+
+    known = set(coverage_tokens)
+    for run in _ALNUM_RUN_RE.findall((value_name or '').lower()):
+        if run in known or run in STOPWORDS or run in SHOP_NAMES:
+            continue
+        if any(_leftover_token_matches_facet_token(kt, run, matcher)
+               for kt in leftover_tokens):
+            continue
+        if any(matcher._tokens_equal_strict(st, run) for st in subcat_tokens):
+            continue
+        return False
+    return True
+
+
+def _collect_longest_per_axis_from_leftover(leftover_tokens, facet_values, matcher,
+                                            subcat_tokens=()):
     """For each non-strict facet axis (excluding winkel + merk), return the
     facet value whose tokens are all covered by the leftover tokens,
     preferring the LONGEST facet value name. Catches cases the joined-
     leftover matcher misses due to MIN_LENGTH_RATIO ("Dames" vs
     "pescara dames" trips length-ratio 5/13<0.4) and lets a multi-attribute
     leftover ("rood dames") attach one facet per axis (kleur~Rood +
-    doelgroep_mode~Dames). Returns {axis_name: MatchResult}."""
+    doelgroep_mode~Dames). Returns {axis_name: MatchResult}.
+
+    V59: `subcat_tokens` (the tokens of the matched subcategory NAME) also
+    count as covering a facet token. Dutch retail facets routinely glue the
+    category noun onto the modifier — t_verwarming~'Elektrische verwarmingen'
+    inside subcat "Verwarmingen" — and that noun is by definition absorbed by
+    the subcat match, so it can NEVER appear in the leftover. The old
+    all-covered-by-leftover test therefore rejected every such value:
+    /r/elektrische_verwarming_badkamer/ got ruimte_verwarmingen~Badkamer but
+    never t_verwarming~19254910. A value still needs at least one token
+    covered by a real leftover token, so a value that only echoes the
+    category noun (s_kasten~'Opbergkasten' under "Opbergkasten") stays out.
+    """
     from src.matcher import MatchResult
     by_axis = {}
     for fv in facet_values:
@@ -401,11 +445,26 @@ def _collect_longest_per_axis_from_leftover(leftover_tokens, facet_values, match
         fv_tokens = matcher._coverage_tokens(fv.facet_value_name)
         if not fv_tokens:
             continue
-        if not all(
-            any(_leftover_token_matches_facet_token(kt, ft, matcher)
-                for kt in leftover_tokens)
-            for ft in fv_tokens
-        ):
+        leftover_hits = 0
+        forgiven = False
+        covered = True
+        for ft in fv_tokens:
+            if any(_leftover_token_matches_facet_token(kt, ft, matcher)
+                   for kt in leftover_tokens):
+                leftover_hits += 1
+                continue
+            # Strict equality (no fuzz branch) on the subcat side: the query
+            # gave us no evidence for this token, we're only forgiving the
+            # category noun the subcat match already consumed.
+            if any(matcher._tokens_equal_strict(st, ft) for st in subcat_tokens):
+                forgiven = True
+                continue
+            covered = False
+            break
+        if not covered or not leftover_hits:
+            continue
+        if forgiven and not _value_has_no_unclaimed_fragment(
+                fv.facet_value_name, fv_tokens, leftover_tokens, subcat_tokens, matcher):
             continue
         existing = by_axis.get(axis)
         if (existing is None
@@ -516,8 +575,11 @@ def _append_facet_to_subcat_redirect(result, parsed, subcategory_match, facet_fi
     # stippen" over "Blauw"). Replaces the legacy joined → compound-suffix
     # → per-token-first-hit chain and gives multi-attribute leftovers like
     # "rood dames" both kleur~Rood and doelgroep_mode~Dames.
+    # V59: matched_words goes in too, so a facet value that repeats the
+    # subcategory noun ("Elektrische verwarmingen" under "Verwarmingen") can
+    # still be earned by its remaining token.
     matches_by_axis = _collect_longest_per_axis_from_leftover(
-        leftover_tokens, facet_values, matcher,
+        leftover_tokens, facet_values, matcher, subcat_tokens=matched_words,
     )
 
     # Joined-leftover safety net. The token-equality scan above can miss
