@@ -1,6 +1,60 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Twee redenen waarom een facet niet aan een `/r/`-redirect geplakt wordt, en maar één ervan zit in de matcher (2026-08-24)
+
+Aanleiding: twee rijen uit `Downloads\redirects_global_828a73ad_20260820_094234.xlsx` waar het
+doel kaler was dan het kon zijn. Ze zien er identiek uit (subcat-naammatch, leftover-token blijft
+liggen) maar hebben totaal verschillende oorzaken — check dus altijd éérst of de facetwaarde
+überhaupt in de pool zit vóór je in `_collect_longest_per_axis_from_leftover` gaat graven.
+
+**1. De Search API geeft ongefilterd maar de top-8 facetwaarden terug, en `facets.csv` is dus
+incompleet.** `opbergkast voor balkon` → `Opbergkasten` (`meubilair_389371_6383260`) bleef kaal
+omdat `ruimte~4945789` (Balkon, 21 producten) niet in de pool zat. `load_facets`
+(`src/db_loader.py:248`) haalt per categorie één ongefilterde call op
+(`/search/products?category=<slug>&limit=1`) en leest daar `facets` uit — en die lijst is
+**afgekapt op de 8 waarden met de meeste producten**. Dezelfde categorie mét een ruimte-filter
+aan geeft er **18**, Balkon staat op plek 13. Diagnose-truc: vraag de categorie op met
+`filters[<facet>][0]=<een waarde>`; dan komt de volledige waardenlijst terug (de geselecteerde
+waarde staat er als `selected: true` bij). Dit raakt elke long-tail facetwaarde in elke
+categorie, dus élke run — met een complete pool had de optimizer hier exact
+`/c/ruimte~4945789` gebouwd (geverifieerd door de waarde te injecteren: collector → `ruimte:
+Balkon`, score 95).
+
+**2. Het categorienoun is al opgegeten door de subcat-match, dus samengestelde facetwaarden waren
+onmatchbaar.** `elektrische verwarming badkamer` → `Verwarmingen` (`main_sanitair_559440`) kreeg
+wel `ruimte_verwarmingen~Badkamer` maar nooit `t_verwarming~19254910` ('Elektrische
+verwarmingen', 12.618 producten) — terwijl die waarde gewoon in de pool zat.
+`_absorbed_by_subcat` haalt `verwarming` uit de keyword-tokens (het zit in "Verwarmingen"), dus
+de leftover is `elektrische badkamer`, en `_collect_longest_per_axis_from_leftover` eiste dat
+**élk** token van de facetwaarde door een leftover-token gedekt is. `verwarmingen` kán daar per
+definitie niet in zitten. Gevolg: het hele Nederlandse retail-patroon waarin het categorienoun in
+de facetwaarde herhaald wordt (`t_verwarming`, `s_kasten`, `ut_*`) was structureel onbereikbaar
+via dit pad. **V59** (`main_parallel_v2.py`) geeft de tokens van de gematchte subcategorienaam
+mee als extra dekking, met twee remmen: minstens één token moet nog door een échte
+leftover-token verdiend worden (anders plakt `v_verwarmingen~'Verwarmingen'` zichzelf onder
+subcat "Verwarmingen"), en op de subcat-kant geldt `_tokens_equal_strict` — geen fuzz-branch,
+want de query levert voor dat token geen enkel bewijs.
+
+**Een token dat de tokenizer weggooit, is geen bewijs dát het er niet toe doet.**
+`_coverage_tokens` dropt alles onder 3 tekens en kale getallen, dus `productlijn_koken~'Philips
+airfryer XL'` tokeniseert naar `['philips','airfryer']`: met de nieuwe vergeving leek die waarde
+volledig gedekt door `philips` + het vergeven categorienoun, en `philips airfryer` zou stil
+versmald zijn naar de XL-lijn. Daarom `_value_has_no_unclaimed_fragment`: zodra de vergeving
+vuurt, moet élke resterende woord- of nummer-run in de waarde door de query genoemd zijn
+(stopwoorden en winkelnamen uitgezonderd). De guard draait alléén op het nieuwe pad, dus het
+oude gedrag blijft byte-identiek — en dat is precies de reden om 'm daar te zetten in plaats van
+in `_coverage_tokens`.
+
+**Meet de blast radius op de export zelf, niet op een testcase.** Voor elke rij het
+(keyword, subcat-naam, doel-subcat-id) uit `old url` / `reason` / `new url` teruggerekend en de
+collector twee keer gedraaid (oud vs. nieuw) tegen de echte `facets.csv`: 998 rijen, 81 door het
+subcat-append-pad, **1 veranderd** (precies rij 222). Zonder de XL-guard waren het er 2 — die
+tweede rij was het hele signaal dat de guard nodig was. Reproscript-patroon staat in
+`tests/test_v59_subcat_noun_coverage.py`; de facetvolgorde in de URL hoef je niet te forceren,
+`_canonicalize_facet_order` (V41) sorteert alfabetisch op facetnaam en maakt er alsnog
+`ruimte_verwarmingen~…~~t_verwarming~…` van.
+
 ## `/r/`-URL met een slash in de zoekterm: de row moet op de `%2f`-vorm, en de POST decodeert die weg (2026-08-20)
 
 Vervolg op de loop-entry van 2026-06-30 (ERR_TOO_MANY_REDIRECTS). **Teamsearch heeft de

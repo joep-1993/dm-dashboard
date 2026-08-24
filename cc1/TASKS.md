@@ -4,6 +4,36 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-24 — V59: facetwaarden die het categorienoun herhalen zijn nu wél matchbaar
+
+Uit twee rijen van `Downloads\redirects_global_828a73ad_20260820_094234.xlsx`. Mechaniek,
+de diagnose-truc voor de afgekapte facetlijst en de blast-radius-methode staan in LEARNINGS
+(zelfde datum). Nog niet in een echte Tier-A-run gedraaid.
+
+- [x] **V59 in `_collect_longest_per_axis_from_leftover`** (`backend/rurl_optimizer_v2/
+      main_parallel_v2.py`): de tokens van de gematchte subcategorienaam dekken ook facet-tokens,
+      mits minstens één token door een echt leftover-token verdiend wordt en met
+      `_tokens_equal_strict` op de subcat-kant. `elektrische verwarming badkamer` levert nu
+      `…/main_sanitair_559440/c/ruimte_verwarmingen~19257689~~t_verwarming~19254910`
+      (2.435 producten live) i.p.v. alleen de Badkamer-facet.
+- [x] **`_value_has_no_unclaimed_fragment`-guard**: op het vergevingspad moet élke resterende
+      woord-/nummer-run in de facetwaarde door de query genoemd zijn. Houdt `philips airfryer`
+      weg bij `productlijn_koken~'Philips airfryer XL'` — `_coverage_tokens` gooit `xl` weg,
+      dus zonder guard leek die waarde volledig gedekt.
+- [x] **Blast radius op de export**: 998 rijen, 81 via het subcat-append-pad, 1 veranderd
+      (rij 222). Zonder de guard 2.
+- [x] **Tests**: `backend/rurl_optimizer_v2/tests/test_v59_subcat_noun_coverage.py` (10 tests);
+      hele suite 100 passed.
+- [ ] **Fix 2 — de facetpool is incompleet.** `load_facets` (`src/db_loader.py:248`) leest per
+      categorie één ongefilterde Search-call en krijgt daar maar de top-8 facetwaarden op
+      productaantal. Long-tail waarden (`ruimte~4945789` Balkon, 21 producten in Opbergkasten)
+      bestaan dus niet voor de optimizer. Nodig: per facet een tweede call mét een waarde
+      geselecteerd (geeft de volledige lijst terug), of de waarden uit de Taxonomy API halen.
+      Raakt elke run en elke categorie — de duurdere maar impactvollere van de twee.
+- [ ] **Rij 223 opnieuw draaien zodra fix 2 er is**: `opbergkast voor balkon` hoort naar
+      `…/meubilair_389371_6383260/c/ruimte~4945789` (21 producten) te gaan, nu nog de kale
+      categorie.
+
 ### 2026-08-20 — `/r/`-URL's met een slash in de zoekterm kunnen eindelijk redirects krijgen
 
 De canonicalisatielus van 2026-06-30 is door teamsearch gefikst. Mechaniek, de
