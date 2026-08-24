@@ -55,7 +55,7 @@ from backend.database import (
     get_redshift_connection, return_redshift_connection,
 )
 from backend.seo_titles_service import (
-    build_blueprint, canon_key, load_rules, load_existing_combos,
+    build_blueprint, canon_key, load_rules, load_local_combos, store_has_combos,
     parse_url, _resolve_cat, _upsert_blueprint, _yyyymmdd,
     init_seo_titles_table,
 )
@@ -182,12 +182,14 @@ def main():
 
     print('[3/5] loading facet position rules + existing combos')
     rules = load_rules()
-    existing = load_existing_combos(force=True)
-    print(f'      {len(rules):,} facet rules | {len(existing):,} existing (cat_id, key) combos')
+    local = load_local_combos(force=True)
+    print(f'      {len(rules):,} facet rules | {len(local):,} combos already in '
+          f'pa.seo_titles_blueprints')
 
     print(f'[4/5] building blueprints for every non-empty subset of the top '
           f'{args.top_n} ({2 ** args.top_n - 1} per category)')
     out_rows = []
+    pending = []          # (ck, blueprint, facet_visits) parallel to out_rows
     new_bps = []          # (blueprint, facet_visits) for the --write step
     n_new = n_existing = 0
     for cid, info in cats:
@@ -200,11 +202,8 @@ def main():
                 types = set(combo)
                 bp = build_blueprint(cid, info['cat_name'], types, rules)
                 ck = (cid, canon_key(bp['key']))
-                is_existing = ck in existing
-                n_existing += is_existing
-                n_new += (not is_existing)
-                if not is_existing:
-                    new_bps.append((bp, sum(visits_by_facet.get(t, 0) for t in combo)))
+                combo_visits = sum(visits_by_facet.get(t, 0) for t in combo)
+                pending.append((ck, bp, combo_visits))
                 out_rows.append({
                     'cat_id': cid,
                     'cat_name': info['cat_name'],
@@ -215,11 +214,28 @@ def main():
                     'h1_title': bp['h1_title'],
                     'description': bp['description'],
                     'country_code': bp['country_code'],
-                    'already_exists': 'yes' if is_existing else 'no',
-                    'facet_visits': sum(visits_by_facet.get(t, 0) for t in combo),
+                    'already_exists': '',          # filled in below
+                    'facet_visits': combo_visits,
                     'cat_visits': info['cat_visits'],
                     'top5_rank_of_facets': ' + '.join(str(rank_of[t]) for t in sorted(combo)),
                 })
+
+    # "Already exists" = in pa.seo_titles_blueprints, or in the /page-titles store
+    # itself. The store is asked with one GET per combo (parallel + memoised in
+    # pa.page_titles_api_cache), because it has no list endpoint. This replaced a
+    # lookup in pa.page_titles_existing, a July snapshot of the since-dropped MySQL
+    # beslist.tblPageTitles.
+    to_ask = [ck for ck, _, _ in pending if ck not in local]
+    print(f'      asking the store about {len(to_ask):,} combos not in '
+          f'pa.seo_titles_blueprints (cached answers are free)')
+    in_store = store_has_combos(to_ask) if to_ask else set()
+    for row, (ck, bp, combo_visits) in zip(out_rows, pending):
+        is_existing = ck in local or ck in in_store
+        row['already_exists'] = 'yes' if is_existing else 'no'
+        n_existing += is_existing
+        n_new += (not is_existing)
+        if not is_existing:
+            new_bps.append((bp, combo_visits))
 
     print(f'      {len(out_rows):,} blueprint rows | {n_new:,} new, {n_existing:,} already exist')
 

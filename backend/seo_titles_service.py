@@ -10,8 +10,16 @@ Flow (see /home/joepvanschagen/.claude/plans/proud-singing-lecun.md):
   1. Redshift: top-X SEO-visited faceted /c/ URLs (ordered by visits desc).
   2. parse_url -> (leaf_slug, {facet types}); slug -> cat_id via TaxonomyCache.
   3. canon_key = '~'.join(sorted(lower(types))).
-  4. DEDUP: drop combos already in pa.page_titles_existing (the tblPageTitles
-     export) or pa.seo_titles_blueprints (what this tool already built/pushed).
+  4. DEDUP, two steps:
+       a. drop combos pa.seo_titles_blueprints already holds (built or pushed);
+       b. ask the store itself for the rest — GET /page-titles/{cat_id}/record?key=.
+     Until 2026-08-24 step (b) was a lookup in pa.page_titles_existing, a July
+     snapshot of an Excel export of MySQL beslist.tblPageTitles. That table has
+     since been dropped, the snapshot cannot see records added after it was taken,
+     and 387.277 of its 539.214 rows are a "shifted" layout whose `key` column
+     holds a CATEGORY NAME, not a facet key (their real key sits in `title`), so
+     they never matched a combo anyway. The API answer is authoritative; the
+     snapshot table stays only as the "existing" tab in the frontend.
   5. For each NEW combo: build a deterministic placeholder blueprint AND (best
      effort) an AI unique title for the source URL (reused ai_titles_service).
   6. Publish: POST blueprints -> /page-titles. Blueprints ONLY — unique titles are
@@ -51,6 +59,18 @@ PAGE_TITLES_KEY = {
     "staging": lambda: os.getenv("CONTENT_API_KEY_STAGING", ""),
 }
 PUSH_BATCH = 5000
+
+# ---- Reading the store back -----------------------------------------------
+# GET /page-titles/{cat_id}/record?key=<key> -> 200 + the record, or 404
+# "Record not found". There is no list endpoint, so existence can only be asked
+# one combo at a time; that is what STORE_WORKERS and the cache table are for.
+# The key is matched LITERALLY and is order-sensitive (merk~type_plantenbakken
+# is a different lookup than type_plantenbakken~merk), so always send canon_key().
+STORE_WORKERS = 12
+# A cached "exists" never expires: /page-titles has no delete verb, so a record
+# cannot disappear. A cached "missing" does — anyone can add a record — and is
+# re-checked once it is this old.
+STORE_MISS_TTL_DAYS = 7
 
 # ---------------------------------------------------------------------------
 # Blueprint building (ported from scripts/pagetitles_blueprint_from_urls.py)
@@ -416,15 +436,17 @@ def fetch_top_urls(top_n, date_from=None, date_to=None):
 
 
 # ---------------------------------------------------------------------------
-# Dedup: existing blueprint combos (Excel snapshot + our own pushes)
+# Dedup, step (a): combos this tool already holds locally
 # ---------------------------------------------------------------------------
 _existing_cache = {"combos": None, "loaded_at": 0.0}
 _EXISTING_TTL = 600  # seconds
 
 
-def load_existing_combos(force=False):
-    """Set of (cat_id, canon_key) already covered: pa.page_titles_existing (the
-    tblPageTitles export) UNION pa.seo_titles_blueprints (built or pushed)."""
+def load_local_combos(force=False):
+    """Set of (cat_id, canon_key) pa.seo_titles_blueprints already holds, in any
+    status. Cheap in-memory guard that keeps a re-run from rebuilding its own
+    output; it says nothing about what the store holds — that is
+    store_has_combos()."""
     now = time.time()
     if not force and _existing_cache["combos"] is not None \
             and now - _existing_cache["loaded_at"] < _EXISTING_TTL:
@@ -433,9 +455,6 @@ def load_existing_combos(force=False):
     cur = conn.cursor()
     try:
         combos = set()
-        cur.execute("SELECT cat_id, canon_key FROM pa.page_titles_existing")
-        for row in cur.fetchall():
-            combos.add((row['cat_id'], row['canon_key']))
         cur.execute("SELECT cat_id, key FROM pa.seo_titles_blueprints")
         for row in cur.fetchall():
             combos.add((row['cat_id'], canon_key(row['key'])))
@@ -445,6 +464,127 @@ def load_existing_combos(force=False):
     finally:
         cur.close()
         return_db_connection(conn)
+
+
+# ---------------------------------------------------------------------------
+# Dedup, step (b): ask the /page-titles store itself
+# ---------------------------------------------------------------------------
+def _record_exists(session, env, cat_id, key):
+    """True / False / None(=could not tell) for one (cat_id, key) in the store."""
+    base = PAGE_TITLES_API[env]
+    for attempt in range(1, 4):
+        try:
+            resp = session.get(f"{base}/{cat_id}/record",
+                               params={"key": key}, timeout=30)
+            if resp.status_code == 200:
+                return True
+            if resp.status_code == 404:
+                return False
+            # 401/400/5xx: not an answer about this record.
+            if resp.status_code < 500:
+                return None
+        except requests.RequestException:
+            pass
+        time.sleep(1.5 * attempt)
+    return None
+
+
+def store_has_combos(combos, env="production", workers=STORE_WORKERS,
+                     force_recheck=False, progress=None):
+    """Which of `combos` (an iterable of (cat_id, canon_key)) the /page-titles
+    store already holds. Authoritative — this is the live store, not a snapshot.
+
+    Answers are memoised in pa.page_titles_api_cache so a re-run only pays for
+    combos it has not seen: a hit is kept forever (no delete verb exists, so a
+    record cannot vanish), a miss is re-checked after STORE_MISS_TTL_DAYS.
+
+    A combo whose GET cannot be answered (network, 401, 5xx) is reported as
+    EXISTING. That is the conservative direction: treating a live record as new
+    would rebuild it and overwrite it on the next push, while treating a missing
+    record as existing only costs us one blueprint we could have added.
+    """
+    combos = list(dict.fromkeys(combos))
+    if not combos:
+        return set()
+    if not PAGE_TITLES_KEY[env]():
+        raise RuntimeError(f"missing API key for env={env}; cannot verify the store")
+
+    exists, todo = set(), []
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT cat_id, key, found FROM pa.page_titles_api_cache
+            WHERE found OR checked_at > now() - (%s || ' days')::interval
+        """, (STORE_MISS_TTL_DAYS,))
+        cached = {(r['cat_id'], r['key']): r['found'] for r in cur.fetchall()}
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+    for c in combos:
+        hit = None if force_recheck else cached.get(c)
+        if hit is True:
+            exists.add(c)
+        elif hit is False:
+            pass
+        else:
+            todo.append(c)
+
+    if not todo:
+        return exists
+
+    session = requests.Session()
+    session.headers["X-Api-Key"] = PAGE_TITLES_KEY[env]()
+    answers = {}
+
+    def _one(c):
+        return c, _record_exists(session, env, c[0], c[1])
+
+    done = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for c, res in ex.map(_one, todo):
+            done += 1
+            if res is None:
+                exists.add(c)          # conservative: never rebuild on doubt
+                _inc("store_errors")
+            else:
+                answers[c] = res
+                if res:
+                    exists.add(c)
+            if progress and done % 200 == 0:
+                progress(done, len(todo))
+
+    if answers:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.executemany("""
+                INSERT INTO pa.page_titles_api_cache (cat_id, key, found, checked_at)
+                VALUES (%s, %s, %s, now())
+                ON CONFLICT (cat_id, key) DO UPDATE
+                    SET found = EXCLUDED.found, checked_at = EXCLUDED.checked_at
+            """, [(c[0], c[1], v) for c, v in answers.items()])
+            conn.commit()
+        finally:
+            cur.close()
+            return_db_connection(conn)
+    return exists
+
+
+def get_store_record(cat_id, key, env="production"):
+    """The record the store holds for (cat_id, key), or None when it holds none.
+    The read path the tool lacked until 2026-08-24 — use it to verify a push."""
+    if not PAGE_TITLES_KEY[env]():
+        raise RuntimeError(f"missing API key for env={env}")
+    session = requests.Session()
+    session.headers["X-Api-Key"] = PAGE_TITLES_KEY[env]()
+    resp = session.get(f"{PAGE_TITLES_API[env]}/{int(cat_id)}/record",
+                       params={"key": canon_key(key)}, timeout=30)
+    if resp.status_code == 404:
+        return None
+    resp.raise_for_status()
+    return resp.json()
 
 
 # ---------------------------------------------------------------------------
@@ -486,6 +626,17 @@ def init_seo_titles_table():
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS ix_pte_combo ON pa.page_titles_existing (cat_id, canon_key)")
+        # Memoised answers from GET /page-titles/{cat_id}/record (see
+        # store_has_combos). `key` is the canonical key, matching what we send.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS pa.page_titles_api_cache (
+                cat_id     INTEGER   NOT NULL,
+                key        TEXT      NOT NULL,
+                found      BOOLEAN   NOT NULL,
+                checked_at TIMESTAMP NOT NULL DEFAULT now(),
+                PRIMARY KEY (cat_id, key)
+            )
+        """)
         conn.commit()
     finally:
         cur.close()
@@ -539,6 +690,8 @@ def _reset_state(top_n, date_from, date_to):
             "top_n": top_n, "date_from": date_from, "date_to": date_to,
             "urls_fetched": 0, "scanned": 0, "no_cat": 0, "no_facets": 0,
             "dup": 0, "skipped_existing": 0, "new_combos": 0,
+            "skipped_local": 0, "skipped_store": 0, "store_errors": 0,
+            "store_candidates": 0, "store_checked": 0, "store_total": 0,
             "titles_generated": 0, "titles_skipped": 0, "titles_failed": 0,
             "message": "", "should_stop": False,
             "started_at": time.time(), "finished_at": None,
@@ -638,54 +791,79 @@ def _run(top_n, date_from, date_to):
         _set(urls_fetched=len(rows))
 
         rules = load_rules()
-        existing = load_existing_combos(force=True)
+        local = load_local_combos(force=True)
         # Facet dependencies, so combos that cannot exist on the site are never
         # built. Empty map = cache not populated yet -> behave as before.
         deps = load_facet_deps()
 
-        _set(phase="building_blueprints")
+        # ---- pass 1: parse + dedup. No HTTP here, so the whole URL list is
+        # reduced to distinct candidate combos before a single GET is spent.
+        _set(phase="scanning_urls")
         seen = set()          # every (cat_id, canon_key) examined this run
+        candidates = []       # (ck, cat, types, url, visits, revenue)
+        for r in rows:
+            if _stopping():
+                break
+            _inc("scanned")
+            url = (r.get('url') or '').lower()
+            p = parse_url(url)
+            if not p:
+                continue
+            leaf, types = p
+            cat = _resolve_cat(taxonomy_cache, leaf)
+            if not cat:
+                _inc("no_cat")
+                continue
+            if not types:
+                _inc("no_facets")
+                continue
+            # A dependent facet without its parent cannot be reached, so the
+            # blueprint would be dead weight. Checked BEFORE the dedup/existing
+            # checks so the counter reflects every such URL seen, not just the
+            # first occurrence of each combo.
+            bad = impossible_reason(types, deps)
+            if bad:
+                _inc("impossible")
+                continue
+            # dedup on the canonical (cat_id, key) — identical form used by
+            # load_local_combos, so the same combo is never counted twice
+            ck = (cat['cat_id'], canon_key('~'.join(sorted(types))))
+            if ck in seen:
+                _inc("dup")
+                continue
+            seen.add(ck)
+            if ck in local:
+                _inc("skipped_existing")
+                _inc("skipped_local")
+                continue
+            candidates.append((ck, cat, types, url, r.get('visits'), r.get('revenue')))
+
+        # ---- pass 2: ask the store about the survivors. One GET per candidate,
+        # parallelized and memoised; see store_has_combos.
+        in_store = set()
+        if candidates and not _stopping():
+            _set(phase="checking_store", store_candidates=len(candidates))
+            in_store = store_has_combos(
+                [c[0] for c in candidates],
+                progress=lambda done, tot: _set(store_checked=done, store_total=tot))
+            _set(store_checked=len(candidates), store_total=len(candidates))
+
+        # ---- pass 3: build what neither we nor the store already have
+        _set(phase="building_blueprints")
         created = set()       # unique (cat_id, canon_key) actually built this run
         new_sources = []      # (source_url) per new combo, for AI-title generation
         conn = get_db_connection()
         cur = conn.cursor()
         try:
-            for r in rows:
+            for ck, cat, types, url, visits, revenue in candidates:
                 if _stopping():
                     break
-                _inc("scanned")
-                url = (r.get('url') or '').lower()
-                p = parse_url(url)
-                if not p:
-                    continue
-                leaf, types = p
-                cat = _resolve_cat(taxonomy_cache, leaf)
-                if not cat:
-                    _inc("no_cat")
-                    continue
-                if not types:
-                    _inc("no_facets")
-                    continue
-                # A dependent facet without its parent cannot be reached, so the
-                # blueprint would be dead weight. Checked BEFORE the dedup/existing
-                # checks so the counter reflects every such URL seen, not just the
-                # first occurrence of each combo.
-                bad = impossible_reason(types, deps)
-                if bad:
-                    _inc("impossible")
-                    continue
-                # dedup on the canonical (cat_id, key) — identical form used by
-                # load_existing_combos, so the same combo is never counted twice
-                ck = (cat['cat_id'], canon_key('~'.join(sorted(types))))
-                if ck in seen:
-                    _inc("dup")
-                    continue
-                seen.add(ck)
-                if ck in existing:
+                if ck in in_store:
                     _inc("skipped_existing")
+                    _inc("skipped_store")
                     continue
                 bp = build_blueprint(cat['cat_id'], cat.get('cat_name', ''), types, rules)
-                _upsert_blueprint(cur, bp, url, r.get('visits'), r.get('revenue'))
+                _upsert_blueprint(cur, bp, url, visits, revenue)
                 conn.commit()
                 if ck not in created:
                     created.add(ck)
@@ -792,7 +970,7 @@ def upsert_blueprint_built(cat_id, key, cat_name, title, h1_title, description):
     but this path takes whatever /api/seo-titles/create-built was handed by the
     frontend, i.e. the facet order as it appeared in the URL. Storing that raw
     made the same combo insertable twice under two spellings — the PK is the raw
-    (cat_id, key) while the dedup in load_existing_combos() compares canon_key()
+    (cat_id, key) while the dedup in load_local_combos() compares canon_key()
     — which is how 450 combos ended up duplicated (cleaned up 2026-08-10)."""
     key = canon_key(key)
     conn = get_db_connection()
@@ -976,7 +1154,7 @@ def publish_built(env="production", push_unique_titles=False, combos=None):
             result["unique_titles_push"] = {"success": False, "error": str(e)}
 
     _pub_set(phase="refreshing_dedup")
-    load_existing_combos(force=True)  # refresh dedup set with the new pushes
+    load_local_combos(force=True)  # refresh dedup set with the new pushes
     _pub_set(status="done", phase="done", finished_at=time.time(),
              message=f"pushed {pushed}, failed {failed}")
     return result
@@ -1061,6 +1239,9 @@ def get_stats():
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        # NOTE: a row count of the July snapshot, not of the live store. The store
+        # has no list endpoint, so its total cannot be counted — only individual
+        # combos can be looked up (store_has_combos / get_store_record).
         cur.execute("SELECT count(*) AS n FROM pa.page_titles_existing")
         existing = cur.fetchone()['n']
         cur.execute("""
@@ -1068,11 +1249,18 @@ def get_stats():
             FROM pa.seo_titles_blueprints GROUP BY status
         """)
         by_status = {row['status']: row['n'] for row in cur.fetchall()}
+        cur.execute("""
+            SELECT count(*) AS n, count(*) FILTER (WHERE found) AS found
+            FROM pa.page_titles_api_cache
+        """)
+        cache = cur.fetchone()
         return {
             "existing_blueprints": existing,
             "built": by_status.get("built", 0),
             "pushed": by_status.get("pushed", 0),
             "failed": by_status.get("failed", 0),
+            "store_checked": cache['n'],
+            "store_found": cache['found'],
         }
     finally:
         cur.close()

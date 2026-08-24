@@ -9,12 +9,14 @@ clean deterministic blueprints, and writes them to a NEW sheet `seo_traffic_new`
 (blueprint cols + visits + revenue, sorted by revenue desc) inside the
 tblPageTitles_blueprint_from_urls workbook.
 
-"No blueprint yet" = NOT in live MySQL beslist.tblPageTitles, NOT in the prior
+"No blueprint yet" = NOT in the LIVE /page-titles store (asked per combo with
+GET /page-titles/{cat_id}/record?key=, see bp.store_has_combos), NOT in the prior
 tblPageTitles_new_from_unique.xlsx, and NOT among the combos already generated in
-the blueprint_from_urls deliverable.
+the blueprint_from_urls deliverable. Until 2026-08-24 the first of those was a read
+of MySQL beslist.tblPageTitles, which has since been dropped.
 
-Run under the mysql venv (needs pymysql):
-  ~/.mysql-venv/bin/python scripts/pagetitles_blueprint_from_seo_traffic.py
+Run under the repo venv (no pymysql needed any more):
+  venv/bin/python scripts/pagetitles_blueprint_from_seo_traffic.py
 """
 import os, sys, json, pickle
 
@@ -58,13 +60,14 @@ def main():
     rules = bp.load_rules(pg.cursor())
     pg.close()
 
+    # Local skip-sets first (free); the live store is asked afterwards, once per
+    # surviving combo, because /page-titles has no list endpoint.
     skip = bp.load_existing_combos()
     n_xlsx = len(skip)
-    tbl = bp.load_tblpagetitles_combos()
     gen = load_generated_combos()
-    skip |= tbl; skip |= gen
-    print(f"[load] skip: xlsx={n_xlsx} tblPageTitles={len(tbl)} generated={len(gen)} "
-          f"union={len(skip)}", file=sys.stderr)
+    skip |= gen
+    print(f"[load] skip: xlsx={n_xlsx} generated={len(gen)} union={len(skip)}",
+          file=sys.stderr)
 
     # aggregate visits/revenue per (cat_id, canon_key); keep a representative type set
     agg = {}   # (cat, key) -> [visits, revenue, types]
@@ -88,10 +91,14 @@ def main():
         else:
             a[0] += int(visits or 0); a[1] += float(revenue or 0)
 
-    new = {ck: v for ck, v in agg.items() if ck not in skip}
+    cand = {ck: v for ck, v in agg.items() if ck not in skip}
     print(f"[scan] parsed={parsed} no_cat={no_cat} no_facets={no_facets}", file=sys.stderr)
-    print(f"[scan] distinct trafficked combos={len(agg)} | NO-blueprint (new)={len(new)}",
+    print(f"[store] asking the live store about {len(cand)} candidate combos",
           file=sys.stderr)
+    in_store = bp.store_has_combos(list(cand))
+    new = {ck: v for ck, v in cand.items() if ck not in in_store}
+    print(f"[scan] distinct trafficked combos={len(agg)} | not in a local skip-set="
+          f"{len(cand)} | NO-blueprint (new)={len(new)}", file=sys.stderr)
 
     # build rows, sort by revenue desc then visits desc
     out_rows = []

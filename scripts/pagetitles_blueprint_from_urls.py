@@ -22,27 +22,26 @@ Templates:
                 &#10062; beslist.nl
 
 One row per distinct (cat_id, key) where key = '~'.join(sorted(facet types)).
-Skips combos already present in the existing
-  Downloads/claude/tblPageTitles_new_from_unique.xlsx  (sheet 'new_pagetitles').
+Skips combos already present in either:
+  - Downloads/claude/tblPageTitles_new_from_unique.xlsx  (sheet 'new_pagetitles'), and
+  - the LIVE /page-titles store, asked per combo with
+    GET /page-titles/{cat_id}/record?key=  (store_has_combos).
+Until 2026-08-24 the second skip-set was read from MySQL `beslist.tblPageTitles`.
+That table has been dropped; `beslist.tblPageTitleImport` is a stale 41k-row copy
+that a /page-titles push does not update, so it is not a substitute. Because the API
+has no list endpoint, the store is asked AFTER the scan, once per surviving combo.
 
 Usage:
   pagetitles_blueprint_from_urls.py sample [N]   # print N example blueprints + stats
   pagetitles_blueprint_from_urls.py build        # full run -> new Excel
 """
-import os, re, sys, json
+import os, re, sys, json, time
 from urllib.parse import unquote
-import psycopg2, pymysql
+import psycopg2
 
-CREDS = {}
-for _line in open(os.path.expanduser('~/.mysql-creds')):
-    if '=' in _line:
-        _k, _v = _line.strip().split('=', 1); CREDS[_k] = _v
-
-
-def my():
-    return pymysql.connect(host=CREDS['MYSQL_HOST'], user=CREDS['MYSQL_USER'],
-                           password=CREDS['MYSQL_PASSWORD'], db='beslist', charset='utf8mb4')
-
+# No MySQL any more: the skip-set used to come from beslist.tblPageTitles, which was
+# dropped. store_has_combos() asks the /page-titles API instead, so this script runs
+# under the repo venv (psycopg2 + openpyxl) — the ~/.mysql-venv detour is gone.
 PG_DSN = ("postgresql://dbadmin:Q9fGRKtUdvdtxsiCM12HeFe0Nki0PvmjZRFLZ9ArmlWdMnDQXX8SdxKnPniqGmq6"
           "@10.1.32.9:5432/n8n-vector-db")
 
@@ -112,12 +111,83 @@ def load_existing_combos():
 
 
 def load_tblpagetitles_combos():
-    """(cat_id, canon_key) set already live in MySQL beslist.tblPageTitles (NL)."""
-    conn = my(); c = conn.cursor()
-    c.execute("SELECT cat_id, `key` FROM tblPageTitles WHERE country_code='NL'")
-    combos = set((r[0], canon_key(r[1])) for r in c.fetchall())
-    conn.close()
-    return combos
+    """GONE. MySQL `beslist.tblPageTitles` was dropped (confirmed absent on
+    dbs-htz-001 on 2026-08-24; `beslist.tblPageTitleImport` is a stale 41k-row copy
+    that a /page-titles push does not touch, so it is NOT the live store either).
+    Use store_has_combos() — it asks the live store instead of a snapshot."""
+    raise RuntimeError(
+        "beslist.tblPageTitles no longer exists; use store_has_combos(combos) to "
+        "ask GET /page-titles/{cat_id}/record?key= about the live store")
+
+
+def _api_key():
+    """UNIQUE_TITLES_API_KEY from the repo .env (no python-dotenv here)."""
+    env = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+    key = os.getenv('UNIQUE_TITLES_API_KEY', '')
+    if not key and os.path.exists(env):
+        for line in open(env):
+            if line.startswith('UNIQUE_TITLES_API_KEY='):
+                key = line.split('=', 1)[1].strip()
+                break
+    if not key:
+        raise RuntimeError('UNIQUE_TITLES_API_KEY not set and not found in .env')
+    return key
+
+
+def store_has_combos(combos, workers=12, verbose=True):
+    """Which of `combos` ((cat_id, canon_key) tuples) the live /page-titles store
+    already holds. Replaces load_tblpagetitles_combos().
+
+    The store answers GET /page-titles/{cat_id}/record?key=<key> with 200 + the
+    record or 404 "Record not found", and has NO list endpoint, so this costs one
+    request per combo (parallelized; stdlib urllib to keep the script dependency-
+    free). The key is matched literally and is order-sensitive -> always pass
+    canon_key() output.
+
+    A combo whose request cannot be answered counts as EXISTING: rebuilding a live
+    record would overwrite it on the next push, while a wrongly-skipped combo only
+    costs one blueprint. Errors are reported on stderr so a broken run is visible
+    rather than silently emitting nothing.
+    """
+    import urllib.request, urllib.parse, urllib.error
+    from concurrent.futures import ThreadPoolExecutor
+
+    combos = list(dict.fromkeys(combos))
+    if not combos:
+        return set()
+    key = _api_key()
+    base = 'https://website-configuration.api.beslist.nl/page-titles'
+
+    def one(ck):
+        cat_id, facet_key = ck
+        url = f"{base}/{cat_id}/record?" + urllib.parse.urlencode({'key': facet_key})
+        req = urllib.request.Request(url, headers={'X-Api-Key': key})
+        for attempt in range(1, 4):
+            try:
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    return ck, (r.status == 200), False
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    return ck, False, False
+                if e.code < 500:
+                    return ck, True, True      # 401/400: not an answer -> conservative
+            except Exception:
+                pass
+            time.sleep(1.5 * attempt)
+        return ck, True, True
+
+    exists, errors = set(), 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for i, (ck, found, err) in enumerate(ex.map(one, combos), 1):
+            if found:
+                exists.add(ck)
+            errors += err
+            if verbose and i % 2000 == 0:
+                print(f"[store] checked {i}/{len(combos)}", file=sys.stderr)
+    if errors:
+        print(f"[store] !! {errors} combos could not be checked and were counted "
+              f"as existing", file=sys.stderr)
+    return exists
 
 
 def facet_phrase(types, rules, unknown_counter):
@@ -172,13 +242,11 @@ def main():
     print(f"[load] facet_position_rules={len(rules)} "
           f"(type-facets={sum(1 for _, t in rules.values() if t)})", file=sys.stderr)
 
-    # skip-set = prior xlsx combos UNION live MySQL tblPageTitles combos (canon keys)
+    # skip-set, step 1 = prior xlsx combos. Step 2 (the live store) runs AFTER the
+    # scan: the store has no list endpoint, so it can only be asked per combo, and
+    # asking it about the ~965k urls' worth of duplicates would be pointless.
     existing = load_existing_combos()
-    nx = len(existing)
-    tbl = load_tblpagetitles_combos()
-    existing |= tbl
-    print(f"[load] skip combos: xlsx={nx} tblPageTitles={len(tbl)} union={len(existing)}",
-          file=sys.stderr)
+    print(f"[load] skip combos from xlsx={len(existing)}", file=sys.stderr)
 
     cur = pg.cursor(name='url_stream'); cur.itersize = 50000
     cur.execute("SELECT url FROM pa.urls WHERE url LIKE '%/c/%'")
@@ -186,6 +254,7 @@ def main():
     seen = set()           # (cat, key) emitted this run (dedup)
     unknown_counter = {}
     rows = []
+    candidates = []        # (ck, url, cat, types) surviving the xlsx skip-set
     scanned = no_cat = no_facets = skipped_existing = dup = 0
     examples = []
     for (url,) in cur:
@@ -207,17 +276,32 @@ def main():
         seen.add(ck)
         if ck in existing:
             skipped_existing += 1; continue
+        candidates.append((ck, url, cat, types))
+    pg.close()
+
+    # skip-set, step 2: ask the live store about the survivors (one GET each,
+    # parallel). In sample mode only the first N are checked, so a sample stays
+    # fast instead of firing tens of thousands of requests.
+    if mode == 'sample':
+        candidates = candidates[:N]
+    print(f"[store] asking the live store about {len(candidates)} candidate combos",
+          file=sys.stderr)
+    in_store = store_has_combos([c[0] for c in candidates])
+    skipped_store = 0
+    for ck, url, cat, types in candidates:
+        if ck in in_store:
+            skipped_store += 1; continue
         row = build_row(cat, id2name.get(cat, ''), types, rules, unknown_counter)
         if mode == 'sample':
             if len(examples) < N:
                 examples.append((url, row))
         else:
             rows.append(row)
-    pg.close()
 
     print(f"\n[scan] urls={scanned} no_cat={no_cat} no_facets={no_facets} "
-          f"dup={dup} skipped_existing={skipped_existing}", file=sys.stderr)
-    print(f"[scan] NEW blueprint rows={len(seen) - skipped_existing - 0}", file=sys.stderr)
+          f"dup={dup} skipped_xlsx={skipped_existing} skipped_store={skipped_store}",
+          file=sys.stderr)
+    print(f"[scan] NEW blueprint rows={len(candidates) - skipped_store}", file=sys.stderr)
     if unknown_counter:
         top = sorted(unknown_counter.items(), key=lambda x: -x[1])[:20]
         print(f"[warn] facet types not in rules: {len(unknown_counter)} "

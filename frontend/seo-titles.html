@@ -390,14 +390,21 @@
                 const phaseNames = {
                     starting: 'Starting…',
                     fetching_urls: 'Fetching top URLs from Redshift…',
+                    scanning_urls: 'Scanning URLs…',
+                    // One GET /page-titles/…/record per candidate combo: the store has
+                    // no list endpoint, so this is the slow-but-authoritative dedup.
+                    checking_store: 'Checking which combos the store already has…',
                     building_blueprints: 'Building blueprints…',
                     generating_titles: 'Generating unique titles…',
                     done: 'Done', error: 'Error',
                 };
-                // real % only during the scan phase (scanned / urls_fetched); otherwise indeterminate
+                // Real % during the two phases that have a known total; the rest is
+                // indeterminate.
                 let pct = null;
-                if (run.phase === 'building_blueprints' && run.urls_fetched) {
+                if (run.phase === 'scanning_urls' && run.urls_fetched) {
                     pct = Math.min(100, Math.round((run.scanned || 0) / run.urls_fetched * 100));
+                } else if (run.phase === 'checking_store' && run.store_total) {
+                    pct = Math.min(100, Math.round((run.store_checked || 0) / run.store_total * 100));
                 } else if (run.status === 'done') {
                     pct = 100;
                 }
@@ -425,7 +432,11 @@
                     // Combos skipped because a dependent facet's parent is absent
                     // (type_parfum without merk etc.) — they cannot exist on the site.
                     ['Impossible', run.impossible],
-                    ['Skipped (exist)', run.skipped_existing], ['New combos', run.new_combos],
+                    // Skipped = already in pa.seo_titles_blueprints, or the store said
+                    // it has the record. Store errors are counted as "exists" (never
+                    // rebuild on doubt), so they get their own cell rather than hiding.
+                    ['Skipped (exist)', run.skipped_existing],
+                    ['Store errors', run.store_errors], ['New combos', run.new_combos],
                     ['Created', run.titles_generated], ['Titles skipped', run.titles_skipped], ['Failed', run.titles_failed],
                 ];
                 document.getElementById('counters').innerHTML = c.map(([k, v]) =>

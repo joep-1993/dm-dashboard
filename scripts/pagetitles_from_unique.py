@@ -286,11 +286,16 @@ def main():
     labels = load_value_labels()
     print(f"[load] value labels={len(labels)}", file=sys.stderr)
 
-    # existing combos to detect NEW vs existing
-    conn = my(); c = conn.cursor()
-    c.execute("SELECT cat_id,`key` FROM tblPageTitles WHERE country_code='NL'")
-    existing = set((r[0], r[1]) for r in c.fetchall())
-    conn.close()
+    # Existing combos, to detect NEW vs existing. This used to be
+    #   SELECT cat_id,`key` FROM tblPageTitles WHERE country_code='NL'
+    # but MySQL beslist.tblPageTitles was dropped (gone on dbs-htz-001 as of
+    # 2026-08-24; beslist.tblPageTitleImport is a stale copy a /page-titles push
+    # does not update). The live store is the authority and is asked per combo —
+    # it has no list endpoint — so `existing` starts empty and is filled in below,
+    # once the candidate combos are known.
+    import pagetitles_blueprint_from_urls as _bp
+    existing = set()
+    _store_lookup = _bp.store_has_combos
 
     pg = psycopg2.connect(PG_DSN)
     pc = pg.cursor(name='stream'); pc.itersize = 20000
@@ -338,6 +343,23 @@ def main():
         if mode == 'sample' and len(examples) < N and unmatched != page_value_phs:
             examples.append((url, cat, cat_name, key, title, t_out, h1, h_out, sorted(unmatched)))
     pg.close()
+
+    # Fill the `existing` set now that the candidate combos are known: one
+    # GET /page-titles/{cat_id}/record?key= per combo, parallel (see the note at
+    # the top of main). In sample mode only the combos we print are checked.
+    if mode == 'excel':
+        import pickle as _pk
+        _combos = list(_pk.load(open('/tmp/agg.pkl', 'rb')))
+    elif mode == 'sample':
+        _combos = list(agg)[:max(N * 20, 200)]
+    else:
+        _combos = list(agg)
+    print(f"[store] asking the live store about {len(_combos)} combos",
+          file=sys.stderr)
+    # The store is asked with canonical keys, but `existing` is compared against
+    # agg's own keys, so map the answers back to the shape agg uses.
+    _asked = {(c, _bp.canon_key(k)): (c, k) for c, k in _combos}
+    existing = {_asked[ck] for ck in _store_lookup(list(_asked)) if ck in _asked}
 
     if mode == 'sample':
         print(f"\n=== scanned {scanned} pages, {len(agg)} combos ===\n")
