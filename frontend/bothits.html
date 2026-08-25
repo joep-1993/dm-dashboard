@@ -205,6 +205,66 @@
         #startDate, #endDate {
             accent-color: #5e4a90; color-scheme: light;
         }
+        /* PERIODE-PRESETS — dezelfde vorm als in seo-stats.html en shop-campaigns.html:
+           de knopgroep krijgt de radius en de zachte schaduw van het datumvak ernaast,
+           zodat de twee als één periodecontrol lezen.
+           Alleen maatvoering en hoeken: de KLEUR van .btn-preset staat in css/style.css
+           (groep 2, "neutraal"). Dit blok laadt ná die stylesheet, dus een kleur hier zou
+           de gedeelde regel stil overschrijven — precies wat de opruiming van 2026-08-14
+           heeft weggehaald. De actieve staat (.btn-preset.active) komt ook daaruit en
+           wordt hier niet gezet: geen enkele presetgroep in het dashboard doet dat. */
+        .btn-preset { padding: 0.35rem 0.7rem; }
+        .btn-group .btn-preset:not(:first-child) { border-left-width: 1px; border-left-style: solid; }
+        .btn-group:has(.btn-preset) {
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(45,42,58,0.06);
+            overflow: hidden;
+        }
+        .btn-group .btn-preset:first-child { border-top-left-radius: 10px; border-bottom-left-radius: 10px; }
+        .btn-group .btn-preset:last-child { border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
+
+        /* LAADSTAAT — het canonieke recept uit UI_BLUEPRINT ("een grafiek naast een tabel
+           heeft zijn eigen laadstaat nodig", Joep 2026-08-14, opgeschreven nádat precies
+           dit gedrag op 90d in SEO Stats opviel). Bewust een shimmer en geen dekkende
+           overlay met een draaiend wieltje: het patroon is "het wordt getekend".
+           Dezelfde `skelShimmer`-keyframes als de skeleton-rijen in de tabel eronder — die
+           staan in css/style.css — zodat grafiek en rijen in hetzelfde ritme pulseren in
+           plaats van elk hun eigen laadtaal te spreken.
+           Lichtere stops dan .skel-bar (#ececec/#f6f6f6) en MET alpha: die bar is 1,45rem
+           hoog en mag contrast hebben, maar over 340px wordt datzelfde grijs een muur. De
+           canvas eronder gaat op 0,32, dus de vorige lijn en de assen schemeren door — dat
+           leest als "wordt vervangen" in plaats van "is weg". */
+        .chart-box .chart-skel,
+        .chart-box-sm .chart-skel,
+        .donut-wrap .chart-skel { display: none; }
+        .chart-box.is-loading .chart-skel,
+        .chart-box-sm.is-loading .chart-skel,
+        .donut-wrap.is-loading .chart-skel {
+            display: block;
+            position: absolute;
+            inset: 0;
+            /* z-index 4 en niet de standaardstapeling: de donut heeft een .donut-center op
+               2 en een .donut-tip op 3, dus zonder dit shimmert het ONDER het totaal. */
+            z-index: 4;
+            border-radius: 8px;
+            background: linear-gradient(90deg, rgba(242,242,244,0.86) 25%,
+                                              rgba(250,250,251,0.86) 37%,
+                                              rgba(242,242,244,0.86) 63%);
+            background-size: 400% 100%;
+            animation: skelShimmer 1.4s ease infinite;
+        }
+        .chart-box.is-loading canvas,
+        .chart-box-sm.is-loading canvas,
+        .donut-wrap.is-loading canvas { opacity: 0.32; }
+        /* Het getal in de donut is het TOTAAL van de vorige selectie; scherp laten staan
+           boven een ladende grafiek is precies het "oude antwoord dat actueel lijkt" waar
+           de catch van refresh() ook al voor waakt. */
+        .donut-wrap.is-loading .donut-center { opacity: 0.32; }
+        /* De legenda hoort bij de grafiek die vervangen wordt, dus die dimt mee. Wel
+           blijven staan (geen display:none): anders zakt de kaart een regel in en springt
+           de hele pagina bij elke klik. pointer-events eraf, want een reeks aan/uit zetten
+           terwijl de nieuwe data nog onderweg is, is een klik op de vorige grafiek. */
+        .daily-legend.is-loading { opacity: 0.35; pointer-events: none; }
         /* De paarse flatpickr-kalender staat sinds 2026-08-14 in css/style.css: dit
            blok van negen regels stond op zes pagina's byte-identiek. Hier iets wijzigen
            doet dus niets meer — pas het daar aan. */
@@ -317,17 +377,50 @@
                      row below the other filter labels. -->
                 <div class="row g-3 align-items-start">
                     <!-- Periode als één kader (Joep, 2026-08-13) i.p.v. twee losse
-                         "Van"/"Tot en met"-kolommen. Dat scheelt een kolom, dus de drie
-                         checkboxlijsten staan weer op hun oorspronkelijke col-md-2 en de
-                         kaart eromheen is de gewone dashboardvorm. De inputs zelf zijn
-                         ongewijzigd (#startDate / #endDate), dus flatpickr en params()
-                         merken hier niets van. -->
-                    <div class="col-md-3">
+                         "Van"/"Tot en met"-kolommen. De inputs zelf zijn ongewijzigd
+                         (#startDate / #endDate), dus flatpickr en params() merken hier niets van.
+
+                         col-md-auto en niet meer col-md-3 (Joep, 2026-08-25): Snelkeuze staat
+                         nu als eigen kolom hiernaast, en die twee samen moeten binnen de kaart
+                         blijven naast de drie col-md-2-lijsten. Gemeten op een 1500px-venster
+                         (kaart 1076px): auto geeft het datumvak zijn eigen 215px in plaats van
+                         de 269px van col-md-3, en die 54px is precies wat het verschil maakt
+                         tussen ~70px lucht rechts van URL-type en een rij die overloopt. -->
+                    <div class="col-md-auto">
                         <label class="form-label mb-1">Periode</label>
                         <div class="date-box">
                             <input type="date" id="startDate" aria-label="Van">
                             <span class="sep">–</span>
                             <input type="date" id="endDate" aria-label="Tot en met">
+                        </div>
+                    </div>
+                    <!-- Snelkeuze = de presets uit SEO Stats (btn-group btn-group-sm), maar als
+                         EIGEN kolom tussen Periode en Domein (Joep, 2026-08-25) i.p.v. onder het
+                         datumvak. Daarom heeft de groep hier wél een label: de rij staat op
+                         align-items-start, dus zonder label zouden de knoppen op de labelregel
+                         van de buren beginnen en een halve regel te hoog hangen.
+
+                         Het anker van een preset is de LAATSTE DAG MET LOGS
+                         (META.coverage.last_day), niet gisteren: de ingest loopt achter op de
+                         kalender, dus "7d vanaf gisteren" zou hier stelselmatig lege staartdagen
+                         meenemen — zie setPreset().
+
+                         data-days + één listener in de wiring, geen inline onclick: dit bestand
+                         wiret alles in JS. -->
+                    <div class="col-md-auto">
+                        <label class="form-label mb-1">Snelkeuze</label>
+                        <!-- d-flex is hier GEEN cosmetica: .btn-group is inline-flex en een
+                             .form-label is inline-block, dus zonder dit staan het label en de
+                             knoppen naast elkaar op één regel en hangt de groep een halve regel
+                             boven het datumvak ernaast. Block-level flex zet hem onder het label,
+                             op dezelfde hoogte als de .date-box. De kolom is col-md-auto, dus de
+                             groep houdt zijn eigen breedte (max-content) en rekt niet uit. -->
+                        <div class="btn-group btn-group-sm d-flex" role="group" id="periodPresets"
+                             aria-label="Periode-presets">
+                            <button class="btn btn-preset" data-days="7">7d</button>
+                            <button class="btn btn-preset" data-days="14">14d</button>
+                            <button class="btn btn-preset" data-days="30">30d</button>
+                            <button class="btn btn-preset" data-days="90">90d</button>
                         </div>
                     </div>
                     <div class="col-md-2">
@@ -359,7 +452,25 @@
                      van een sectie staat onderaan rechts (UI_BLUEPRINT).
                      Let op bij wegklikken: Bootstrap haalt de banner uit de DOM, en de
                      knop staat er los van — die blijft dus staan. -->
-                <div class="d-flex justify-content-end gap-2 mt-3">
+                <!-- mt-4 en niet mt-3 (Joep, 2026-08-25): sinds de filterkolommen naar
+                     rechts zijn geschoven eindigt URL-type vlak bij de rechterrand, dus de
+                     knop kwam recht onder die lijst te staan. Met 16px las dat als een vijfde
+                     regel van het lijstje; 24px zet het weer als een eigen actiebalk. Let op:
+                     dit is de marge naar de WAARSCHUWING als die zichtbaar is (die staat
+                     ertussen met zijn eigen mt-3), niet altijd naar de filterrij. -->
+                <div class="d-flex justify-content-end align-items-center gap-2 mt-4">
+                    <!-- De canonieke inline spinner uit UI_BLUEPRINT ("Spinners zijn voor
+                         kleine inline busy-hints"), met een tekst erbij zodat de melding ook
+                         zonder beweging te lezen is. `me-auto` zet hem LINKS in de balk: hij
+                         mag de primaire knop niet opzij duwen als hij verschijnt.
+                         Toggelen gaat alleen op .d-none — die utility staat in Bootstrap na
+                         .d-inline-flex, dus hij wint zolang hij erop staat en de rij hoeft
+                         geen tweede klasse om en om. -->
+                    <span class="d-inline-flex align-items-center gap-2 me-auto muted-note d-none"
+                          id="filterBusy" role="status">
+                        <span class="spinner-border spinner-border-sm"></span>
+                        Bezig met laden…
+                    </span>
                     <button class="btn btn-sm btn-run" id="applyBtn">Toepassen</button>
                 </div>
             </div>
@@ -440,7 +551,8 @@
                     </div>
                     <div class="card-body">
                         <div id="dailyLegend" class="daily-legend mb-2"></div>
-                        <div class="chart-box"><canvas id="dailyChart"></canvas></div>
+                        <div class="chart-box"><canvas id="dailyChart"></canvas>
+                             <div class="chart-skel"></div></div>
                     </div>
                 </div>
 
@@ -452,6 +564,7 @@
                                 <div class="donut-wrap">
                                     <canvas id="typeChart"></canvas>
                                     <div class="donut-center" id="typeCenter"></div>
+                                    <div class="chart-skel"></div>
                                 </div>
                             </div>
                         </div>
@@ -477,7 +590,8 @@
                                  bothits_service.py en in BOTHITS_PROCESS.md. -->
                             <div class="card-header"><h5 class="mb-0">Facet-diepte</h5></div>
                             <div class="card-body">
-                                <div class="chart-box-sm chart-framed"><canvas id="depthChart"></canvas></div>
+                                <div class="chart-box-sm chart-framed"><canvas id="depthChart"></canvas>
+                                     <div class="chart-skel"></div></div>
                             </div>
                         </div>
                     </div>
@@ -973,6 +1087,125 @@
             `<label><input type="checkbox" value="${escapeHtml(v)}" checked> ${escapeHtml(labels ? labels[i] : v)}</label>`).join('');
     }
 
+    // ---- Periode ---------------------------------------------------------
+    // De flatpickr-instanties worden bewaard omdat setDates() ze moet kunnen zetten
+    // ZONDER onChange: met triggerChange zou één preset twee refreshes afvuren, één
+    // per veld. Blijft null als de CDN wegvalt — dan zijn het gewoon native velden.
+    let fpStart = null, fpEnd = null;
+
+    // Datumrekenwerk volledig in UTC (Date.UTC + toISOString). `new Date('2026-03-26')`
+    // is UTC-middernacht, dus lokale getters kunnen daar in een CEST-browser een dag
+    // naast zitten — dezelfde valkuil als in de noot bij syncPartialWarn().
+    function shiftDays(iso, n) {
+        const [y, m, d] = iso.split('-').map(Number);
+        return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+    }
+
+    // Startdatum van een venster van `days` dagen dat eindigt op de laatste dag met
+    // logs, geknipt op de eerste dag met logs: een preset mag geen bereik zetten waar
+    // per definitie niets in zit (de bucket bewaart ~42 dagen, de tabel houdt de rest).
+    function rangeStart(cov, days) {
+        const start = shiftDays(cov.last_day, -(days - 1));
+        return (cov.first_day && start < cov.first_day) ? cov.first_day : start;
+    }
+
+    function setDates(start, end) {
+        if (fpStart) fpStart.setDate(start, false); else document.getElementById('startDate').value = start;
+        if (fpEnd) fpEnd.setDate(end, false); else document.getElementById('endDate').value = end;
+    }
+
+    // Het einde is coverage.last_day, niet gisteren — zie de noot bij de knoppen. Zonder
+    // /meta is er geen anker en doet de knop niets; boot() heeft dan al een foutmelding
+    // boven de kaarten gezet, dus een tweede melding hier zou alleen ruis zijn.
+    function setPreset(days) {
+        const cov = META?.coverage || {};
+        if (!cov.last_day) return;
+        setDates(rangeStart(cov, days), cov.last_day);
+        // Direct filteren, zoals in SEO Stats: één klik is de hele actie, er hoort geen
+        // Toepassen achteraan. Dat is ook waarom setDates() met triggerChange=false zet —
+        // anders is dit de tweede en derde refresh van dezelfde klik.
+        refresh();
+    }
+
+    // De ingedrukte preset blijft opgelicht zolang het gekozen bereik er precies mee
+    // overeenkomt (Joep, 2026-08-25). De kleur en het gewicht van .btn-preset.active
+    // staan al in css/style.css; hier wordt alleen bepaald WELKE aan staat.
+    //
+    // Vergelijken gaat via rangeStart() en niet via een dagentelling: bij een korte
+    // historie knipt een preset op first_day, en dan is "het aantal dagen" niet meer 90
+    // terwijl die knop wél is wat je hebt ingedrukt.
+    //
+    // Alleen de EERSTE match licht op. Om diezelfde reden kunnen twee presets hetzelfde
+    // bereik opleveren (met 20 dagen historie geven 30d en 90d allebei first_day), en dan
+    // is de kleinste de knop die je logisch hebt gekozen — twee opgelichte knoppen zouden
+    // suggereren dat het bereik twee dingen tegelijk is.
+    //
+    // Een handmatig getypt bereik matcht niets en dan staat er niets aan. Dat is het
+    // eerlijke antwoord: een knop die oplicht terwijl de datums iets anders zeggen, is
+    // precies de "ziet er actueel uit en is het niet"-fout die deze pagina elders vermijdt.
+    function syncPresetActive() {
+        const cov = META?.coverage || {};
+        const s = document.getElementById('startDate').value;
+        const e = document.getElementById('endDate').value;
+        const btns = [...document.querySelectorAll('#periodPresets .btn-preset')];
+        const hit = (cov.last_day && e === cov.last_day)
+            ? btns.find(b => s === rangeStart(cov, Number(b.dataset.days)))
+            : null;
+        btns.forEach(b => {
+            b.classList.toggle('active', b === hit);
+            b.setAttribute('aria-pressed', b === hit ? 'true' : 'false');
+        });
+    }
+
+    // ---- Laadstaat -------------------------------------------------------
+    // Recept uit UI_BLUEPRINT: evenveel cellen als kolommen, zodat een skeletonrij precies
+    // zo hoog is als een geladen rij en de kaart niet springt zodra de data er is.
+    function skeletonRows(cols, n = 8) {
+        const cell = '<td><span class="skel-bar"></span></td>';
+        return ('<tr class="skel-row">' + cell.repeat(Math.max(cols, 1)) + '</tr>').repeat(n);
+    }
+
+    // Eén functie die de hele laadstaat van het Overzicht aan- en uitzet, en die op ELKE
+    // uitgang van refresh() wordt aangeroepen — ook in de catch. Een shimmer die na een
+    // dode fetch blijft draaien leest als "nog bezig" voor een request die al weg is.
+    // aria-busy op hetzelfde element, zodat een schermlezer hoort wat de shimmer laat zien.
+    // De "Bezig met laden…"-hint in de filterkaart hoort bij ELKE filtergestuurde fetch,
+    // en er kunnen er twee tegelijk lopen (het Overzicht en, met die tab open, de URL's).
+    // Daarom twee vlaggen en geen teller: vlaggen zijn idempotent, dus een refresh die
+    // door de stale-guard vroegtijdig terugkeert kan de hint niet permanent laten hangen —
+    // met een teller zou die ene gemiste aftrek betekenen dat het wieltje blijft draaien.
+    //
+    // Waarom deze hint er is naast de shimmer: /top-urls doet over een bereik van 90 dagen
+    // ~17 seconden (gemeten 2026-08-25), en dan is één shimmerende tabel te weinig om te
+    // zien of de tool nog leeft.
+    const BUSY = { overview: false, urls: false };
+    function setBusyHint(key, on) {
+        BUSY[key] = on;
+        document.getElementById('filterBusy')
+            ?.classList.toggle('d-none', !(BUSY.overview || BUSY.urls));
+    }
+
+    const BUSY_CHARTS = ['dailyChart', 'typeChart', 'depthChart'];
+    function setOverviewBusy(on) {
+        BUSY_CHARTS.forEach(id => {
+            // De directe ouder is de .chart-box / .chart-box-sm / .donut-wrap, en die staat
+            // al op position:relative — daarom kan de .chart-skel erin absoluut liggen.
+            const box = document.getElementById(id)?.parentElement;
+            if (!box) return;
+            box.classList.toggle('is-loading', on);
+            box.setAttribute('aria-busy', on ? 'true' : 'false');
+        });
+        document.getElementById('dailyLegend')?.classList.toggle('is-loading', on);
+        setBusyHint('overview', on);
+        // De tabel hangt aan dezelfde /summary-fetch als de grafieken, dus die shimmert
+        // mee. Zes rijen: het zijn acht bot-families, en een skeleton hoort te lijken op
+        // wat er straks staat zonder de kaart langer te maken dan hij wordt.
+        if (on) {
+            const tb = document.querySelector('#botTable tbody');
+            if (tb) tb.innerHTML = skeletonRows(12, 6);
+        }
+    }
+
     // ---- Boot ------------------------------------------------------------
     async function boot() {
         try {
@@ -992,10 +1225,13 @@
         // (Joep, 2026-08-13) — zie de Filters-kop.
         const cov = META.coverage || {};
         if (cov.last_day) {
+            // Startbereik via rangeStart(), hetzelfde pad als de 30d-preset. Het
+            // hand-uitgeschreven rekenwerk dat hier stond mengde setDate/getDate (lokaal)
+            // met toISOString (UTC) en kon daardoor een dag verschuiven.
+            // Nog steeds rechtstreeks op .value en niet via setDates(): dit gebeurt
+            // opzettelijk VÓÓR de flatpickr-init hieronder.
             document.getElementById('endDate').value = cov.last_day;
-            const d = new Date(cov.last_day); d.setDate(d.getDate() - 29);
-            const lo = cov.first_day && d < new Date(cov.first_day) ? cov.first_day : d.toISOString().slice(0, 10);
-            document.getElementById('startDate').value = lo;
+            document.getElementById('startDate').value = rangeStart(cov, 30);
         }
         // Flatpickr ná het zetten van .value: hij neemt de huidige waarde van het
         // veld over en zet het type naar text, dus een YYYY-MM-DD er later in
@@ -1005,8 +1241,8 @@
             const fpOpts = { dateFormat: 'Y-m-d', allowInput: true,
                              disableMobile: true, locale: { firstDayOfWeek: 1 },
                              onChange: () => refresh() };
-            flatpickr('#startDate', fpOpts);
-            flatpickr('#endDate', fpOpts);
+            fpStart = flatpickr('#startDate', fpOpts);
+            fpEnd = flatpickr('#endDate', fpOpts);
         }
         chkbox('hostFilter', META.hosts || []);
         chkbox('classFilter', Object.keys(classCounts()));
@@ -1020,11 +1256,21 @@
     }
 
     // ---- Overview --------------------------------------------------------
+    // Elke refresh krijgt een nummer, en alleen de hoogste mag tekenen. Zonder dat is
+    // vier keer snel achter elkaar een preset aanklikken een race: vier vluchten die in
+    // willekeurige volgorde terugkomen, en de laatst getekende grafiek is dan niet
+    // noodzakelijk die van de knop die je als laatste indrukte.
+    let refreshSeq = 0;
     async function refresh(force = false) {
         // Vóór de fetches: de banner hoort bij de periode die nu getoond wordt, en
         // refresh() is het enige punt waar élke ingang samenkomt (Toepassen, de
-        // flatpickr-onChange, groupBy en de boot).
+        // presets, de flatpickr-onChange, groupBy en de boot). Dat maakt het ook de
+        // juiste plek voor de actieve preset: die volgt de DATUMVELDEN, niet de klik,
+        // dus een handmatig gekozen bereik zet hem net zo goed uit.
         syncPartialWarn();
+        syncPresetActive();
+        const seq = ++refreshSeq;
+        setOverviewBusy(true);
         const gb = document.getElementById('groupBy').value;
         const f = force ? { force: 'true' } : {};
         let daily, summary;
@@ -1034,6 +1280,11 @@
                 getJSON(API + '/summary?' + params(f)),
             ]);
         } catch (e) {
+            // Een verlopen vlucht laat de laadstaat STAAN: de nieuwere refresh is er nog
+            // mee bezig en die zet hem zelf uit. Hetzelfde geldt voor de foutmelding —
+            // een 400 van een bereik dat je al niet meer bekijkt, hoort niet in beeld.
+            if (seq !== refreshSeq) return;
+            setOverviewBusy(false);
             // Leegmaken, niet laten staan: een grafiek van de vorige selectie onder een
             // nieuwe datumkeuze is een verkeerd antwoord, geen oud antwoord.
             showLoadError(e.message);
@@ -1044,6 +1295,8 @@
             if (tb) tb.innerHTML = '';
             return;
         }
+        if (seq !== refreshSeq) return;
+        setOverviewBusy(false);
         clearLoadError();
         drawDaily(daily, gb);
         drawType(summary);
@@ -1708,7 +1961,12 @@
         urlQuery = document.getElementById('urlQ').value.trim();
         urlQLast = urlQuery;
         document.getElementById('urlHeading').textContent = `Top ${fmt(limit)} URL's`;
-        tb.innerHTML = '<tr><td colspan="6" class="p-3 text-muted">laden…</td></tr>';
+        // Skeletonrijen i.p.v. de tekstrij "laden…" die hier stond (UI_BLUEPRINT: een
+        // laadstaat hoort de VORM van het resultaat te hebben, anders springt de tabel
+        // van één regel naar honderd). Acht rijen ongeacht de limiet: het is een hint,
+        // geen voorspelling, en bij "Alles" wil je hier geen 5.000 skeletons.
+        tb.innerHTML = skeletonRows(6, 8);
+        setBusyHint('urls', true);
         try {
             // De kolom toont sinds 2026-08-13 de vorm MÉT trailing slash (zie urlPath),
             // maar de tabellen bewaren hem zonder. Een URL uit de kolom kopiëren en hier
@@ -1732,9 +1990,11 @@
             });
         } catch (e) {
             urlRows = [];
+            setBusyHint('urls', false);
             tb.innerHTML = `<tr><td colspan="6" class="p-3 text-danger">Laden mislukt: ${escapeHtml(e.message)}</td></tr>`;
             return;
         }
+        setBusyHint('urls', false);
         renderUrls();
     }
     // De ingest slaat elk pad zonder trailing slash op (`.rstrip("/")` in
@@ -2135,6 +2395,11 @@
 
     // ---- Wiring ----------------------------------------------------------
     document.getElementById('applyBtn').onclick = () => refresh();
+    // Eén listener op de groep in plaats van vier inline onclicks; setPreset() zet de
+    // datums zonder onChange en doet de ene refresh zelf.
+    document.querySelectorAll('#periodPresets .btn-preset').forEach(b => {
+        b.onclick = () => setPreset(Number(b.dataset.days));
+    });
     document.getElementById('refreshBtn').onclick = () => refresh(true);
     document.getElementById('s3FetchBtn').onclick = s3Fetch;
     document.getElementById('s3CancelBtn').onclick = async () => {
