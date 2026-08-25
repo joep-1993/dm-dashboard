@@ -2256,12 +2256,25 @@
             cont.querySelectorAll('.swatch').forEach(s => s.classList.remove('sel'));
             btn.classList.add('sel');
             cont.dataset.color = btn.dataset.color;
-            // Live-preview the colour on the text input.
+            // Live-preview the colour on the text input...
             const txt = btn.closest('.note-wrap').querySelector('.note-input');
-            if (txt.value.trim()) txt.style.background = btn.dataset.color;
+            if (!txt.value.trim()) return;
+            txt.style.background = btn.dataset.color;
+            // ...and persist it. The input's `change` event can't carry the colour:
+            // clicking a swatch blurs the field, so change fires BEFORE this handler
+            // sets dataset.color (i.e. with the old colour), and a colour-only pick
+            // fires no change at all. Either way notesMap kept the previous colour and
+            // the next redraw — delta toggle, sort, page — repainted the note back to it.
+            saveNoteFrom(txt);
         }
 
-        async function saveNoteFrom(el) {
+        // Note writes are serialized per date. Picking a swatch fires two saves in a
+        // row (blur→change with the old colour, then pickSwatch with the new one); two
+        // PUTs in flight on the same row could land in either order and the stale one
+        // would win.
+        const noteSaves = {};
+
+        function saveNoteFrom(el) {
             const wrap = el.closest('.note-wrap');
             const date = el.dataset.date;
             const txt = wrap.querySelector('.note-input');
@@ -2271,13 +2284,13 @@
                                    : ((notesMap[date] && notesMap[date].color) || PRESET_COLORS[0]);
             notesMap[date] = { note, color };
             txt.style.background = note.trim() ? color : '';
-            try {
-                await fetch(`${API}/notes`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ date, note, color }),
-                });
-            } catch (e) { /* keep local value; will retry on next edit */ }
+            const put = () => fetch(`${API}/notes`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date, note, color }),
+            }).catch(e => { /* keep local value; will retry on next edit */ });
+            noteSaves[date] = (noteSaves[date] || Promise.resolve()).then(put, put);
+            return noteSaves[date];
         }
 
         function exportXlsx() {
