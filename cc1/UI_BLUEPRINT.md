@@ -1362,6 +1362,21 @@ carries through automatically:
   3. **Bij gelijke uitkomst licht alleen de kleinste op.** Met 20 dagen historie geven
      30d en 90d dezelfde startdatum; twee opgelichte knoppen zouden suggereren dat het
      bereik twee dingen tegelijk is. `aria-pressed` gaat mee met de klasse.
+- **Past een filterrij niet meer op één regel, bepaal dan WELK element wrapt** (Bot Hits,
+  2026-08-25). Een `row` wrapt van zichzelf netjes, maar hij laat het laatste element
+  zakken en dat is zelden het element dat je kunt missen: hier viel URL-type — zes vinkjes —
+  naar een tweede regel en stond daar los onder een halfvolle rij. Met
+  `order-md-last order-xl-0` op de kleinste kolom zakt die in plaats daarvan. **Doe dit
+  nooit door de paginawrapper breder te maken**: één breedte voor alle tools, zie
+  "Fixed width wrapper" bovenaan — dat is precies de uitzondering die op 2026-08-14 is
+  opgeheven, en Bot Hits was één van de vijf pagina's die toen zijn omgezet.
+- **Een tool die de selectie van de gebruiker inperkt, ZEGT dat, boven de data die het
+  raakt** (Bot Hits URL's-tab, 2026-08-25: die query kijkt max 90 dagen terug omdat 192
+  dagen 90 seconden kost). Stil afkappen levert rijen op die over een ander bereik gaan dan
+  het filter bovenaan beweert — dezelfde fout als een tabel die na een mislukte fetch de
+  vorige cijfers laat staan. De melding noemt hoe lang de selectie is, welk bereik je nu
+  ziet, en dat de andere secties de volle selectie gebruiken. Niet wegklikbaar, in
+  tegenstelling tot een waarschuwing die je één keer leest: deze legt uit wat er NU staat.
 - **Checkboxes / radios**: `<input class="form-check-input" type="checkbox|radio">`
   in a `.form-check` with a `.form-check-label`. Keep the default Bootstrap accent —
   don't recolour. (Canonicals' bulk-select adds a `canon-select` class alongside

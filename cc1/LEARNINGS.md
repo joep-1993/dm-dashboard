@@ -1,6 +1,48 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een query van 90 seconden waarin `work_mem` niets doet: drie verdachten, en de dader is de scan (2026-08-25, Bot Hits)
+
+`/top-urls` kon 90s duren. Uitgeprofileerd op de live database om te weten of dit een query is
+die je optimaliseert of een vraag die je begrenst. De tab leest uit twee tabellen; de onbekende
+staart (`bothits_unknown_daily`, 876k rijen) doet 0,3s over 30 dagen en 1,8s over de volledige
+historie, dus het zit volledig in het bekende been over `bothits_url_daily` — 22,2 mln rijen.
+
+| Bereik | Nu | `enable_incremental_sort=off` | Zonder `count(DISTINCT)` |
+|---|---|---|---|
+| 30 dagen | 4,4s | 4,0s | 5,7s (waarvan 1,7s voor `days`) |
+| 90 dagen | 10,0s | 9,2s | 11,0s (waarvan 4,4s voor `days`) |
+| 192 dagen | 89,8s | 22,6s | 16,6s (waarvan 4,4s voor `days`) |
+
+**`work_mem` was de plausibele verdachte en het was hem niet.** Hij staat op 4MB en de GROUP BY
+spilt zichtbaar naar disk (`external merge Disk: 47120kB` + twee workers). 256MB geeft 4,4 ->
+3,9s. De les is niet "work_mem doet niets", maar dat een spill in het plan STAAT terwijl de
+kosten ergens anders zitten: de scan over 4,4 mln (30 dagen) tot 22,1 mln rijen. Meet het
+verschil, lees niet alleen het plan.
+
+**De superlineaire sprong is een planner-flip, niet meer data.** 90 dagen -> 192 dagen is 2x zo
+veel rijen en 9x zo veel tijd, omdat Postgres boven ~100 dagen overstapt van een parallelle
+seq scan + sort naar een Incremental Sort over de `url_id`-index — en daarmee zijn
+parallellisme verliest. Zo'n knik in een tijdcurve is een reden om `EXPLAIN` te vergelijken
+tussen twee bereiken, niet om aan de grootste knop te draaien.
+
+**`count(DISTINCT x)` in een GROUP BY blokkeert een HashAggregate.** Dát is waarom er
+überhaupt over alle rijen gesorteerd werd. Weghalen geeft een `Partial HashAggregate` en 192
+dagen zakt naar 12,2s — maar de kolom `days` moet dan in een tweede query op de top-N, en die
+kost zelf 1,7-4,4s. Voor de bereiken die je echt gebruikt levert het dus niets op. Goed om te
+weten als een DISTINCT-aggregaat wél weg kan.
+
+**Conclusie die ik zonder de meting niet had durven trekken:** ~4s is de bodem zonder een
+rollup-tabel, en die zou het bekende been niet-uitputtend maken — precies de eigenschap waarop
+die tab betrouwbaar is. Dus een grens van 90 dagen op de tab, mét een melding boven de tabel
+over wat je nu ziet. Knijpen zonder het te zeggen zou rijen opleveren die over een ander bereik
+gaan dan het filter beweert.
+
+**Twee dingen over de omgeving die tijd kostten:** een `SET work_mem`/`SET enable_...` op een
+GEPOOLDE connectie lekt naar de volgende gebruiker van die connectie (`SET LOCAL` in een
+transactie, of niet doen), en de bothits-tabellen staan in de shared Postgres
+(`n8n-vector-db`, schema `pa`) en niet in Redshift — het `pa.`-prefix suggereert het tweede.
+
 ## Een laadstaat die je niet ziet is niet hetzelfde als een laadstaat die niet werkt (2026-08-25, Bot Hits)
 
 Periodepresets (7d/14d/30d/90d) uit SEO Stats naar Bot Hits, plus de vraag "klikken moet direct

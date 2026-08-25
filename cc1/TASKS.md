@@ -22,19 +22,24 @@ Gedaan (commits `98e94ad`, `5b41e51`):
       inline "Bezig met laden…" in de filterkaart.
 - [x] `.btn-preset` de `min-width: 3rem` die het blueprint voorschrijft.
 
-Open, alle drie een beslissing van Joep en geen bug:
+Die drie open punten zijn diezelfde dag afgehandeld (`51afaef`, `13beeb8`, `3ebb8ea`) — twee
+ervan anders dan hier eerst stond:
 
-- [ ] **`/top-urls` doet 17,4s over 90 dagen met limiet 500** (gemeten 2026-08-25). Dat is de
-      langzaamste kant van de tool en de reden dat de URL's-tab een zichtbare laadstaat nodig had.
-      Optimaliseren (index, kleinere default-limiet, of de twee bronnen apart pagineren) is nog geen
-      taak — eerst de vraag of die combinatie in de praktijk wordt gebruikt.
-- [ ] **De filterrij wrapt onder een venster van 1200px**: URL-type valt dan op een tweede regel,
-      omdat Bootstraps container daar van 1140 naar 960px springt en er ~55px te weinig is. Met één
-      kolom minder paste het nog wel. Fix zou `col-md-12 col-xl-10` op de paginawrapper zijn, maar
-      dat maakt de héle pagina breder op middenformaten.
-- [ ] **`seo-stats.html` mist `min-width: 3rem` op `.btn-preset`** — dezelfde soort latente
-      inconsistentie als de `toISOString()` die het blueprint daar al noemt. Nu onzichtbaar omdat
-      "7d" het enige korte label is.
+- [x] **`/top-urls`**: eerst gemeten in plaats van geoptimaliseerd. Niet de limiet is het probleem
+      (250 en 500 zijn even snel) maar het bereik: 30 dagen 4,4s, 90 dagen 10,0s, 192 dagen 89,8s.
+      `work_mem` verhogen doet vrijwel niets, de sprong naar 90s is een planner-flip, en de
+      `count(DISTINCT)` weghalen levert voor de gebruikte bereiken niets op — cijfers en `EXPLAIN`
+      in LEARNINGS (zelfde datum). Daarom een grens: de tab kijkt max 90 dagen terug en meldt dat
+      boven de tabel. **Een rollup-tabel blijft de enige weg naar sub-seconde en is bewust geen
+      taak**: die maakt het bekende been niet-uitputtend, en dat is de eigenschap waarop deze tab
+      betrouwbaar is. Pas oppakken als je die lijst structureel over lange reeksen wil lezen.
+- [x] **De wrappende filterrij**: opgelost met `order-md-last order-xl-0` op de Snelkeuze-kolom,
+      dus de kleinste kolom zakt in plaats van de checkboxlijst. **Het voorstel dat hier eerst
+      stond (`col-md-12 col-xl-10` op de wrapper) was fout en moet niemand meer oppakken**: dat is
+      exact de eigen-paginabreedte die op 2026-08-14 is opgeheven, waarbij Bot Hits één van de vijf
+      omgezette pagina's was. Zie UI_BLUEPRINT, "Fixed width wrapper — ÉÉN breedte".
+- [x] **`seo-stats.html`** heeft nu ook `min-width: 3rem` op `.btn-preset`; daarmee is er geen
+      pagina meer zonder.
 
 ### 2026-08-24 — Audit Auto-Redirects: fase 0-3 (V61)
 
