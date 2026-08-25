@@ -1,6 +1,95 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Vraaguitval of rankingverlies: de GSC-toets, en drie manieren waarop het venster je voorliegt (2026-08-25, SEO-analyse)
+
+Gevraagd naar "de SEO-performance van gisteren tegen de week ervoor". Dag-op-dag (ma 24-08 vs ma
+17-08) gaf −10,3% bezoeken. Week-op-week (18-24 vs 11-17 aug) gaf **+2,6%**, en +10,1% omzet. Beide
+kloppen; alleen de tweede beschrijft iets.
+
+**Eén dag tegen één dag is geen basislijn, ook niet als het dezelfde weekdag is.** 17-08 was met
+66.904 bezoeken de hoogste dag van de hele reeks. Erger dan de verkeerde headline was wat er
+daarna op voortbouwde: op die ene maandagvergelijking markeerde ik zes categorieën als "brede
+staart met iets structureels". Tegen volledige weken hielden er **twee** van stand. Drogisterij
+(−18,9% → −4,2%) en Speelgoed (−22,6% → −2,7%) bewegen gewoon mee met hun impressies; Kleding en
+Eten & drinken groeien zelfs. Ze stonden alleen laag omdat 03-08 én 17-08 toevallig sterke
+maandagen waren. Volgorde die dit voorkomt: eerst een volledig weekvenster, pas dan per categorie
+kijken.
+
+**De toets zelf: leg de bezoeken naast GSC-impressies.** Dalen de impressies even hard als de
+bezoeken, dan is de vraag weg en valt er niets te repareren. Blijven de impressies staan terwijl
+de bezoeken zakken, dan zit het verlies in positie of CTR en is het wél van ons.
+
+| Maincat | Bezoeken NL | Impressies | Positie | Oordeel |
+|---|---|---|---|---|
+| Tuinartikelen | −26,3% | −26,8% | 5,62 → 6,21 | vraag weg |
+| Sport & outdoor | −26,6% | −28,1% | 5,67 → 6,65 | vraag weg |
+| Auto's | −8,8% | −6,9% | 6,20 → 6,77 | rankingverlies |
+| Fietsen | −9,4% | **+1,2%** | 5,96 → 5,97 | CTR-erosie |
+| Klussen | +4,4% | +4,4% | 6,29 → 6,07 | gezond |
+
+De methode valideert zichzelf: over alle R-urls dalen de bezoeken 3,4% en de GSC-clicks 5,6% —
+die horen in de pas te lopen. Doen ze dat niet, dan klopt je scope niet.
+
+**Twee scope-vallen bij `bt.search_console`.** Hij bevat **alleen beslist.nl**, terwijl de
+bezoekcijfers all-domain zijn (NL + BE). Zonder `country_code='NL'` op de bezoekkant vergelijk je
+appels met peren en gaan de deltas ~3pp uit elkaar. En hij loopt ~2 dagen achter op een manier die
+je niet ziet aan het rijaantal: op 23 en 24 augustus stonden er ~700k rijen (normaal) maar 1,4-1,8
+mln impressies tegen ~3,2 mln normaal. Een verse dag ziet er dus compleet uit en is het niet —
+tel impressies, niet rijen. Posities blijven impressie-gewogen, zie
+`seo_weighted_avg_position_method`.
+
+**De longtail heeft geen top-10.** Vervolgvraag was welke individuele R-urls het verlies dragen.
+Week-op-week staan R-urls **netto stil**: 210.127 → 209.798 bezoeken over **218.109 unieke urls**.
+De bruto daling is −133.562 en wordt vrijwel volledig gecompenseerd door een even grote bruto
+stijging. De tien grootste dalers zijn samen −359 bezoeken = **0,3%** van die bruto daling, en de
+grootste individuele daler verliest 59 bezoeken. Over drie weken verandert dat niet (0,3%, grootste
+daler −69).
+
+Dus: bruto daling zonder de bruto stijging ernaast is een betekenisloos getal, en op url-niveau
+sturen is hier per definitie ruis najagen. Wat wél draagt zijn clusters. Op `dv.r_terms`-niveau
+kwam er één uit dat geen enkele categorie-doorsnede liet zien: winkel- en folderzoektermen,
+26.578 → 22.908 (−13,8%) tegen −8,3% voor de rest, bij 11,5% van het volume en 17,8% van de netto
+daling. Met het voorbehoud dat het geen zelfstandig fenomeen is — Gamma/Praxis/Karwei/Intratuin is
+de tuincentrumhoek en binnen Action zitten `action_parasol` en `opblaasbaar_zwembad_action`, dus
+het is deels dezelfde zomer-uitdoving in andere formulering. Dat IKEA, Zeeman en Xenos vlak tot
+positief staan, ondersteunt die lezing.
+
+**Eigen scriptfout die het bijna verborg**: een `if r['v0'] < 100: continue` op de basisperiode
+filtert rijen weg die alleen in de vergelijkingsperiode bestaan. Ik zag daardoor eerst een −71%
+die nergens op sloeg. Reconcilieer een split altijd tegen het ongegroepeerde totaal — dat is wat
+het defect hieronder aan het licht bracht.
+
+
+## Twee stille datadefecten: bots door `is_real_visit`, en `dim_visit.domain` zes dagen NULL (2026-08-25)
+
+Beide gevonden tijdens de SEO-analyse hierboven, beide falen zonder foutmelding.
+
+**`is_real_visit=1` houdt gedistribueerd scraperverkeer niet tegen.** `marketing_channel = 'Overig
+Kanaal'` sprong van 12.092 naar 85.091 bezoeken per dag (+604%), volledig in `aff0 / ch3` ("Overig
+direct verkeer onbekend", 10.546 → 83.505). Signatuur, en meteen de manier om het te detecteren:
+
+- **unieke IP's naast bezoeken leggen** — 10.630 → 66.654, dus ~1 bezoek per IP;
+- roterende desktop-Chrome-UA's met willekeurige versies (Chrome/131, /133, /116, elk ~7.800);
+- landenspreiding met vrijwel nul clicks (VS 11.609 bezoeken / 2 clicks, BR 6.948 / 0, HK 4.848 / 6);
+- gericht op **C-urls** (4.297 → 55.804) en **PLP's** (2.806 → 21.413).
+
+Aanvang za 22-08 (33.301), vol vanaf zo 23-08. Het echte verkeer eronder is vlak: NL+BE 7.630 →
+8.666 bezoeken, outclicks 4.120 → 3.979. SEO/DMA organic/GSAAS zijn niet geraakt. Gevolg: elke
+rapportage op totaalbezoeken of op Overig Kanaal is sinds 22-08 vervuild, en de CTR van dat kanaal
+is puur door de noemer ingestort (0,377 → 0,052 oc/visit).
+
+**`dim_visit.domain` is 100% NULL van 18 t/m 23 augustus**, en op 24-08 weer gevuld. Precies de
+dagen die je nodig hebt om de afgelopen week te beoordelen. Een `WHERE dv.domain = 1` faalt daar
+niet, hij geeft stilzwijgend minder rijen — mijn NL/BE-split kwam op −71% uit tot het totaal niet
+meer reconcilieerde met de ongegroepeerde som. `country_code` is de hele periode 0% NULL en is
+voorlopig de betrouwbare splitsing. Let op dat de twee niet hetzelfde meten: `domain` is de site
+(1 = beslist.nl, 2 = beslist.be), `country_code` is de bezoeker.
+
+Kanaalnaam voor de volledigheid, want hij is niet te raden: het kanaal heet
+**`Overig Kanaal`**, niet `Overig`. Naast `Onbekend Kanaal` (aff −1). Volledige lijst staat in
+`chan_deriv.ref_channel_derivation_stats`.
+
 ## Een query van 90 seconden waarin `work_mem` niets doet: drie verdachten, en de dader is de scan (2026-08-25, Bot Hits)
 
 `/top-urls` kon 90s duren. Uitgeprofileerd op de live database om te weten of dit een query is

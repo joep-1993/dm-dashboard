@@ -4,6 +4,49 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-25 — SEO-diagnose 24 augustus: dagbeeld, kanaal Overig, R-url-daling
+
+Analyse, geen code. Rapport als artifact:
+`https://claude.ai/code/artifact/85b61137-d687-4778-bab2-9f0f53429f6d`. Methode en cijfers in
+LEARNINGS (zelfde datum), twee entries.
+
+Gedaan:
+
+- [x] SEO dag ma 24-08 vs ma 17-08 (−10,3% bezoeken) én week 18-24 vs 11-17 (+2,6% bezoeken,
+      +10,1% omzet, OPB +7,3%). De dagvergelijking is misleidend: 17-08 was de hoogste dag van de
+      reeks.
+- [x] Kanaal **Overig Kanaal** uitgeplozen: +604% op de dag is scraperverkeer, geen groei. Echt
+      NL+BE-verkeer eronder is vlak.
+- [x] R-url-daling per categorie (−22,0% over vier maandagen) toegeschreven aan zomer-uitdoving:
+      Ventilatoren −93,7%, Parasols −79,8%, Opblaaszwembaden −91,5%. Meubels bleek tuinmeubels.
+- [x] GSC-toets om vraaguitval van rankingverlies te scheiden, op volledige weken en in
+      NL-scope. Van de zes verdachte categorieën blijven er twee over.
+- [x] Longtail-vraag beantwoord: er ís geen top-10 (0,3% van de bruto daling over 218.109 urls).
+      Wel één cluster: winkel-/folderzoektermen −13,8%.
+
+Open, in volgorde van urgentie:
+
+- [ ] **Scraper afvangen.** Signatuur staat in LEARNINGS. Zolang dit meetelt in `is_real_visit=1`
+      ligt er een vervuilingslaag over elke totaalrapportage — en over kanaal Overig helemaal.
+      Vraag bij data/infra of dit een WAF-regel wordt of een correctie op de vlag.
+- [ ] **Uitzoeken of `dim_visit.domain` wordt bijgeladen voor 18 t/m 23 augustus.** Zo niet, dan
+      moeten de NL/BE-splitsingen in de dashboards over naar `country_code`. Controleer meteen
+      welke tools op `domain` filteren — SEO stats doet het niet, maar dat is niet gecheckt voor
+      de rest.
+- [ ] **Auto's op queryniveau uitpluizen.** Enige categorie met aantoonbaar positieverlies
+      (gewogen 6,20 → 6,77, clicks −15,4% bij impressies −6,9%). Welke termen, en aan wie.
+- [ ] **Fietsen-SERP's met de hand bekijken.** Impressies +1,2%, positie stil op 5,96 → 5,97, en
+      tóch −9,4% bezoeken en CTR 1,11 → 1,04. Vraag noch ranking verklaart het; verdenking ligt bij
+      een AI-overview of een uitgebreider shopping-blok. Alleen te zien door te kijken.
+- [ ] **Drie R-urls die naar exact nul vielen nakijken**: `beslist.be/.../r/toolstation/`,
+      `/r/verduisterend/` (Sport & outdoor) en `/r/lasbril/c/t_lasbescherming~7204157`. Van 26-41
+      bezoeken naar 0 is zelden vraaguitval — eerder uit de index, een redirect, of geen producten.
+      Klein, maar het enige uit de longtail met een concrete oorzaak.
+
+Bewust **geen** taak: jagen op individuele R-urls. De longtail is 218.109 urls diep en de bruto
+daling wordt week-op-week vrijwel volledig gecompenseerd door een even grote bruto stijging.
+Alleen clusters dragen genoeg volume.
+
 ### 2026-08-25 — Bot Hits: periodepresets in het Filters-blok + een echte laadstaat
 
 Gedaan (commits `98e94ad`, `5b41e51`):
