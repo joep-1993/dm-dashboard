@@ -147,13 +147,19 @@ kapot was, maar omdat de backend uit zijn cache antwoordt. Gemeten op deze tool:
 | `/daily` + `/summary`, gecachte range | 11-50ms |
 | `/summary`, 90 dagen, `force=true` | 534ms |
 | `/daily`, volledige historie (192 dagen), `force=true` | 265ms |
-| **`/top-urls`, 90 dagen, limiet 500** | **17,4 s** |
+| **`/top-urls`, 90 dagen** | **10,0 s** |
+
+> Hier stond eerst **17,4s** voor "90 dagen, limiet 500". Dat getal was contention: ik had er
+> op datzelfde moment andere curls tegenaan lopen. De schone meting staat in de entry hieronder
+> ("Een query van 90 seconden waarin `work_mem` niets doet") — 90 dagen doet 10,0s en de limiet
+> doet niets (250 en 500 zijn gelijk). De conclusie verandert er niet door, de orde van grootte
+> ook niet, maar een getal in dit bestand wordt later geloofd, dus dat hoort te kloppen.
 
 Dus: op het Overzicht flitst hij en zie je vooral de knop oplichten, en op de URL's-tab is hij
 seconden lang het enige wat er staat. Dat maakte ook de ontwerpkeuze: geen kunstmatige
 minimum-weergavetijd (dat is latency toevoegen om een animatie te kunnen tonen), maar wel een
-inline "Bezig met laden…" naast de shimmer, want zeventien seconden shimmerende tabel zonder
-tweede signaal leest als vastgelopen.
+inline "Bezig met laden…" naast de shimmer, want tien seconden shimmerende tabel zonder tweede
+signaal leest als vastgelopen. (Die tab is inmiddels op 90 dagen begrensd, zie `51afaef`.)
 
 **Klikgedrag testen zonder CDP: een same-origin iframe.** Remote debugging is hier geblokkeerd, dus
 "klik op de knop en kijk wat er gebeurt" kan niet met Playwright of een CDP-script. Wat wél werkt:
