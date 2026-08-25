@@ -1,6 +1,51 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Drie assen in één PLP-URL, drie verschillende antwoorden (2026-08-25, SEO-analyse)
+
+Vraag: beslist.nl 301't een oude `/p/`-slug naar de canonieke, bol.com lost hetzelfde op met een
+canonical tag — wat is SEO-technisch beter? Het antwoord is de 301, en dat is wat we doen. Maar de
+metingen die dat moesten onderbouwen legden iets anders bloot: de slug is maar één van de drie
+variabele delen in `/p/{slug}/{maincat}/{ean}/`, en elk deel volgt een **ander** regime.
+
+| As | Testinput | Wat er gebeurt |
+|---|---|---|
+| slug | `/p/loungeset_test123/10/4250525361728/` | **301**, 1 hop, 114 bytes, `Hit from cloudfront` |
+| slug (kort) | `/p/x/10/4250525361728/` | 301, idem |
+| maincat | `/p/…/11/4250525361728/` | **200** + `noindex,follow` + self-canonical naar de fóute URL |
+| trailing slash | `/p/…/10/4250525361728` (zonder) | **200** + `index,follow` + self-canonical zonder slash |
+| onbekend id | `/p/…/10/9999999999999/` | 404 |
+| `?utm_source=` | op de canonieke URL | 200, canonical stript de param correct |
+
+De trailing-slash-as is de enige waar echt iets lekt: twee URLs, beide `index,follow`, beide met
+een self-referencing canonical naar zichzelf, identieke content. Dat is een duplicaat dat geen
+enkel signaal krijgt om zich te consolideren. De maincat-as doet feitelijk al bol's aanpak (met
+`noindex` erbovenop) terwijl de slug ernaast 301't — inconsistent, en het rendert een volledige PLP
+voor een URL die niemand nodig heeft.
+
+**De 301 stript de query string.** `?utm_source=test&gclid=ABC123` op een niet-canonieke slug komt
+niet terug in de `Location`. SEO-neutraal, maar het is een attributiegat: een Ads final URL of
+affiliate-link die een verouderde slug bevat verliest z'n `gclid`, dus die conversie wordt niet
+toegerekend. Dit is het enige punt uit de sessie met directe omzetimpact.
+
+**Waarom 301 hier beter is dan een canonical, kort:** een 301 is een directive, een canonical een
+hint die Google mag negeren. En met 200+canonical is de URL-ruimte oneindig — élke willekeurige
+slug wordt dan een crawlbare 200 die volledig gerenderd moet worden, tegen 114 bytes vanaf de
+CloudFront-edge nu. Google's eigen lijn: canonical gebruik je wanneer de duplicaat toegankelijk
+móet blijven. Bij een slugwijziging is dat niet zo. Twee dingen staan al goed: `max-age=86400` op
+de 301 (geen eeuwige browsercache van een permanent redirect, de klassieke valkuil) en de canonical
+die utm-params wegstript.
+
+**Meetgotcha: `curl -I` geeft 403, ook met de whitelisted UA.** De WAF blokkeert HEAD; `curl -sSI`
+gaf op élke variant `HTTP/2 403 · Error from cloudfront` en dus bijna de conclusie dat alles stuk
+was. Met GET werkt het wel. Gebruik dus `curl -sS -A 'Beslist script voor SEO' -o /dev/null -D -`
+om headers te lezen, of `-L -w '%{num_redirects} hops -> %{http_code} %{url_effective}'` voor
+hop-counts. Aanvulling op `live_page_fetch_whitelisted_ua`.
+
+Randvoorwaarde die bij een 301-strategie in de praktijk meestal sneuvelt: sitemap, interne links en
+feeds moeten áltijd de actuele slug emitteren, anders is elke sitemap-URL een redirect ("Pagina met
+redirect" in GSC) en verbrand je crawlbudget. Niet gecontroleerd deze sessie.
+
 ## Vraaguitval of rankingverlies: de GSC-toets, en drie manieren waarop het venster je voorliegt (2026-08-25, SEO-analyse)
 
 Gevraagd naar "de SEO-performance van gisteren tegen de week ervoor". Dag-op-dag (ma 24-08 vs ma

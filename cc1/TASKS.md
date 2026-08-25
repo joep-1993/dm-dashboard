@@ -4,6 +4,36 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-25 — PLP-slug: 301 vs canonical, en twee duplicaat-assen die niet meedoen
+
+Analyse, geen code in dit repo. Metingen en onderbouwing in LEARNINGS (zelfde datum). Vergelijkings-
+tabel als xlsx: `Downloads\claude\301_vs_canonical_slug_PLP.xlsx`.
+
+Gedaan:
+
+- [x] 301-vs-canonical afgewogen voor slugwijzigingen op `/p/`. **Conclusie: 301 houden**, bol's
+      canonical-aanpak niet overnemen (directive vs hint, en 200+canonical maakt de URL-ruimte
+      oneindig).
+- [x] Live gemeten met curl over vijf URL-varianten: slug, korte slug, maincat, trailing slash,
+      onbekend id. Onze 301 is 1 hop, 114 bytes, edge-cached met `max-age=86400`.
+- [x] Drie afwijkingen gevonden die niets met de oorspronkelijke vraag te maken hadden (zie open).
+
+Open, aan te kaarten bij dev/IT — geen van deze zit in dit repo:
+
+- [ ] **Query string meegeven in de 301.** `?utm_source=…&gclid=…` wordt nu gestript bij een
+      niet-canonieke slug → gclid weg → conversie niet toegerekend. Enige punt met directe
+      omzetimpact; hoogste prioriteit van de drie.
+- [ ] **Trailing slash canonicaliseren op `/p/`.** Met én zonder slash geeft nu 200 +
+      `index,follow` + een self-canonical naar zichzelf. Echte duplicaat. 301 naar de
+      slash-variant, conform onze eigen canonicalisatieregel.
+- [ ] **Maincat-as gelijktrekken met de slug-as.** `/11/` i.p.v. `/10/` geeft 200 +
+      `noindex,follow` + self-canonical naar de foute URL. Zou een 301 naar de juiste maincat
+      moeten zijn.
+- [ ] **Controleren of sitemap, interne links en feeds de actuele slug emitteren.** Niet gecheckt.
+      Zo niet, dan is elke sitemap-URL een redirect en lekt er crawlbudget weg.
+- [ ] **IndexNow-push bij een slugwijziging.** Nagaan of de nieuwe canonieke slug gepusht wordt;
+      zonder die push blijft Google de oude nog weken als indexed-met-redirect houden.
+
 ### 2026-08-25 — SEO-diagnose 24 augustus: dagbeeld, kanaal Overig, R-url-daling
 
 Analyse, geen code. Rapport als artifact:
