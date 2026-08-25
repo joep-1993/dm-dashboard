@@ -4,6 +4,38 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-25 — Bot Hits: periodepresets in het Filters-blok + een echte laadstaat
+
+Gedaan (commits `98e94ad`, `5b41e51`):
+
+- [x] Presetgroep 7d/14d/30d/90d (`btn-group btn-group-sm`), eerst onder het datumvak, daarna op
+      verzoek als eigen kolom "Snelkeuze" tussen Periode en Domein — Periode van `col-md-3` naar
+      `col-md-auto` om de rij te laten passen, Toepassen van `mt-3` naar `mt-4` omdat URL-type nu
+      verder naar rechts eindigt.
+- [x] Anker op `coverage.last_day` i.p.v. gisteren, start geknipt op `first_day`; `boot()` gebruikt
+      nu dezelfde helper en niet meer zijn eigen (tijdzone-mengende) rekenwerk.
+- [x] Klik filtert direct (deed het al) + generation-token, zodat vier klikken achter elkaar geen
+      race meer zijn.
+- [x] Actieve preset blijft opgelicht, gestuurd door de datumvelden; handmatig bereik = niets actief.
+- [x] Laadstaat volgens UI_BLUEPRINT: shimmer over de drie Overzicht-grafieken, skeletonrijen in de
+      bot-familietabel, de "laden…"-tekstrij van de URL's-tab ook een skeleton, plus de canonieke
+      inline "Bezig met laden…" in de filterkaart.
+- [x] `.btn-preset` de `min-width: 3rem` die het blueprint voorschrijft.
+
+Open, alle drie een beslissing van Joep en geen bug:
+
+- [ ] **`/top-urls` doet 17,4s over 90 dagen met limiet 500** (gemeten 2026-08-25). Dat is de
+      langzaamste kant van de tool en de reden dat de URL's-tab een zichtbare laadstaat nodig had.
+      Optimaliseren (index, kleinere default-limiet, of de twee bronnen apart pagineren) is nog geen
+      taak — eerst de vraag of die combinatie in de praktijk wordt gebruikt.
+- [ ] **De filterrij wrapt onder een venster van 1200px**: URL-type valt dan op een tweede regel,
+      omdat Bootstraps container daar van 1140 naar 960px springt en er ~55px te weinig is. Met één
+      kolom minder paste het nog wel. Fix zou `col-md-12 col-xl-10` op de paginawrapper zijn, maar
+      dat maakt de héle pagina breder op middenformaten.
+- [ ] **`seo-stats.html` mist `min-width: 3rem` op `.btn-preset`** — dezelfde soort latente
+      inconsistentie als de `toISOString()` die het blueprint daar al noemt. Nu onzichtbaar omdat
+      "7d" het enige korte label is.
+
 ### 2026-08-24 — Audit Auto-Redirects: fase 0-3 (V61)
 
 Vijf parallelle reviews over `rurl_optimizer_v2` + de service, daarna zelf geverifieerd. Volledige

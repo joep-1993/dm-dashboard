@@ -1328,7 +1328,40 @@ carries through automatically:
   and "All" sit in ~39px cells between ~47px ones — each label is dead-centre in
   its own cell, but the cells differ, and that is what reads as "All isn't
   centred" (Joep, 2026-08-06). An "All" preset uses a FIXED start date, not an
-  open-ended range: the API wants both bounds.
+  open-ended range: the API wants both bounds. `seo-stats.html` zet alleen de
+  padding en mist de `min-width` — latent, want daar is "7d" het enige korte label.
+- **Staat de groep náást het datumvak, dan is het één flexrij en volstaat de
+  `btn-group`. Staat hij als EIGEN kolom met een label erboven, dan moet er
+  `d-flex` bij** (Bot Hits, 2026-08-25). `.btn-group` is `inline-flex` en
+  `.form-label` is `inline-block`, dus zonder dat staan het label en de knoppen
+  naast elkaar op één regel en hangt de groep een halve regel boven het datumvak
+  ernaast. In een `col-md-auto` rekt de groep daar niet van uit: de kolom is
+  shrink-to-fit, dus hij houdt zijn max-content-breedte. Een eigen kolom vraagt ook
+  een eigen label ("Snelkeuze"), niet omdat de knoppen uitleg nodig hebben maar
+  omdat de rij op `align-items-start` staat en de labelregel de uitlijning bepaalt.
+- **Ankeren op de laatste dag met DATA, niet op de kalender, als de tool
+  achterloopt** (Bot Hits, 2026-08-25). Dit is dezelfde regel als "today − 3"
+  hierboven — een preset mag geen dagen bevatten die er niet zijn — alleen komt de
+  grens hier uit de API (`/meta.coverage.last_day`) in plaats van uit een vaste
+  marge, want de CloudFront-ingest loopt een wisselend aantal dagen achter. De
+  startdatum knipt op `coverage.first_day`, zodat 90d bij een korte historie geen
+  bereik zet waar per definitie niets in zit. Reken die datums in UTC (`Date.UTC` +
+  `getUTC*` + `toISOString`) of volledig in lokale delen, maar meng het niet: zie
+  de `ymd()`-regel hierboven.
+- **De ingedrukte preset licht op en blijft opgelicht** (Joep, 2026-08-25). Kleur en
+  gewicht van `.btn-preset.active` staan al in `style.css`; wat een pagina zelf doet
+  is bepalen WELKE aan staat. Drie dingen die daarbij vastliggen:
+  1. **Zet hem vanuit de plek waar de datums samenkomen** (de load/refresh), niet
+     vanuit de klikhandler. Dan volgt de markering de DATUMVELDEN, dus een handmatig
+     getypt bereik zet hem net zo goed uit — een knop die oplicht terwijl de velden
+     iets anders zeggen, is dezelfde "ziet er actueel uit en is het niet"-fout die de
+     laadstaten hierboven vermijden.
+  2. **Vergelijk via de berekende startdatum, niet via een dagentelling.** Een preset
+     die op `first_day` is geknipt is geen 90 dagen meer, terwijl het wél de knop is
+     die je indrukte.
+  3. **Bij gelijke uitkomst licht alleen de kleinste op.** Met 20 dagen historie geven
+     30d en 90d dezelfde startdatum; twee opgelichte knoppen zouden suggereren dat het
+     bereik twee dingen tegelijk is. `aria-pressed` gaat mee met de klasse.
 - **Checkboxes / radios**: `<input class="form-check-input" type="checkbox|radio">`
   in a `.form-check` with a `.form-check-label`. Keep the default Bootstrap accent —
   don't recolour. (Canonicals' bulk-select adds a `canon-select` class alongside
@@ -1539,6 +1572,15 @@ Two rules that are easy to get wrong:
 The markup has drifted (11 variants across the pages); the canonical form is
 `<span class="spinner-border spinner-border-sm d-none" role="status"></span>`
 toggled via `.d-none`, next to the button or label it belongs to.
+
+**Kunnen er twee fetches tegelijk aan die hint hangen, gebruik dan een vlag per
+bron en geen teller** (Bot Hits, 2026-08-25: het Overzicht en, met die tab open, de
+URL's). Een teller lijkt netter tot je hem combineert met een generation-token: een
+verlopen load keert vroegtijdig terug, mist zijn aftrek, en dan draait het wieltje
+voor altijd. Vlaggen zijn idempotent, dus dat kan niet — `BUSY[key] = on` en de hint
+staat aan zolang er één true is. Dat de hint in de FILTERKAART hangt en niet bij de
+tabel is met opzet: die kaart staat boven de tabstrip en is dus zichtbaar welke tab
+er ook open staat.
 
 ## Footer
 

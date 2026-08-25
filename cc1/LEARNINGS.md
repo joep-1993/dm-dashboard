@@ -1,6 +1,65 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een laadstaat die je niet ziet is niet hetzelfde als een laadstaat die niet werkt (2026-08-25, Bot Hits)
+
+Periodepresets (7d/14d/30d/90d) uit SEO Stats naar Bot Hits, plus de vraag "klikken moet direct
+filteren" en "graag een duidelijke loader". Het eerste deed het al; de rest leverde vier dingen op
+die breder gelden dan deze pagina.
+
+**Meet de responstijd vóórdat je aan een loader gaat sleutelen.** De laadstaat werkte meteen goed,
+maar was in de test niet te zien: 20ms na de klik stond alles al getekend. Niet omdat de shimmer
+kapot was, maar omdat de backend uit zijn cache antwoordt. Gemeten op deze tool:
+
+| Pad | Tijd |
+|---|---|
+| `/daily` + `/summary`, gecachte range | 11-50ms |
+| `/summary`, 90 dagen, `force=true` | 534ms |
+| `/daily`, volledige historie (192 dagen), `force=true` | 265ms |
+| **`/top-urls`, 90 dagen, limiet 500** | **17,4 s** |
+
+Dus: op het Overzicht flitst hij en zie je vooral de knop oplichten, en op de URL's-tab is hij
+seconden lang het enige wat er staat. Dat maakte ook de ontwerpkeuze: geen kunstmatige
+minimum-weergavetijd (dat is latency toevoegen om een animatie te kunnen tonen), maar wel een
+inline "Bezig met laden…" naast de shimmer, want zeventien seconden shimmerende tabel zonder
+tweede signaal leest als vastgelopen.
+
+**Klikgedrag testen zonder CDP: een same-origin iframe.** Remote debugging is hier geblokkeerd, dus
+"klik op de knop en kijk wat er gebeurt" kan niet met Playwright of een CDP-script. Wat wél werkt:
+een tijdelijk `_probe_x.html` in `frontend/`, de echte pagina in een `<iframe>` (zelfde origin, dus
+volledige DOM-toegang), en dan `btn.click()`, `getComputedStyle`, klassen uitlezen en
+`performance.getEntriesByType('resource')` tellen — resultaten in een `<pre>` en die met
+`chrome.exe --headless --screenshot` lezen. Twee dingen om te weten:
+
+- **Meet in dezelfde tick als de klik.** Een `await sleep(20)` erna is al te laat op een gecacht
+  antwoord, en dan lijkt een werkende laadstaat afwezig.
+- **`function foo(){}` op scriptniveau staat op `window`, `let`/`const` niet.** Vandaar dat de probe
+  `w.refresh()` en `w.setOverviewBusy(true)` kan aanroepen (handig om de laadstaat vast te zetten
+  voor een screenshot), maar `w.META` en `w.CHARTS` `undefined` zijn.
+
+Wat het opleverde: klik zet de range in dezelfde tick en vuurt meteen de tweede `/daily` af;
+`chartsLoading=111 skelRows=6` in die tick; de actieve markering gaat 30d → 7d → niets bij een
+handmatig bereik → 30d; vier presets in één tick eindigt op de laatste zonder hangende laadstaat.
+
+**Een teller die met een generation-token samenwerkt, lekt.** De busy-hint hing eerst aan een
+teller (`busyCount++/--`). Met een stale-guard erbij keert een verlopen load vroegtijdig terug —
+precies zoals het hoort, want de nieuwere load bezit de laadstaat — en mist dan zijn aftrek. Eén
+gemiste aftrek en het wieltje draait voor altijd. Twee vlaggen (`BUSY.overview`, `BUSY.urls`) zijn
+idempotent en kunnen dat niet.
+
+**Een dag verschuiven doe je door twee tijdzones te mengen, niet door één fout te kiezen.**
+`boot()` rekende zijn 30-dagenbereik uit met `new Date(iso)` (UTC-middernacht) plus lokale
+`setDate/getDate`, en formatteerde met `toISOString()`. Elke stap los is verdedigbaar; samen kan het
+in een CEST-browser een dag terugvallen. In dit bestand stond de waarschuwing er al bij
+`syncPartialWarn()` — en tien regels hoger deed de code het alsnog. Nu één helper (`shiftDays`) die
+alles in UTC doet, gebruikt door zowel de presets als de boot.
+
+**`.btn-group` is `inline-flex` en `.form-label` is `inline-block`.** Een knopgroep als eigen
+gridkolom mét label erboven landt daardoor náást dat label op één regel, een halve regel boven het
+datumvak ernaast. `d-flex` erop en het staat goed. Kostte één render om te zien en is niet uit de
+markup af te leiden — de klasse die je nodig hebt, staat in Bootstraps display-utilities en niet in
+de component.
+
 ## Eén uitzondering, twee condities: de prune die twee keer verkeerd stond (2026-08-24, V61)
 
 Sluitstuk van de Auto-Redirects-audit: van de 1.343 facet-fragmenten in `rurl_processed` die niet
