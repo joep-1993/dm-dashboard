@@ -4,6 +4,31 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-25 — isSeoFacet: waar de vlag leeft, en een checklist voor IT
+
+Analyse, geen code in dit repo. Vervolg op 2026-08-19. Volledige uitwerking:
+**`cc1/SEO_FACETLINKS_DEPENDENT_FACETS.md` §8**; kortere versie in LEARNINGS (zelfde datum).
+
+- [x] **Bronvraag beantwoord**: categorie×facet-`seoPriority` leeft *uitsluitend* in
+      `CategoryFacetSettings` (Taxonomy v2), één rij per (`categoryId`, `facetId`).
+      `GET /api/CategoryFacets` heeft het veld ook maar geeft **altijd `null`** — geverifieerd op
+      3039. Facet-globaal (`GET /api/Facets/{id}`) bestaat het niet. Dus twee niveaus, geen drie.
+- [x] **"`tbl_CS_Cat_Column_Order` is verouderd" getoetst**: wordt nog wél geschreven — `Order`-service
+      draaide 2026-08-25 10:33 UTC (run `a0ef1552`, maincat 29000, `Completed`, 63 skipped), slots-tabel
+      bijgewerkt 2026-08-24 22:18. Of hij nog *gelezen* wordt is precies vraag 1 aan IT; luidt het
+      antwoord nee, dan wijst dat hárder naar de ontbrekende `CategoryFacets`-rij.
+- [x] **Correctie op 2026-08-19**: "de spiegel is exact" gold alleen voor de `seo_prio`-kolom. De
+      drie lagen verschillen in lidmaatschap (12 / 10 / 10 rijen voor 9000239) en in `order_number`,
+      terwijl de back-sync "0 changes" meldt.
+- [x] **Checklist voor IT opgeleverd**: zes checkpoints van bron naar pagina met commando's en
+      verwachte uitkomst, de A/B-tabel uit één call, de vier doodgelopen hypotheses en drie
+      kandidaat-fixes. https://claude.ai/code/artifact/c977b3c0-a1ab-4284-bce3-329919b9a9c1
+- [x] Bug opnieuw geverifieerd: reproduceert nog steeds, `isSeoFacet=false` voor 3432 mét 5 values.
+- [ ] **Checklist doorsturen naar de eigenaar van ProductSearch v2 / de indexer** en antwoord op de
+      drie vragen ophalen. #priority:high
+- [ ] Optioneel als bijlage: uitdraai van *alle* categorie×facet-combinaties met `seoPriority=true`
+      (per categorie itereren — er is geen dump-call), zodat de reikwijdte een getal krijgt.
+
 ### 2026-08-25 — PLP-slug: 301 vs canonical, en twee duplicaat-assen die niet meedoen
 
 Analyse, geen code in dit repo. Metingen en onderbouwing in LEARNINGS (zelfde datum). Vergelijkings-

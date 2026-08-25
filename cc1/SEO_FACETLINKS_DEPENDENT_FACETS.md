@@ -15,6 +15,9 @@ SEO-visits; onderweg bleek waarom een deel van die values structureel geen kans 
    Modelnaam (5514, Laptops). Geen Parfumerie-dingetje.
 4. **Niet zelf te fixen**: ProductSearch v2 is read-only (17 endpoints, allemaal GET) en
    `isSeoFacet` is een afgeleide waarde. De taxonomie- en sync-kant zijn al correct.
+5. **Bron van de vlag** (nagemeten 2026-08-25): categorie×facet-seoPriority leeft *uitsluitend* in
+   `CategoryFacetSettings`. `GET /api/CategoryFacets` heeft het veld ook, maar geeft altijd `null`.
+   Zie §8 — inclusief de checklist die naar IT kan.
 
 ## 1. Wat seoPriority doet, en hoe je het meet
 
@@ -67,11 +70,13 @@ Daar staat de vlag gewoon goed:
 | ProductSearch v2 `isSeoFacet` | **false** | **false** |
 | noscript-facetlinks | geen | geen |
 
-`tbl_CS_Cat_Column_Order` spiegelt `CategoryFacetSettings` exact — `verpakking` alleen `seo_prio=1`
+`tbl_CS_Cat_Column_Order` spiegelt de **`seo_prio`-kolom** exact — `verpakking` alleen `seo_prio=1`
 in Parfums, `kenmerken` alleen in Aftershaves, `geslacht_parfum` `0` in Eau de Colognes en Body
 Mist. Kolommen: `cat_id`, `ent_id` (= facet-id), `type`, `order_number`, `seo_prio`,
 `is_plp_facet`. De `cat_id` is de taxonomie-id (29000, 9000238, …), niet de legacy id uit de
 URL-slug. `BackSync` draait meerdere keren per dag per maincat en meldt `Completed`.
+**Let op (2026-08-25): alleen de `seo_prio`-kolom spiegelt exact.** Lidmaatschap en
+`order_number` wijken af — zie §8.
 
 **Conclusie: de breuk zit in de projectie/indexering van ProductSearch v2.**
 
@@ -201,11 +206,80 @@ als "Beauty Blue Infini" → rommelmerk *"beauty"*.
 
 ## 7. Openstaand
 
+- [x] **Checklist voor IT opgeleverd** (2026-08-25): zes checkpoints van bron naar pagina, met
+      commando's, verwachte uitkomst en de drie vragen die alleen de indexer-eigenaar kan
+      beantwoorden. Artifact: https://claude.ai/code/artifact/c977b3c0-a1ab-4284-bce3-329919b9a9c1
 - [ ] Ticket bij eigenaar ProductSearch v2/indexer: `isSeoFacet=false` terwijl `seo_prio=1`
-      (bewijs: §2). Vraag welke van de drie fixes uit §3 de juiste plek is.
+      (bewijs: §2, checklist hierboven). Vraag welke van de drie fixes uit §3 de juiste plek is.
+- [ ] Optioneel als onderbouwing bij het ticket: uitdraai van *alle* categorie×facet-combinaties met
+      `seoPriority=true`, zodat er een getal onder de reikwijdte staat i.p.v. drie voorbeelden.
+      Moet per categorie itereren (§8).
 - [ ] Apart, lagere prioriteit: dependency-registratie bijwerken (§4). Bijlage-idee: volledige
       lijst niet-geregistreerde merken met collectie-waarden op hun producten.
 - [ ] Opruimen op basis van de uitdraai: de 1.011 values met 0 producten en de 16 die niet meer in
       de zoekindex bestaan kunnen op `seoPriority=false` (GET-merge-PUT, flat body — zie
       TAXONOMY_API-skill).
 - [ ] Optioneel: kolom "laatste echte visit ooit" toevoegen aan de uitdraai.
+
+## 8. Update 2026-08-25 — waar de vlag leeft, en wat "verouderd" wel en niet betekent
+
+Aanleiding: vanuit IT de opmerking dat `tbl_CS_Cat_Column_Order` verouderd is en niet meer gebruikt
+wordt. Dat raakt de redenering in §2, dus opnieuw gemeten. De bug zelf reproduceert nog steeds:
+dezelfde call geeft `isSeoFacet=false` voor 3432 mét 5 values, terwijl 3027/3039/3441/6271 op
+`true` staan.
+
+### De master is `CategoryFacetSettings`
+
+Eén rij per (`categoryId`, `facetId`) — de enige plek waar seoPriority op categorieniveau leeft.
+
+```bash
+curl -s "$TAX/api/CategoryFacetSettings?categoryId=9000239"   # hele categorie
+curl -s "$TAX/api/CategoryFacetSettings/9000239/3432"         # één combinatie
+# schrijven: PUT /api/CategoryFacetSettings (upsert, platte body) — GET-merge-PUT!
+```
+
+Vier valkuilen:
+
+1. **`GET /api/CategoryFacets` heeft óók een `seoPriority`-veld en dat is altijd `null`.**
+   Geverifieerd op 3039: settings `true`, CategoryFacets `null`, terwijl `displayOrder` daar wél
+   klopt. Het is de *link*-tabel (`id`, `categoryId`, `facetId`, `version`) met een half-gevulde
+   projectie. Nooit de vlag daaruit lezen.
+2. **`GET /api/CategoryFacetSettings` zónder `categoryId` geeft HTTP 400** — geen dump-call, per
+   categorie itereren.
+3. **Facet-globaal bestaat seoPriority niet.** `GET /api/Facets/{id}` geeft `isEnabled`,
+   `isDetail`, `isTopFacet`, `noIndexNoFollow`, `sortMode`, `seoDisplayLimit`. Dus precies twee
+   niveaus: categorie×facet en facet value. `GET /api/Facets/{id}/contexts` is leeg voor 3432/3027.
+4. **`tbl_CS_Cat_Column_Slots` gaat op `column_id` + `maincat_id`**, niet op `cat_id` (dat geeft
+   `Unknown column`). Kolommen: `column_id`, `maincat_id`, `slot_id`, `timestamp`.
+
+### "Verouderd" ≠ "niet bijgehouden"
+
+De `Order`-service draait nog: run `a0ef1552`, maincat 29000, 2026-08-25 10:33 UTC, `Completed`,
+63 rijen skipped. Hoogste `timestamp` in `tbl_CS_Cat_Column_Slots`: 2026-08-24 22:18. Of de
+indexer hem nog *leest* is de open vraag — en luidt het antwoord nee, dan blijft alleen de
+Taxonomy-route over en wijst dat harder naar de ontbrekende `CategoryFacets`-rij, niet zachter.
+
+### De drie lagen zijn het oneens (correctie op §2)
+
+Voor 9000239, gemeten 2026-08-25:
+
+| Laag | rijen | uitschieters |
+|---|---|---|
+| `CategoryFacetSettings` | 12 | — |
+| `GET /api/CategoryFacets` | 10 | 3028 en 3432 ontbreken |
+| `tbl_CS_Cat_Column_Order` | 10 | 7526/7527/7528 ontbreken, 3033 zit er alléén hier |
+
+`seo_prio` spiegelt `seoPriority` 1-op-1 (`true`→1, `null`→0), maar `order_number` niet: 3441 is 5
+in de taxonomie en 4 in MySQL, 6271 6→5, 6272 7→6, 6273 4→7, 3028 11→8 — terwijl de back-sync
+"0 changes" meldt. De formulering "spiegelt exact" uit §2 gold dus alleen voor de seo_prio-kolom.
+
+### Checklist voor IT
+
+Zes checkpoints van bron naar pagina (taxonomie → link-tabel → back-sync → slot → zoekindex →
+noscript), elk met commando en verwachte uitkomst, plus de A/B-tabel uit één API-call, de vier
+gefalsifieerde hypotheses en de drie kandidaat-fixes:
+https://claude.ai/code/artifact/c977b3c0-a1ab-4284-bce3-329919b9a9c1
+
+De drie vragen die erin staan, zijn de hele ask: (1) uit welke bron leidt de indexer `isSeoFacet`
+af, (2) is dat een inner join op `CategoryFacets` waar dependent facetten uitvallen, (3) bestaat er
+een bewuste regel "child-facetten krijgen nooit isSeoFacet"?

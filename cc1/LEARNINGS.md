@@ -1,6 +1,62 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Waar seoPriority op categorieniveau leeft, en waarom de legacy-spiegel niet "exact" is (2026-08-25, SEO-facetlinks)
+
+Vervolg op het onderzoek van 2026-08-19 (`SEO_FACETLINKS_DEPENDENT_FACETS.md`). Vraag vanuit IT:
+*"`tbl_CS_Cat_Column_Order` is verouderd en wordt niet meer gebruikt"* — waar staat de
+facet-op-categorie-vlag dan wél?
+
+**De master is `CategoryFacetSettings` in Taxonomy v2**, één rij per (`categoryId`, `facetId`).
+Dat is de enige plek waar `seoPriority` op categorieniveau leeft:
+
+```bash
+TAX=http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl
+curl -s "$TAX/api/CategoryFacetSettings?categoryId=9000239"    # alle facetten van de categorie
+curl -s "$TAX/api/CategoryFacetSettings/9000239/3432"          # één combinatie
+# schrijven: PUT /api/CategoryFacetSettings (upsert, platte body, GET-merge-PUT!)
+```
+
+Vier valkuilen bij het uitlezen, alle vier nagemeten:
+
+1. **`GET /api/CategoryFacets` heeft óók een `seoPriority`-veld, en dat is altijd `null`.**
+   Geverifieerd op facet 3039 (Doelgroep, Parfums): settings zegt `true`, CategoryFacets zegt
+   `null` — terwijl `displayOrder` daar wél correct doorkomt. Dat endpoint is de *link*-tabel
+   (`id`, `categoryId`, `facetId`, `version`) met een half-gevulde projectie. Lees de vlag daar nooit uit.
+2. **`GET /api/CategoryFacetSettings` zónder `categoryId` geeft HTTP 400.** Er is geen volledige
+   dump-call; je moet per categorie itereren.
+3. **Op facet-globaal niveau bestáát seoPriority niet.** `GET /api/Facets/{id}` geeft `isEnabled`,
+   `isDetail`, `isTopFacet`, `noIndexNoFollow`, `sortMode`, `seoDisplayLimit` — geen seoPriority.
+   Er zijn dus precies twee niveaus: **categorie×facet** en **facet value**. Geen derde.
+   `GET /api/Facets/{id}/contexts` is leeg voor 3432 en 3027.
+4. **`tbl_CS_Cat_Column_Slots` gaat op `column_id` + `maincat_id`, niet op `cat_id`.**
+   Een `WHERE cat_id=...` geeft `Unknown column 'cat_id' in 'where clause'`. Kolommen:
+   `column_id` (= facet-id), `maincat_id`, `slot_id`, `timestamp`.
+
+**"Verouderd" klopt niet in de zin van "niet meer bijgehouden".** De `Order`-service van de
+back-sync draaide vandaag nog: run `a0ef1552`, maincat 29000, 2026-08-25 10:33 UTC, status
+`Completed`, 63 rijen skipped (= geen diff). De hoogste `timestamp` in `tbl_CS_Cat_Column_Slots` is
+2026-08-24 22:18. Of de site/indexer hem nog *leest* is een andere vraag — en als het antwoord nee
+is, versterkt dat de hypothese in plaats van hem te ondergraven: dan loopt de enige route naar
+`isSeoFacet` via de Taxonomy-kant, en dáár mist de `CategoryFacets`-rij.
+
+**Correctie op 2026-08-19: de spiegel is niet exact.** Toen genoteerd als "`tbl_CS_Cat_Column_Order`
+spiegelt `CategoryFacetSettings` exact". Dat geldt alleen voor de `seo_prio`-kolom (`true`→1,
+`null`→0). Voor categorie 9000239 zijn de drie lagen het oneens over lidmaatschap én volgorde:
+
+| Laag | rijen | uitschieters |
+|---|---|---|
+| `CategoryFacetSettings` | 12 | — |
+| `GET /api/CategoryFacets` | 10 | 3028 en 3432 ontbreken |
+| `tbl_CS_Cat_Column_Order` | 10 | 7526/7527/7528 ontbreken, 3033 zit er alléén hier |
+
+En `order_number` loopt uiteen terwijl de back-sync "0 changes" meldt: 3441 is 5 in de taxonomie en
+4 in MySQL, 6271 6→5, 6272 7→6, 6273 4→7, 3028 11→8.
+
+**De bug zelf reproduceert nog** (2026-08-25): dezelfde call geeft `isSeoFacet=false` voor 3432 mét
+5 values, terwijl 3027/3039/3441/6271 op true staan. Checklist voor IT als artifact:
+https://claude.ai/code/artifact/c977b3c0-a1ab-4284-bce3-329919b9a9c1
+
 ## Drie assen in één PLP-URL, drie verschillende antwoorden (2026-08-25, SEO-analyse)
 
 Vraag: beslist.nl 301't een oude `/p/`-slug naar de canonieke, bol.com lost hetzelfde op met een
