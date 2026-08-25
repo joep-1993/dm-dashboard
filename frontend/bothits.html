@@ -213,7 +213,12 @@
            de gedeelde regel stil overschrijven — precies wat de opruiming van 2026-08-14
            heeft weggehaald. De actieve staat (.btn-preset.active) komt ook daaruit en
            wordt hier niet gezet: geen enkele presetgroep in het dashboard doet dat. */
-        .btn-preset { padding: 0.35rem 0.7rem; }
+        /* min-width 3rem is een blueprint-regel en geen smaak: met alleen padding volgt
+           de celbreedte het label, dus "7d" zit in een cel van ~39px tussen cellen van
+           ~47px. Elk label staat dan wel gecentreerd in zijn eigen cel, maar de cellen
+           verschillen — en dat is wat je ziet als "staat niet gecentreerd" (Joep,
+           2026-08-06, op de All-knop in Shop-campagnes). */
+        .btn-preset { padding: 0.35rem 0.7rem; min-width: 3rem; }
         .btn-group .btn-preset:not(:first-child) { border-left-width: 1px; border-left-style: solid; }
         .btn-group:has(.btn-preset) {
             border-radius: 10px;
