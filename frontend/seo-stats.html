@@ -151,7 +151,13 @@
         /* Preset group (7d/14d/30d/90d) shaped like the date inputs next to it: same
            border colour, same 10px radius on the outer corners, same soft shadow. The
            purple text stays, so it still reads as an action rather than a field. */
-        .btn-preset { padding: 0.35rem 0.7rem; }
+        /* min-width erbij op 2026-08-25: zonder die regel volgt de celbreedte het label,
+           dus "7d" zat in een cel van ~39px tussen drie van ~47px. Elk label stond
+           gecentreerd in zijn eigen cel — het zijn de cellen die verschilden, en dat is wat
+           je ziet. Staat zo in UI_BLUEPRINT (de bevinding komt van de All-knop in
+           Shop-campagnes, Joep 2026-08-06); shop-campaigns.html en bothits.html hadden hem
+           al, deze pagina was de laatste zonder. */
+        .btn-preset { padding: 0.35rem 0.7rem; min-width: 3rem; }
         /* Alleen breedte en stijl: de KLEUR van deze scheidingslijn komt van de
            knopgroep in style.css (2026-08-14). Stond hier op #d9d4e8, wat tot de
            opruiming door het !important van het thema werd overschreven — dus dit is
