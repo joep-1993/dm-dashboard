@@ -675,6 +675,14 @@
                              op verzoek van Joep (2026-08-13) — hij kent ze. Ze staan nog
                              wél in de docstring van get_top_urls(), want dat is waar de
                              volgende die deze lijst leest ze nodig heeft. -->
+                        <!-- De 90-dagenmelding (2026-08-25). Hij staat BOVEN de tabel en niet
+                             in de kaartkop, want hij hoort bij de rijen eronder: die gaan over
+                             een ander bereik dan het filter bovenaan de pagina zegt. Inhoud en
+                             zichtbaarheid komen uit loadUrls(); buiten een lange selectie staat
+                             hier niets. Niet wegklikbaar, in tegenstelling tot #partialWarn: die
+                             waarschuwing lees je één keer, deze legt uit wat je NU ziet. -->
+                        <div id="urlRangeNote" class="alert alert-warning py-2 px-3 mb-3 d-none"
+                             style="font-size:0.85rem;" role="alert"></div>
                         <div class="tool-table-wrap">
                             <table class="table table-hover tool-table" id="urlTable">
                                 <thead><tr>
@@ -1957,6 +1965,44 @@
     // hem, en een `let` daar zou betekenen dat deze functie een variabele aanraakt die
     // in de temporal dead zone staat tot dat blok is uitgevoerd.
     let urlRows = [], urlQuery = '', urlQLast = '';
+    // Deze lijst gaat over maximaal 90 dagen, en dat is een MEETRESULTAAT en geen
+    // voorzichtigheid (2026-08-25). Het bekende been van /top-urls aggregeert
+    // pa.bothits_url_daily, 22,2 mln rijen, en dat kost koud: 30 dagen 4,4s, 90 dagen
+    // 10s, de volledige historie (192 dagen) 90s. Die laatste sprong is een planner-flip
+    // — boven ~100 dagen kiest Postgres een Incremental Sort over de url_id-index en
+    // verliest zijn parallellisme.
+    //
+    // Waarom hier een grens en geen snellere query: `work_mem` verhogen naar 256MB doet
+    // vrijwel niets (4,4 -> 3,9s), en de `count(DISTINCT log_date)` die de HashAggregate
+    // blokkeert weghalen levert voor 30 en 90 dagen ook niets op, want `days` moet dan in
+    // een tweede query die zelf 1,7-4,4s kost. Vier seconden is de bodem zonder een
+    // rollup-tabel, en die zou het bekende been niet-uitputtend maken — precies de
+    // eigenschap waarop deze tab betrouwbaar is. Zie de docstring van get_top_urls.
+    //
+    // Knijpen én zeggen, niet stil afkappen: rijen die over een ander bereik gaan dan het
+    // filter bovenaan de pagina beweert, zijn de "ziet er actueel uit en is het niet"-fout
+    // die deze pagina elders juist vermijdt.
+    const URL_TAB_MAX_DAYS = 90;
+    function urlRange() {
+        const s = document.getElementById('startDate').value;
+        const e = document.getElementById('endDate').value;
+        const note = document.getElementById('urlRangeNote');
+        if (!s || !e) { note?.classList.add('d-none'); return {}; }
+        // +1 omdat het bereik inclusief is: 25-08 t/m 25-08 is één dag, geen nul.
+        const days = Math.round((Date.parse(e) - Date.parse(s)) / 86400000) + 1;
+        if (days <= URL_TAB_MAX_DAYS) { note?.classList.add('d-none'); return {}; }
+        const clamped = shiftDays(e, -(URL_TAB_MAX_DAYS - 1));
+        if (note) {
+            note.classList.remove('d-none');
+            note.innerHTML = `<strong>Beperkt tot ${URL_TAB_MAX_DAYS} dagen.</strong> `
+                + `Je selectie is ${days} dagen; deze lijst toont `
+                + `${clamped} t/m ${e}. De andere tabbladen gebruiken je volledige selectie — `
+                + `alleen deze query wordt over een langere reeks onwerkbaar traag `
+                + `(gemeten: 90 dagen 10s, 192 dagen 90s).`;
+        }
+        return { start_date: clamped };
+    }
+
     async function loadUrls() {
         const tb = document.querySelector('#urlTable tbody');
         const limit = document.getElementById('urlLimit').value;
@@ -1980,7 +2026,10 @@
             // de lege-staat horen jouw term terug te geven.
             const qSend = urlQuery.split(/\s+/).map(t => t.replace(/\/+$/, ''))
                 .filter(Boolean).join(' ');
-            urlRows = await getJSON(API + '/top-urls?' + params({ limit, q: qSend || null }));
+            // urlRange() overschrijft start_date via de `extra`-lus in params() — die zet
+            // met p.set(), dus de laatste wint.
+            urlRows = await getJSON(API + '/top-urls?'
+                + params({ limit, q: qSend || null, ...urlRange() }));
             // Binnen de try (audit 2026-08-13). De normalisatie hieronder stond erbuiten,
             // dus bij een niet-lijst antwoord gooide .forEach een TypeError als
             // unhandled rejection en bleef de tabel eeuwig op "laden…" staan. Dat was
