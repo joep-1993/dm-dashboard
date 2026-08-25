@@ -412,7 +412,18 @@
 
                          data-days + één listener in de wiring, geen inline onclick: dit bestand
                          wiret alles in JS. -->
-                    <div class="col-md-auto">
+                    <!-- order-md-last + order-xl-0: WELK element wrapt als de rij niet past
+                         (2026-08-25). Vanaf 1200px past alles op één regel; daaronder springt
+                         Bootstraps container van 1140 naar 960px en komt de rij ~55px tekort.
+                         Zonder deze twee klassen valt URL-type — de langste checkboxlijst —
+                         naar de tweede regel, en dan staat de kolom met zes vinkjes los onder
+                         een halfvolle rij. Nu zakt Snelkeuze, want dat is de kleinste kolom en
+                         de enige die je kúnt missen: de datums ernaast zeggen hetzelfde.
+                         GEEN bredere paginawrapper als fix (`col-md-12 col-xl-10` o.i.d.):
+                         Bot Hits was één van de vijf pagina's waar zo'n eigen breedte op
+                         2026-08-14 juist is teruggedraaid — zie UI_BLUEPRINT, "Fixed width
+                         wrapper — ÉÉN breedte". -->
+                    <div class="col-md-auto order-md-last order-xl-0">
                         <label class="form-label mb-1">Snelkeuze</label>
                         <!-- d-flex is hier GEEN cosmetica: .btn-group is inline-flex en een
                              .form-label is inline-block, dus zonder dit staan het label en de
