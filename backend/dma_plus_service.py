@@ -1029,11 +1029,17 @@ def _parse_affected_entities(log: str) -> dict:
         if m:
             ad_groups.add(m.group(1).strip())
 
-        # Missing campaigns emitted by process_exclusion_sheet_v2:
+        # Missing campaigns emitted by process_exclusion_sheet_v2 /
+        # process_reverse_exclusion_sheet:
         #   "    ⚠️  Campaign not found in Google Ads cache: PLA/Aggregaten_b"
+        # by process_combined_exclusion_v2, which says it slightly differently:
+        #   "    ⚠️  Campaign not found in cache: PLA/Aggregaten_b"
         # and by the final summary block:
         #   "Missing campaigns in Klussen (3): PLA/Aggregaten_a, PLA/Aggregaten_b, ..."
-        m = re.search(r'Campaign not found in Google Ads cache:\s+(PLA/\S+)', line)
+        # The name runs to the end of the line, so match it that way — "\S+"
+        # cut deepest_cats with a space in them in half ("PLA/Philips 1000
+        # series_a" → "PLA/Philips") and put that stump in the export.
+        m = re.search(r'Campaign not found in (?:Google Ads )?cache:\s+(PLA/.+?)\s*$', line)
         if m:
             missing_campaigns.add(m.group(1).strip())
         m = re.search(r'Missing campaigns in [^:]+\(\d+\):\s+(.+)$', line)

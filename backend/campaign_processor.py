@@ -19,9 +19,9 @@ import time
 import uuid
 import platform
 import threading
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
 from backend.gsd_campaigns_service import _name_contains_regexp
@@ -77,6 +77,36 @@ COUNTRY_CONFIG = {
 CUSTOMER_ID = COUNTRY_CONFIG[COUNTRY]["customer_id"]
 MERCHANT_CENTER_ID = COUNTRY_CONFIG[COUNTRY]["merchant_center_id"]
 EXCLUDE_DATAEDIS = COUNTRY_CONFIG[COUNTRY]["exclude_dataedis"]
+
+# --- Shop exclusions across multiple accounts -------------------------------
+# Since 2026-08-20 the NL market also runs on 4089798584 ("DMA NL 2"), holding a
+# parallel set of category campaigns. Those carry a suffix in their name:
+#   PLA/<cat>_<tier>_limit   (steered by the DMA Level 1/2/3 ladder)
+#   PLA/<cat>_<tier>_label   (steered by the "DMA: Label A/B/C" portfolios)
+# Both are real serving campaigns for the category, so a shop exclusion has to
+# cover BOTH — an out-of-stock / dropped shop must not keep serving in whichever
+# family is live. Same call as the DMA exclusions tool makes
+# (dma_exclusions_service.ACCOUNT_CATEGORY_RES); note it differs from DMA
+# bidding, which deliberately steers only `_limit`.
+#
+# ONLY the shop-exclusion paths use this (exclude + reverse-exclude, so what we
+# set in DMA NL 2 also gets lifted there when a shop returns). Inclusion, the
+# validators and the check sheets stay single-account on purpose — DMA NL 2's
+# campaigns are not created or maintained from here.
+EXCLUSION_ACCOUNTS: Dict[str, List[str]] = {
+    CUSTOMER_ID_NL: [CUSTOMER_ID_NL, "4089798584"],
+}
+ACCOUNT_NAMES = {
+    CUSTOMER_ID_NL: "DMA NL",
+    "4089798584": "DMA NL 2",
+    CUSTOMER_ID_BE: "DMA BE",
+}
+# Name variants to look for per account, appended to "PLA/<cat>_<cl1>".
+# "" = the plain convention. Accounts not listed here use the plain one.
+ACCOUNT_CAMPAIGN_SUFFIXES: Dict[str, Tuple[str, ...]] = {
+    "4089798584": ("_limit", "_label"),
+}
+_DEFAULT_CAMPAIGN_SUFFIXES: Tuple[str, ...] = ("",)
 
 MCC_ACCOUNT_ID = "3011145605"  # MCC account where bid strategies are stored
 DEFAULT_BID_MICROS = 200_000  # €0.20
@@ -5391,6 +5421,76 @@ def prefetch_pla_campaigns_and_ad_groups(
     return cache
 
 
+def exclusion_account_ids(customer_id: str) -> List[str]:
+    """Every account a shop exclusion for `customer_id`'s market must reach.
+
+    The primary account is always first, so logs and fallbacks keep pointing at
+    it. Markets without a second account get a one-element list, which makes the
+    multi-account code paths behave exactly like the old single-account ones.
+    """
+    return list(EXCLUSION_ACCOUNTS.get(str(customer_id), [str(customer_id)]))
+
+
+def prefetch_pla_campaigns_for_accounts(
+    client: GoogleAdsClient,
+    customer_ids: List[str],
+    campaign_prefix: str = "PLA/",
+) -> "OrderedDict[str, dict]":
+    """Run prefetch_pla_campaigns_and_ad_groups once per account.
+
+    Returns {customer_id: campaign_cache}, insertion-ordered, so callers walk
+    the accounts in the order exclusion_account_ids() gave them.
+    """
+    caches: "OrderedDict[str, dict]" = OrderedDict()
+    for cid in customer_ids:
+        label = ACCOUNT_NAMES.get(cid, cid)
+        if len(customer_ids) > 1:
+            print(f"\n🏦 Account {label} ({cid})")
+        caches[cid] = prefetch_pla_campaigns_and_ad_groups(client, cid, campaign_prefix)
+    return caches
+
+
+def find_category_campaigns(
+    caches: "OrderedDict[str, dict]",
+    deepest_cat: str,
+    cl1: str,
+) -> List[dict]:
+    """All category campaigns for one (deepest_cat, cl1) slot, across accounts.
+
+    Each account is probed with its own naming convention — plain
+    "PLA/<cat>_<cl1>" for DMA NL/BE, "…_limit" + "…_label" for DMA NL 2 — so one
+    slot can resolve to several campaigns in several accounts. Returns
+    [{'customer_id', 'campaign_name', 'ad_groups', 'resource_name'}, ...],
+    empty when the slot exists in none of them.
+    """
+    matches: List[dict] = []
+    for cid, cache in caches.items():
+        for suffix in ACCOUNT_CAMPAIGN_SUFFIXES.get(cid, _DEFAULT_CAMPAIGN_SUFFIXES):
+            name = f"PLA/{deepest_cat}_{cl1}{suffix}"
+            data = cache.get(name)
+            if data:
+                matches.append({
+                    'customer_id': cid,
+                    'campaign_name': name,
+                    'ad_groups': data['ad_groups'],
+                    'resource_name': data['resource_name'],
+                })
+    return matches
+
+
+def _account_tag(campaign_customer_id: str, account_ids: List[str]) -> str:
+    """" [DMA NL 2]" for a campaign outside the market's primary account, else "".
+
+    Appended AFTER the "(N ad group(s))" suffix on the campaign header line, so
+    the dashboard's log parser (dma_plus_service._parse_affected_entities), which
+    reads the name up to that suffix, keeps working unchanged.
+    """
+    if not account_ids or str(campaign_customer_id) == str(account_ids[0]):
+        return ""
+    cid = str(campaign_customer_id)
+    return f" [{ACCOUNT_NAMES.get(cid, cid)}]"
+
+
 def process_exclusion_sheet_v2(
     client: GoogleAdsClient,
     workbook: openpyxl.Workbook,
@@ -5450,9 +5550,12 @@ def process_exclusion_sheet_v2(
         print(f"❌ Sheet '{SHEET_EXCLUSION}' not found in workbook")
         return
 
-    # Pre-fetch all PLA campaigns and ad groups
+    # Pre-fetch all PLA campaigns and ad groups, for EVERY account this market
+    # runs on (NL = DMA NL + DMA NL 2 since 2026-08-20).
+    account_ids = exclusion_account_ids(customer_id)
     print("\nPre-fetching PLA campaigns and ad groups...")
-    campaign_cache = prefetch_pla_campaigns_and_ad_groups(client, customer_id, "PLA/")
+    print(f"Accounts in scope: {', '.join(f'{ACCOUNT_NAMES.get(c, c)} ({c})' for c in account_ids)}")
+    caches = prefetch_pla_campaigns_for_accounts(client, account_ids, "PLA/")
 
     # =========================================================================
     # STEP 1: Group all rows by (maincat_id, cl1) for efficient batch processing
@@ -5498,13 +5601,21 @@ def process_exclusion_sheet_v2(
     # Per-maincat counters for the summary:
     #   categories_by_maincat       = distinct deepest_cats under the maincat
     #   slots_by_maincat            = categories × number of cl1 groups
-    #   campaigns_found_by_maincat  = how many slots were in the prefetch cache
-    #   missing_campaigns_by_maincat = list of PLA/{cat}_{cl1} names NOT in cache
-    #                                  (aggregated across all cl1 groups)
+    #   slots_covered_by_maincat    = slots found in AT LEAST ONE account
+    #   campaigns_found_by_maincat  = campaigns matched; can exceed the slot count
+    #                                  now that one slot can resolve to a DMA NL
+    #                                  campaign plus a _limit/_label pair in DMA NL 2
+    #   missing_campaigns_by_maincat = list of PLA/{cat}_{cl1} names found in NO
+    #                                  account (aggregated across all cl1 groups)
     campaigns_found_by_maincat: dict = defaultdict(int)
+    slots_covered_by_maincat: dict = defaultdict(int)
     categories_by_maincat: dict = {}
     slots_by_maincat: dict = defaultdict(int)
     missing_campaigns_by_maincat: dict = defaultdict(list)
+    # Campaigns touched per account. DMA NL 2 only holds a subset of the
+    # categories, so this is the number to look at when you want to know
+    # whether the second account was actually reached.
+    campaigns_by_account: dict = defaultdict(int)
 
     # Mark rows with missing fields as errors
     for idx, missing in rows_with_missing_fields:
@@ -5581,22 +5692,32 @@ def process_exclusion_sheet_v2(
         # Track results per shop
         shop_results = {shop: {'success': 0, 'already_excluded': 0, 'errors': []} for shop in shop_names}
         campaigns_found = 0
-        missing_campaigns: list = []  # PLA/{deepest_cat}_{cl1} names not present in the Google Ads cache
+        slots_covered = 0  # deepest_cats found in at least one account
+        missing_campaigns: list = []  # PLA/{deepest_cat}_{cl1} names present in NO account
         total_exclusions_added = 0
 
-        # Process each deepest_cat ONCE for all shops in this group
+        # Process each deepest_cat ONCE for all shops in this group.
+        # One slot can resolve to several campaigns across several accounts
+        # (DMA NL "PLA/X_a" + DMA NL 2 "PLA/X_a_limit" and "PLA/X_a_label"); a
+        # slot only counts as missing when NO account has it.
         for deepest_cat in deepest_cats:
-            campaign_name = f"PLA/{deepest_cat}_{cl1_str}"
-            campaign_data = campaign_cache.get(campaign_name)
+            matches = find_category_campaigns(caches, deepest_cat, cl1_str)
 
-            if not campaign_data:
+            if not matches:
+                campaign_name = f"PLA/{deepest_cat}_{cl1_str}"
                 missing_campaigns.append(campaign_name)
                 print(f"    ⚠️  Campaign not found in Google Ads cache: {campaign_name}")
+            else:
+                slots_covered += 1
 
-            if campaign_data:
+            for campaign_data in matches:
+                campaign_name = campaign_data['campaign_name']
+                campaign_customer_id = campaign_data['customer_id']
                 campaigns_found += 1
+                campaigns_by_account[campaign_customer_id] += 1
                 ad_groups = campaign_data['ad_groups']
-                print(f"    📁 Campaign: {campaign_name} ({len(ad_groups)} ad group(s))")
+                print(f"    📁 Campaign: {campaign_name} ({len(ad_groups)} ad group(s))"
+                      f"{_account_tag(campaign_customer_id, account_ids)}")
                 # Emit a tree line per campaign so the Affected Product Trees
                 # column in the export has something to show. Format is
                 # intentionally parseable by _parse_affected_entities' tree regex.
@@ -5629,7 +5750,9 @@ def process_exclusion_sheet_v2(
                             else:
                                 result = add_shop_exclusions_batch(
                                     client=client,
-                                    customer_id=customer_id,
+                                    # the account THIS campaign lives in, not the
+                                    # market's primary one
+                                    customer_id=campaign_customer_id,
                                     ad_group_id=ag_id,
                                     ad_group_name=ag_name,
                                     shop_names=unique_targeting_names
@@ -5698,6 +5821,7 @@ def process_exclusion_sheet_v2(
             more = f" (+{len(missing_campaigns) - 10} more)" if len(missing_campaigns) > 10 else ""
             print(f"  ⚠️  {len(missing_campaigns)} campaign name(s) missing from Google Ads cache: {preview}{more}")
         campaigns_found_by_maincat[maincat_id_str] += campaigns_found
+        slots_covered_by_maincat[maincat_id_str] += slots_covered
         missing_campaigns_by_maincat[maincat_id_str].extend(missing_campaigns)
 
         # =========================================================================
@@ -5758,6 +5882,11 @@ def process_exclusion_sheet_v2(
     print(f"  → Exclusions actually added: {run_total_added}")
     print(f"  → Already excluded (no-op): {run_total_already_excluded}")
     print(f"  → Mutate errors: {run_total_mutate_errors}")
+    if len(account_ids) > 1:
+        print()
+        print("Campaigns matched per account:")
+        for acct in account_ids:
+            print(f"  {ACCOUNT_NAMES.get(acct, acct)} ({acct}): {campaigns_by_account.get(acct, 0)}")
     if run_total_batch_calls > 0 and run_total_added == 0:
         print()
         print("⚠️  No exclusions were actually added. Either every shop was")
@@ -5768,10 +5897,16 @@ def process_exclusion_sheet_v2(
         mc_name = maincat_name_by_id.get(mc_id, f"maincat_id={mc_id}")
         cats = categories_by_maincat.get(mc_id, 0)
         slots = slots_by_maincat.get(mc_id, 0)
-        pct = (count / slots * 100) if slots else 0
+        covered = slots_covered_by_maincat.get(mc_id, 0)
+        pct = (covered / slots * 100) if slots else 0
         missing = missing_campaigns_by_maincat.get(mc_id, [])
         print(f"Categories in {mc_name}: {cats}")
-        print(f"Campaigns found in {mc_name}: {count}/{slots} ({pct:.0f}%)")
+        # Coverage is per SLOT, not per campaign — a slot served from two
+        # accounts is still one category, so this stays <= 100%.
+        print(f"Campaigns found in {mc_name}: {covered}/{slots} ({pct:.0f}%)")
+        if count != covered:
+            print(f"Campaigns matched in {mc_name}: {count} "
+                  f"(+{count - covered} in secondary accounts)")
         if missing:
             # Stays in the log tail because it's part of the final summary block
             # (important: the /api/dma-plus/status "log" field is truncated to the last 5000 chars).
@@ -5826,9 +5961,13 @@ def process_combined_exclusion_v2(
         return {"exclude": {"rows": 0, "errors": 0},
                 "reverse_exclude": {"rows": 0, "errors": 0}}
 
-    # Pre-fetch ALL PLA campaigns + ad groups exactly once for the whole pass.
+    # Pre-fetch ALL PLA campaigns + ad groups exactly once for the whole pass,
+    # per account this market runs on (NL = DMA NL + DMA NL 2).
+    account_ids = exclusion_account_ids(customer_id)
     print("\nPre-fetching PLA campaigns and ad groups (shared)...")
-    campaign_cache = prefetch_pla_campaigns_and_ad_groups(client, customer_id, "PLA/")
+    print(f"Accounts in scope: {', '.join(f'{ACCOUNT_NAMES.get(c, c)} ({c})' for c in account_ids)}")
+    caches = prefetch_pla_campaigns_for_accounts(client, account_ids, "PLA/")
+    campaigns_by_account: dict = defaultdict(int)
 
     # Column layouts. Both sheets share the leading shop_name / Shop ID /
     # maincat / maincat_id / cl1 columns; the result columns sit at different
@@ -5964,96 +6103,104 @@ def process_combined_exclusion_v2(
             continue
 
         campaigns_found = 0
+        # One (deepest_cat, cl1) slot can resolve to campaigns in several
+        # accounts — plain "PLA/X_a" in DMA NL, "_limit" + "_label" in DMA NL 2.
+        # Both add and remove run against every match, so an exclusion set in
+        # DMA NL 2 is also lifted there when the shop comes back.
         for deepest_cat in deepest_cats:
-            campaign_name = f"PLA/{deepest_cat}_{cl1_str}"
-            campaign_data = campaign_cache.get(campaign_name)
-            if not campaign_data:
-                print(f"    ⚠️  Campaign not found in cache: {campaign_name}")
+            matches = find_category_campaigns(caches, deepest_cat, cl1_str)
+            if not matches:
+                print(f"    ⚠️  Campaign not found in cache: PLA/{deepest_cat}_{cl1_str}")
                 continue
-            campaigns_found += 1
-            ad_groups = campaign_data['ad_groups']
-            print(f"    📁 Campaign: {campaign_name} ({len(ad_groups)} ad group(s))")
-            tree_verb = "Tree to modify" if dry_run else "Tree modified"
-            print(f"      🌳 {tree_verb}: Campaign '{campaign_name}' → "
-                  f"Maincat '{mc_name}' → CL1 '{cl1_str}'")
+            for campaign_data in matches:
+                campaign_name = campaign_data['campaign_name']
+                campaign_customer_id = campaign_data['customer_id']
+                campaigns_found += 1
+                campaigns_by_account[campaign_customer_id] += 1
+                ad_groups = campaign_data['ad_groups']
+                print(f"    📁 Campaign: {campaign_name} ({len(ad_groups)} ad group(s))"
+                      f"{_account_tag(campaign_customer_id, account_ids)}")
+                tree_verb = "Tree to modify" if dry_run else "Tree modified"
+                print(f"      🌳 {tree_verb}: Campaign '{campaign_name}' → "
+                      f"Maincat '{mc_name}' → CL1 '{cl1_str}'")
 
-            for ag in ad_groups:
-                ag_id = str(ag['id'])
-                ag_name = ag['name']
+                for ag in ad_groups:
+                    ag_id = str(ag['id'])
+                    ag_name = ag['name']
 
-                # ---- ADD EXCLUSIONS for this ad group ----
-                if exc_targets:
-                    unique_targets = list(set(exc_targets))
-                    try:
-                        if dry_run:
-                            res = {'success': list(unique_targets),
-                                   'already_excluded': [], 'errors': []}
-                        else:
-                            res = add_shop_exclusions_batch(
-                                client=client, customer_id=customer_id,
-                                ad_group_id=ag_id, ad_group_name=ag_name,
-                                shop_names=unique_targets,
-                            )
-                        if res['errors']:
-                            print(f"      ❌ {ag_name} exclude: {len(res['errors'])} error(s)")
-                        elif res['success']:
-                            print(f"      ✅ {ag_name} exclude: {len(res['success'])} added, "
-                                  f"{len(res['already_excluded'])} already excluded")
-                        else:
-                            print(f"      ⏭️  {ag_name} exclude: all "
-                                  f"{len(res['already_excluded'])} already excluded")
-                        for tgt in res['success']:
-                            for _, _, orig, _, _ in exc_target_to_entries.get(tgt, []):
-                                exc_shop_results[orig]['success'] += 1
-                        for tgt in res['already_excluded']:
-                            for _, _, orig, _, _ in exc_target_to_entries.get(tgt, []):
-                                exc_shop_results[orig]['already'] += 1
-                        for tgt, err in res['errors']:
-                            for _, _, orig, _, _ in exc_target_to_entries.get(tgt, []):
-                                exc_shop_results[orig]['errors'].append(f"{ag_name}: {err}")
-                    except Exception as e:
-                        msg = str(e)[:50]
-                        print(f"      ❌ {ag_name} exclude: {msg}")
-                        for orig in exc_shop_results:
-                            exc_shop_results[orig]['errors'].append(f"{ag_name}: {msg}")
-                    time.sleep(0.3)
+                    # ---- ADD EXCLUSIONS for this ad group ----
+                    if exc_targets:
+                        unique_targets = list(set(exc_targets))
+                        try:
+                            if dry_run:
+                                res = {'success': list(unique_targets),
+                                       'already_excluded': [], 'errors': []}
+                            else:
+                                res = add_shop_exclusions_batch(
+                                    client=client, customer_id=campaign_customer_id,
+                                    ad_group_id=ag_id, ad_group_name=ag_name,
+                                    shop_names=unique_targets,
+                                )
+                            if res['errors']:
+                                print(f"      ❌ {ag_name} exclude: {len(res['errors'])} error(s)")
+                            elif res['success']:
+                                print(f"      ✅ {ag_name} exclude: {len(res['success'])} added, "
+                                      f"{len(res['already_excluded'])} already excluded")
+                            else:
+                                print(f"      ⏭️  {ag_name} exclude: all "
+                                      f"{len(res['already_excluded'])} already excluded")
+                            for tgt in res['success']:
+                                for _, _, orig, _, _ in exc_target_to_entries.get(tgt, []):
+                                    exc_shop_results[orig]['success'] += 1
+                            for tgt in res['already_excluded']:
+                                for _, _, orig, _, _ in exc_target_to_entries.get(tgt, []):
+                                    exc_shop_results[orig]['already'] += 1
+                            for tgt, err in res['errors']:
+                                for _, _, orig, _, _ in exc_target_to_entries.get(tgt, []):
+                                    exc_shop_results[orig]['errors'].append(f"{ag_name}: {err}")
+                        except Exception as e:
+                            msg = str(e)[:50]
+                            print(f"      ❌ {ag_name} exclude: {msg}")
+                            for orig in exc_shop_results:
+                                exc_shop_results[orig]['errors'].append(f"{ag_name}: {msg}")
+                        time.sleep(0.3)
 
-                # ---- REMOVE EXCLUSIONS for this ad group ----
-                if rex_targets:
-                    unique_targets = list(set(rex_targets))
-                    try:
-                        if dry_run:
-                            res = {'success': list(unique_targets),
-                                   'not_found': [], 'errors': []}
-                        else:
-                            res = reverse_exclusion_batch(
-                                client=client, customer_id=customer_id,
-                                ad_group_id=ag_id, ad_group_name=ag_name,
-                                shop_names=unique_targets,
-                            )
-                        if res['errors']:
-                            print(f"      ❌ {ag_name} unexclude: {len(res['errors'])} error(s)")
-                        elif res['success']:
-                            print(f"      ✅ {ag_name} unexclude: {len(res['success'])} removed, "
-                                  f"{len(res['not_found'])} not found")
-                        else:
-                            print(f"      ⏭️  {ag_name} unexclude: all "
-                                  f"{len(res['not_found'])} not found")
-                        for tgt in res['success']:
-                            for _, _, orig, _, _ in rex_target_to_entries.get(tgt, []):
-                                rex_shop_results[orig]['success'] += 1
-                        for tgt in res['not_found']:
-                            for _, _, orig, _, _ in rex_target_to_entries.get(tgt, []):
-                                rex_shop_results[orig]['not_found'] += 1
-                        for tgt, err in res['errors']:
-                            for _, _, orig, _, _ in rex_target_to_entries.get(tgt, []):
-                                rex_shop_results[orig]['errors'].append(f"{ag_name}: {err}")
-                    except Exception as e:
-                        msg = str(e)[:50]
-                        print(f"      ❌ {ag_name} unexclude: {msg}")
-                        for orig in rex_shop_results:
-                            rex_shop_results[orig]['errors'].append(f"{ag_name}: {msg}")
-                    time.sleep(0.3)
+                    # ---- REMOVE EXCLUSIONS for this ad group ----
+                    if rex_targets:
+                        unique_targets = list(set(rex_targets))
+                        try:
+                            if dry_run:
+                                res = {'success': list(unique_targets),
+                                       'not_found': [], 'errors': []}
+                            else:
+                                res = reverse_exclusion_batch(
+                                    client=client, customer_id=campaign_customer_id,
+                                    ad_group_id=ag_id, ad_group_name=ag_name,
+                                    shop_names=unique_targets,
+                                )
+                            if res['errors']:
+                                print(f"      ❌ {ag_name} unexclude: {len(res['errors'])} error(s)")
+                            elif res['success']:
+                                print(f"      ✅ {ag_name} unexclude: {len(res['success'])} removed, "
+                                      f"{len(res['not_found'])} not found")
+                            else:
+                                print(f"      ⏭️  {ag_name} unexclude: all "
+                                      f"{len(res['not_found'])} not found")
+                            for tgt in res['success']:
+                                for _, _, orig, _, _ in rex_target_to_entries.get(tgt, []):
+                                    rex_shop_results[orig]['success'] += 1
+                            for tgt in res['not_found']:
+                                for _, _, orig, _, _ in rex_target_to_entries.get(tgt, []):
+                                    rex_shop_results[orig]['not_found'] += 1
+                            for tgt, err in res['errors']:
+                                for _, _, orig, _, _ in rex_target_to_entries.get(tgt, []):
+                                    rex_shop_results[orig]['errors'].append(f"{ag_name}: {err}")
+                        except Exception as e:
+                            msg = str(e)[:50]
+                            print(f"      ❌ {ag_name} unexclude: {msg}")
+                            for orig in rex_shop_results:
+                                rex_shop_results[orig]['errors'].append(f"{ag_name}: {msg}")
+                        time.sleep(0.3)
 
         # Write back per-row statuses.
         for sh, idx, name, col_st, col_err in excludes:
@@ -6101,6 +6248,10 @@ def process_combined_exclusion_v2(
           f"{exc_error + len(rows_with_missing_fields_exc)}")
     print(f"R-exclude — rows OK: {rex_success}, failed: "
           f"{rex_error + len(rows_with_missing_fields_rex)}")
+    if len(account_ids) > 1:
+        print("Campaigns matched per account: " + ", ".join(
+            f"{ACCOUNT_NAMES.get(a, a)} ({a}): {campaigns_by_account.get(a, 0)}"
+            for a in account_ids))
     print(f"{'='*70}\n")
 
     return {
@@ -8472,9 +8623,14 @@ def process_reverse_exclusion_sheet(
     COL_STATUS = 5         # F: Status
     COL_ERROR = 6          # G: Error
 
-    # Pre-fetch campaigns cache
+    # Pre-fetch campaigns cache, per account this market runs on. Un-excluding
+    # has to reach every account the exclusion could have been written to
+    # (NL = DMA NL + DMA NL 2), otherwise a returning shop stays blocked there.
+    account_ids = exclusion_account_ids(customer_id)
     print("\nPre-fetching PLA campaigns and ad groups...")
-    campaign_cache = prefetch_pla_campaigns_and_ad_groups(client, customer_id, "PLA/")
+    print(f"Accounts in scope: {', '.join(f'{ACCOUNT_NAMES.get(c, c)} ({c})' for c in account_ids)}")
+    caches = prefetch_pla_campaigns_for_accounts(client, account_ids, "PLA/")
+    campaigns_by_account: dict = defaultdict(int)
 
     # =========================================================================
     # STEP 1: Group all rows by (maincat_id, cl1) for efficient batch processing
@@ -8585,20 +8741,27 @@ def process_reverse_exclusion_sheet(
         campaigns_found = 0
         total_exclusions_removed = 0
 
-        # Process each deepest_cat ONCE for all shops in this group
+        # Process each deepest_cat ONCE for all shops in this group. A slot can
+        # resolve to campaigns in several accounts (plain "PLA/X_a" in DMA NL,
+        # "_limit" + "_label" in DMA NL 2) and only counts as missing when NO
+        # account has it.
         missing_campaigns: list = []
         for deepest_cat in deepest_cats:
-            campaign_name = f"PLA/{deepest_cat}_{cl1_str}"
-            campaign_data = campaign_cache.get(campaign_name)
+            matches = find_category_campaigns(caches, deepest_cat, cl1_str)
 
-            if not campaign_data:
+            if not matches:
+                campaign_name = f"PLA/{deepest_cat}_{cl1_str}"
                 missing_campaigns.append(campaign_name)
                 print(f"    ⚠️  Campaign not found in Google Ads cache: {campaign_name}")
 
-            if campaign_data:
+            for campaign_data in matches:
+                campaign_name = campaign_data['campaign_name']
+                campaign_customer_id = campaign_data['customer_id']
                 campaigns_found += 1
+                campaigns_by_account[campaign_customer_id] += 1
                 ad_groups = campaign_data['ad_groups']
-                print(f"    📁 Campaign: {campaign_name} ({len(ad_groups)} ad group(s))")
+                print(f"    📁 Campaign: {campaign_name} ({len(ad_groups)} ad group(s))"
+                      f"{_account_tag(campaign_customer_id, account_ids)}")
                 # Tree line per campaign — parseable by _parse_affected_entities
                 mc_name_disp = maincat_name_by_id.get(maincat_id_str, f"maincat_id={maincat_id_str}")
                 shops_disp = ", ".join(sorted(set(shop_names))[:5]) + ("..." if len(set(shop_names)) > 5 else "")
@@ -8629,7 +8792,9 @@ def process_reverse_exclusion_sheet(
                             else:
                                 result = reverse_exclusion_batch(
                                     client=client,
-                                    customer_id=customer_id,
+                                    # the account THIS campaign lives in, not the
+                                    # market's primary one
+                                    customer_id=campaign_customer_id,
                                     ad_group_id=ag_id,
                                     ad_group_name=ag_name,
                                     shop_names=unique_targeting_names
@@ -8748,6 +8913,11 @@ def process_reverse_exclusion_sheet(
     print(f"  → Exclusions actually removed: {run_total_removed}")
     print(f"  → Already not excluded (no-op): {run_total_already_not_excluded}")
     print(f"  → Mutate errors: {run_total_mutate_errors}")
+    if len(account_ids) > 1:
+        print()
+        print("Campaigns matched per account:")
+        for acct in account_ids:
+            print(f"  {ACCOUNT_NAMES.get(acct, acct)} ({acct}): {campaigns_by_account.get(acct, 0)}")
     if run_total_batch_calls > 0 and run_total_removed == 0:
         print()
         print("⚠️  No exclusions were actually removed. Either the shops were already")
