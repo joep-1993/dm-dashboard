@@ -50,13 +50,30 @@ SAME_CATEGORY_MIN_SCORE = 80
 
 # Minimum lengtes om false fuzzy matches te voorkomen
 # Voorbeeld: "12v" mag NIET matchen op "E" (energielabel)
-MIN_KEYWORD_LENGTH_FOR_FUZZY = 3  # Keywords korter dan 3 chars: geen fuzzy
+# V62 (2026-08-26): 3 -> 4. Op drie letters is één afwijkende letter al
+# fuzz.ratio 86, ruim boven de drempel van 80: "verkoelende gel" in Dekbedden
+# landde op /c/kleur~Geel ('gel' vs 'geel'), en 'verkoelende' — het woord dat de
+# vraag stelt — bleef ongematcht. Exacte en synoniem-matches lopen niet via deze
+# check, dus 'usb', 'led', 'xxl' en 'bio' matchen onveranderd; alleen fuzzy op
+# <= 3 tekens vervalt. Zelfde bodem die _tokens_equal_modulo_morphology (V29) al
+# aanhoudt voor zijn fuzz-tak (min lengte 4).
+MIN_KEYWORD_LENGTH_FOR_FUZZY = 4  # Keywords korter dan 4 chars: geen fuzzy
 MIN_FACET_LENGTH_FOR_FUZZY = 3    # Facets korter dan 3 chars: geen fuzzy
 
 # Minimum lengte ratio tussen keyword en facet
 # Keyword moet minimaal 40% van facet lengte zijn (of vice versa)
 # Verhoogd van 0.3 naar 0.4 in V5
 MIN_LENGTH_RATIO = 0.4
+
+
+# V62: qualifiers die alleen betekenis hebben NAAST het woord dat ze bepalen
+# ("zonder boren", "met voet"). Ze zijn geen globale stopwords - de matcher moet
+# 'zonder' in "zonder boren" wel op de facetwaarde 'Zonder boren' kunnen leggen.
+# Maar als er na het wegstrepen van stopwords niets anders overblijft, bepalen ze
+# niets meer en mogen ze de stopwords-only short-circuit (V27) niet blokkeren.
+DANGLING_QUALIFIERS = {
+    'zonder', 'met', 'voor', 'incl', 'inclusief', 'excl', 'exclusief',
+}
 
 
 # ==============================================================================
@@ -157,6 +174,11 @@ STOPWORDS = {
     'verzenden', 'verzending',
     'retour', 'retourneren',
     'voorraad', 'voorradig', 'leverbaar',
+    # V62: een abonnement is een commerciele voorwaarde, geen producteigenschap.
+    # /elektronica_19934132/r/zonder_abonnement/ (Mobiele telefoons) matchte het
+    # losse 'zonder' cross-category op een facetwaarde die letterlijk 'Zonder'
+    # heet (cd-speler_wekker in Wekkerradio's) en liet 'abonnement' vallen.
+    'abonnement', 'abonnementen', 'simlockvrij', 'sim-only', 'simonly',
     'afhalen', 'ophalen',
     'winkelwagen', 'kassa', 'assortiment', 'magazijn',
     'filiaal', 'klantenservice',

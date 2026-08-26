@@ -2,7 +2,4 @@
 - SA360 biedstrategieën aanpassen/koppelen?
 - Graag een onderzoek doen naar alle facet values in maincat Parfumerie die seoPriority=1 hebben in de taxonomy api, en waarvan de cat/facet combinatie seoprio=1 heeft ('aan' staat), maar die in de afgelopen 1.5 jaar 0 visits hebben gehad via SEO. Voor deze facet values graag kijken of ze óók geen visits hebben gehad via andere kanalen (in dezelfde daterange). Hiervan zou ik graag een uitdraai willen. Uitdraai graag in de vorm van een Excel met één tabblad waarin de facet values staan die via álle kanalen 0 visits kreeg afgelopen 1,5 jaar, en één tabblad met de facet values die via SEO 0 visits kregen, maar via andere kanalen wel.
 
-Auto-redirects:
-- Als een query uitsluitend bestaat uit stopwoorden, en de redirect url daarom dezelfde url is maar dan zonder query, mag de score op 99 (voorbeelden: https://www.beslist.nl/products/gezond_mooi/gezond_mooi_561582_572094/r/beste_getest/ --> https://www.beslist.nl/products/gezond_mooi/gezond_mooi_561582_572094/)
-- Regel 369 in Downloads\redirects_global_828a73ad_20260820_094234.xlsx: waarom naar https://www.beslist.nl/products/meubilair/meubilair_389369_400883/c/ruimte~389398 en niet https://www.beslist.nl/products/meubilair/meubilair_389369_6129074/c/ruimte~389398?
-- 
+- Graag in de categorie Tegelaccessoires (https://www.beslist.nl/products/klussen/klussen_486172_638250/) naar de productbeschrijvingen kijken en zoeken naar specifieke Types, zoals 'Hoekprofielen', 'Wiesbaden', 'Tegel leveling systemen'. Van deze Type-kandidaten vervoglens graag het maandelijkse zoekvolume ophalen (alles wat je heirvoor nodig hebt zit in Keyword Planner). Exporteer aub alle kandidaten met meer dan 50 maandelijks zoekvolume naar een Excel.

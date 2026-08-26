@@ -386,7 +386,8 @@ class KeywordMatcher:
                 )
 
             # v12: Validate semantic match (prevents pyjama -> pyjamabroeken)
-            if not self._is_semantic_match(keyword_normalized, matched_name):
+            if not self._is_semantic_match(keyword_normalized, matched_name,
+                                           facet_name=fv.facet_name):
                 # Invalid fuzzy match - keyword embedded incorrectly
                 return MatchResult(
                     keyword=keyword,
@@ -790,7 +791,8 @@ class KeywordMatcher:
 
             if not self._is_valid_fuzzy_match(keyword_normalized, matched_name):
                 continue
-            if not self._is_semantic_match(keyword_normalized, matched_name):
+            if not self._is_semantic_match(keyword_normalized, matched_name,
+                                           facet_name=fv.facet_name):
                 continue
 
             threshold = self._get_threshold_for_facet(fv.facet_name)
@@ -1226,7 +1228,24 @@ class KeywordMatcher:
         """
         return _DBL_VOWEL_RE.sub(r'\1', s)
 
-    def _is_semantic_match(self, keyword: str, facet_value_name: str) -> bool:
+    @staticmethod
+    def _remainder_is_axis_noun(remainder: str, facet_name: str) -> bool:
+        """V62: True when the leftover of a prefix match is a noun the facet's
+        OWN name carries ('machines' for t_zaagmachines, 'kussen' for
+        t_tuinstoelkussen). Stem >= 4 so short fragments can't bridge."""
+        rem = (remainder or '').strip().lower()
+        if not rem or ' ' in rem:
+            return False
+        for suf in ('en', 's'):
+            if rem.endswith(suf) and len(rem) - len(suf) >= 4:
+                rem = rem[:-len(suf)]
+                break
+        if len(rem) < 4:
+            return False
+        return rem in (facet_name or '').lower()
+
+    def _is_semantic_match(self, keyword: str, facet_value_name: str,
+                           facet_name: str = '') -> bool:
         """
         v12: Check if the match is semantically valid.
 
@@ -1292,6 +1311,37 @@ class KeywordMatcher:
             remainder = fv[len(kw):]
             # Check if remainder is empty or just a known suffix
             if remainder == '' or remainder in DUTCH_SUFFIXES:
+                return True
+            # V62: the rule above reads a SPACE-separated remainder as if it were
+            # a glued compound continuation, and that is a different situation.
+            # "meubel" + "sets" is one word naming another product; "doorzichtige"
+            # + " slips" is an adjective in front of its noun, and the keyword is
+            # a whole token of the value. That rejection is why
+            # /r/doorzichtige_string/ ignored type_erotische_slips 'Doorzichtige
+            # slips' (740 products) and matched 'string' onto 'G-strings' (228)
+            # instead.
+            #
+            # The keyword must DOMINATE the value for this to hold. Without a
+            # length floor the rule reopens every "first word of a longer value"
+            # match, and match_with_partial scores those with partial_ratio,
+            # which returns 100 for any substring: 'inductie' then matches
+            # type_kh 'Inductie beschermer' (an induction-hob cover) and
+            # /r/grillplaat_voor_inductie/ leaves Pannen for Keukenhulpjes.
+            # At >= 0.6 the value adds a qualifier to the keyword ('doorzichtige
+            # slips'); below it, the value is about something else that merely
+            # starts with the same word.
+            if (remainder.startswith(' ') and len(kw) >= 4
+                    and len(fv) and len(kw) / len(fv) >= 0.6):
+                return True
+            # V62: the remainder is allowed when it is the AXIS's own head noun.
+            # The rule above exists to stop "meubel" -> "meubelsets", where the
+            # extra noun names a different product. But t_zaagmachines
+            # 'Cirkelzaagmachines' adds 'machines' to 'cirkelzaag' and the facet
+            # itself is called zaagmachines: the axis is already about machines,
+            # so the value is the query's product, not another one. Same for
+            # t_tuinstoelkussen 'Loungekussens' vs 'lounge'. 'sets' appears in no
+            # t_badmeubel axis, so meubel/meubelsets stays rejected.
+            if facet_name and self._remainder_is_axis_noun(remainder, facet_name):
                 return True
             # Otherwise: INVALID - the facet has more than just a suffix
             # e.g., "meubel" + "sets" -> "sets" is not in DUTCH_SUFFIXES

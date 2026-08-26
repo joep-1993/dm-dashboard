@@ -219,7 +219,13 @@ def _keyword_bridges_value(keyword: Optional[str], value_names: Optional[str]) -
             # stem can't drop a match below the length floor.
             if len(k) >= 4 and len(v) >= 4:
                 vstem = _bridge_stem(v)
-                if kstem in vstem or vstem in kstem:
+                # V62: the >= 4 floor has to hold for the STEMS as well, not just
+                # the tokens it started from. _bridge_stem('boren') is 'bor', and
+                # 'bor' sits inside 'bordeauxrod' - which is how the leftover
+                # tokens "zonder boren" got kleurtint 'Bordeauxrood' appended to
+                # a Gordijnroedes redirect. Three letters is not a bridge.
+                if (len(kstem) >= 4 and len(vstem) >= 4
+                        and (kstem in vstem or vstem in kstem)):
                     return True
     return False
 

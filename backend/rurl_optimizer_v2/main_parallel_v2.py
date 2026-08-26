@@ -761,7 +761,8 @@ def _append_facet_to_subcat_redirect(result, parsed, subcategory_match, facet_fi
     return result
 
 
-def _rescue_long_unmatched_token(keyword, target_text, threshold=8, prefix_link=False):
+def _rescue_long_unmatched_token(keyword, target_text, threshold=8, prefix_link=False,
+                                 names_cat='', names_cat_morpheme=False):
     """Hard-reject guard for the V28 search-derived rescue path.
 
     Returns the first non-stopword, non-generic-adjective query token of
@@ -789,7 +790,13 @@ def _rescue_long_unmatched_token(keyword, target_text, threshold=8, prefix_link=
 
     def _stem(t):
         t = t.lower()
-        if len(t) > 3 and t.endswith('s'):
+        # V62: strip the Dutch '-en' plural too. Without it the singular query
+        # token never equals its own category name in the plural, and the guard
+        # rejected the rescue that was RIGHT: 'loungebank' vs dom_cat
+        # 'Loungebanken' read as "the guess dropped a long product token".
+        if len(t) > 5 and t.endswith('en'):
+            t = t[:-2]
+        elif len(t) > 3 and t.endswith('s'):
             t = t[:-1]
         if len(t) > 3 and t.endswith('e'):
             t = t[:-1]
@@ -808,6 +815,16 @@ def _rescue_long_unmatched_token(keyword, target_text, threshold=8, prefix_link=
             (len(tt) >= 4 and sw.startswith(tt)) or (len(sw) >= 4 and tt.startswith(sw))
             for tt in target_toks
         ):
+            continue
+        # V62: the token is what pointed AT this category in the first place.
+        # 'grillplaat' shares no stem with 'Grillpannen', but Grillpannen is a
+        # child of the r-url's own subcategory Pannen and 95 of the query's 111
+        # matches sit in it — the descent is a refinement of the page we were
+        # already on, not the wrong-product jump this guard exists to block.
+        # Only offered for a descendant (names_cat_morpheme); sideways, the
+        # strict stem test stands.
+        if names_cat and _names_category(w, names_cat,
+                                         allow_morpheme=names_cat_morpheme):
             continue
         return w
     return None
@@ -991,6 +1008,184 @@ def _qualifier_matches_value(tok: str, value_name: str) -> bool:
         return False
     return any(_adj_norm(t) == n
                for t in _ADJ_WORD_RE.findall(value_name.lower()))
+
+
+# V62: how many products the Search API's dominant category needs behind it
+# before its verdict counts as evidence against the matcher's own pick. The
+# dominance gate in search_derived is a SHARE, and a share of 1.0 over 11
+# products is what put "kledingkast 260 hoog" on Kastonderdelen. Shares this
+# thin are a taxonomy accident, not a signal about the query.
+V62_DOM_COUNT_FLOOR = 25
+
+# V62: below this share of the query's content tokens, a kept-by-the-guard
+# redirect isn't a moderate-confidence answer, it's the scorer's rejection with
+# a nicer number on it. "karlsson matrassen vildar hr" -> Topdekmatrassen
+# /c/type_topdekmatras~Latex (1 of 4 tokens, 2 products) sat at 60 for exactly
+# this reason. Measured AFTER the append passes, so a row that earns its
+# coverage by picking up a second facet keeps the restore.
+V62_MIN_RESTORE_COVERAGE = 0.5
+
+
+def _tokens_not_represented(keyword_words, target_text) -> list:
+    """V62: the query's content tokens that leave no lexical trace in
+    `target_text` (destination category name + facet value names + url).
+
+    Same substring/stem test the V31 leftover-consumer runs inline; hoisted so
+    the V31 guard can ask the same question BEFORE it decides to keep a match,
+    and so the restore can be re-checked after the append passes.
+    """
+    from src.validation_rules import STOPWORDS, SHOP_NAMES
+    out = []
+    tt = (target_text or '').lower()
+
+    def _present(t):
+        if not t:
+            return True
+        if t in tt:
+            return True
+        st = t.rstrip('e').rstrip('s')
+        return bool(st) and st in tt
+
+    for w in keyword_words or []:
+        w = (w or '').lower()
+        if len(w) < 2 or w in STOPWORDS or w in SHOP_NAMES:
+            continue
+        if _present(w):
+            continue
+        # A glued or hyphenated compound is represented when its PARTS are.
+        # 'antislipmat' leaves no trace in "Douchematten + Antislip" as one
+        # string, but both halves are right there — counting it as missing read
+        # the query as 0% covered and threw away a correct redirect. Hyphens
+        # first (the publisher's own boundary), then every split that leaves two
+        # parts of >= 4 characters.
+        if '-' in w and all(_present(p) for p in w.split('-') if len(p) >= 3):
+            continue
+        if any(_present(w[:i]) and _present(w[i:])
+               for i in range(4, len(w) - 2)):
+            continue
+        out.append(w)
+    return out
+
+
+def _names_category(token: str, cat_name: str, allow_morpheme: bool = False) -> bool:
+    """V62: does a query token NAME the category `cat_name`?
+
+    Strict form is the lexical bridge the leftover-consumer already trusts
+    ('loungebank' -> 'Loungebanken'). The loose form is only offered when the
+    candidate category sits UNDERNEATH the destination, where the worst case is
+    a more specific page on the same subject: a shared leading morpheme of >= 5
+    characters, which is what ties a Dutch compound to the category built on the
+    same head word ('grillplaat' -> 'Grillpannen' under 'Pannen'). Sideways, that
+    same test would happily walk from a waterkoker to a waterfilter, so it stays
+    behind the descendant check.
+    """
+    from src.reliability_scorer import _keyword_bridges_value
+    if not token or not cat_name:
+        return False
+    if _keyword_bridges_value(token, cat_name):
+        return True
+    if not allow_morpheme:
+        return False
+    for w in re.findall(r'[a-zà-ž0-9]+', cat_name.lower()):
+        shared = 0
+        for a, b in zip(w, token):
+            if a != b:
+                break
+            shared += 1
+        if shared >= 5:
+            return True
+    return False
+
+
+def _compound_head_variants(tok: str, cat_name: str) -> list:
+    """V62: query token -> [token, qualifier-prefix] when the token is a compound
+    of "<qualifier> + <the category's own head noun>".
+
+    "betontegel" in Tuintegels is beton + tegel: the tail names the category we
+    are already on, so the prefix is the part still looking for a facet -
+    materiaal 'Beton', 406 products, sitting unused in that very subcategory
+    while the redirect carried only kleurtint 'Antraciet'. Bounded on both sides
+    (shared tail >= 4, remaining prefix >= 4) and anchored on the DESTINATION's
+    name, so it cannot invent a qualifier out of an unrelated token.
+    """
+    t = (tok or '').lower()
+    out = [t]
+    if len(t) < 8:
+        return out
+    cands = set()
+    for w in re.findall(r'[a-z\u00e0-\u017e]+', (cat_name or '').lower()):
+        cands.add(w)
+        if w.endswith('s'):
+            cands.add(w[:-1])
+        if len(w) > 5 and w.endswith('en'):
+            cands.add(w[:-2])
+    # Every split whose TAIL is the ending of a category word. Taking each split
+    # rather than the longest common suffix matters: 'betontegel' and 'tuintegel'
+    # happen to share 'ntegel', and 'beto' is not a qualifier - 'beton' is.
+    for i in range(4, len(t) - 3):
+        tail = t[i:]
+        if len(tail) >= 4 and any(c.endswith(tail) for c in cands):
+            if t[:i] not in out:
+                out.append(t[:i])
+    return out
+
+
+def _v50_relaxed_result(r, parsed, multi_facet, relax_depth, dom_count,
+                        current_score, margin=25):
+    """V50 relaxation, as a callable.
+
+    A multi-token R-URL whose full query AND-collapses to a near-empty result
+    (dom_count <= 2) had its category chosen from statistical noise. Re-run the
+    WHOLE cascade on the query minus its trailing significant token(s) and return
+    the relaxed row only if it scores `margin` higher, so a low-count-but-correct
+    pick is never churned. Bounded to 2 steps. Returns None when it doesn't apply.
+
+    V62: hoisted out of the cascade's tail so the V28 hard-reject can use it too.
+    That branch RETURNS on the spot, so the relaxation below it was unreachable —
+    /r/cavia_kooi_twee_verdieping/ (2 products behind 'Konijnenhokken') shipped
+    with no redirect at all, while relaxing to 'cavia' scores 95 on Cavia's.
+    """
+    from src.validation_rules import STOPWORDS as _SW50, SHOP_NAMES as _SN50
+    if relax_depth != 0 or dom_count is None or dom_count > 2:
+        return None
+    if CURATED_OVERRIDES.get((parsed.main_category,
+                              (parsed.keyword or '').strip().lower())):
+        return None
+    sig = [w for w in re.split(r'[\s\-_]+', (parsed.keyword or '').lower())
+           if len(w) >= 3 and w not in _SW50 and w not in _SN50 and not w.isdigit()]
+    if len(sig) < 4:
+        return None
+    # Only include a subcat segment when the source URL actually has one (the
+    # parser sets subcategory_name to the maincat when it doesn't, which would
+    # build a duplicated /products/mc/mc/r/... path).
+    sub = (parsed.subcategory_name
+           if (parsed.subcategory_id
+               and parsed.subcategory_name != parsed.main_category)
+           else None)
+    best = None
+    # Try dropping 1..K trailing significant tokens; a single drop can stall on a
+    # mediocre intermediate, so evaluate each relaxation and keep the strongest.
+    for k in range(1, min(3, len(sig) - 1) + 1):
+        rkw = '_'.join(sig[:-k])
+        rbase = (f"/products/{parsed.main_category}/{sub}/r/{rkw}/"
+                 if sub else f"/products/{parsed.main_category}/r/{rkw}/")
+        try:
+            rel = process_url_v2((rbase, multi_facet, relax_depth + 1))
+        except Exception:
+            rel = None
+        if rel and rel.get('redirect_url'):
+            rs = rel.get('reliability_score') or 0
+            if best is None or rs > best[0]:
+                best = (rs, rel, rkw)
+    if best and best[0] >= (current_score or 0) + margin:
+        out = dict(best[1])
+        out['original_url'] = r.original_url
+        out['keyword'] = r.keyword
+        out['reason'] = (f"[V50 relaxed] full query collapsed to {dom_count} "
+                         f"product(s); relaxed to '{best[2].replace('_', ' ')}'; "
+                         + (out.get('reason') or ''))
+        return out
+    return None
 
 
 def _spurious_brand_facet(pf_name, pf_value_name, keyword, dom_cat_name, matcher) -> bool:
@@ -1567,6 +1762,13 @@ def process_url_v2(args):
     _kw_tokens = [w for w in (parsed.keyword or '').lower().split() if len(w) >= 2]
     _shops_in_kw = _detect_shops(parsed.keyword)
     _non_stop_non_shop = [w for w in _kw_tokens if w not in STOPWORDS and w not in SHOP_NAMES]
+    # V62: a qualifier with nothing left to qualify is not a content token. See
+    # DANGLING_QUALIFIERS - "zonder abonnement" is a commercial condition, and
+    # letting the bare 'zonder' through sent /r/zonder_abonnement/ from Mobiele
+    # telefoons to Wekkerradio's on a facet value named 'Zonder'.
+    from src.validation_rules import DANGLING_QUALIFIERS as _DQ62
+    if _non_stop_non_shop and all(w in _DQ62 for w in _non_stop_non_shop):
+        _non_stop_non_shop = []
     if (parsed.full_category_path
             and _kw_tokens
             and not _non_stop_non_shop
@@ -1593,8 +1795,14 @@ def process_url_v2(args):
             'facet_count': 1 if _ef27 else 0,
             'match_score': 0,
             'match_type': 'stopwords_only_clean_category',
-            'reliability_score': 60,  # C tier: stopwords-only query has nothing to match — clean-category redirect is safe but always needs a review
-            'reliability_tier': 'C',
+            # V62: was 60 (tier C, "needs review"). The destination here is the
+            # R-URL itself minus the /r/<keyword>/ segment — same category, same
+            # existing /c/ facet, nothing added and nothing dropped. There is no
+            # match to be wrong about, so there is nothing for a reviewer to
+            # check: a stopwords-only query on a category page IS that category
+            # page. Tier A.
+            'reliability_score': 99,
+            'reliability_tier': 'A',
             'h1_similarity': 0,
             'h1_overlap': 0,
             'h1_query_coverage': 0,
@@ -2522,6 +2730,13 @@ def process_url_v2(args):
     final_score = reliability_score
     final_tier = reliability_tier
     flag_for_review = ''
+    # V62: set when the V31 guard restored a zeroed score because it chose to keep
+    # the matcher's result. Read twice below: the append passes treat such a row as
+    # trusted (they used to skip it, because they gate on the PRE-restore score —
+    # so the rows the guard had just decided to trust were the only ones that
+    # never got a second facet), and the restore itself is re-tested at the end
+    # against how much of the query the final url actually accounts for.
+    _v62_restored = False
     # V45: facet value names appended by the search-derived branches below. The
     # override branch (~line 3044) otherwise CLEARS out_facet_value_names because
     # value names can't be reconstructed from the URL — so we collect them here
@@ -2559,28 +2774,75 @@ def process_url_v2(args):
         # multi-facet result is more trustworthy than search-derived's
         # different-subcat guess. Restore a tier-C score so the row isn't
         # rescued out from under the user.
+        #
+        # V62 (2026-08-26): three holes in that reasoning, all found in one
+        # review pass over redirects_global_828a73ad:
+        #  1. "in the URL's own subcategory" was tested with r.subcategory_id,
+        #     which url_builder copies from the PARSED url on nearly every path.
+        #     It is therefore true even when the redirect lands somewhere else
+        #     entirely, so the guard protected precisely the cross-subcat jumps
+        #     its own docstring excludes: "beter bed aanbieding" in
+        #     Seniorenbedden -> Tafels /c/type_tafels~Bed, "fietsen berging" in
+        #     Tuinhuisjes -> Hogedrukreinigers /c/t_hdrukrein~Fietsen. Ask the
+        #     destination instead (redirect_subcat_id, from the redirect url).
+        #  2. It never asked whether the query MENTIONS the category it was
+        #     overruling. "loungebank tuin sale" kept Tuinbanken /c/ruimte~Tuin
+        #     (a facet the category name already implies, 92k of ~100k products)
+        #     while ignoring the one token that names a category: Loungebanken,
+        #     which held 8.696 of the query's 9.980 matches.
+        #  3. Descent was blocked along with everything else, even though Fix D
+        #     already treats a DESCENDANT dominant category as the safe
+        #     direction: "grillplaat voor inductie" kept Pannen /c/optie_pan~
+        #     Inductie instead of descending into its own child Grillpannen.
         _skip_rescue_override = False
+        # V62: "anchored in the URL's own subcategory" includes a descent into a
+        # CHILD of it - that is the same subject, only narrower, and a normal
+        # outcome of the cascade (/voor_volwassenen_562438/ -> its child Erotische
+        # slips). Only a jump OUT of the subtree disqualifies the guard.
+        _own_slug62 = str(parsed.subcategory_name or '')
+        _dest_slug = ((r.redirect_url or '').split('/c/')[0]
+                      .rstrip('/').rsplit('/', 1)[-1])
+        _in_own_subtree = bool(_own_slug62) and (
+            _dest_slug == _own_slug62 or _dest_slug.startswith(_own_slug62 + '_'))
         if (
             r.success
             and not _brand_spurious  # V39: never restore a rejected spurious-brand match
             and getattr(r, 'facet_count', 0) >= 1
-            and r.subcategory_id
-            and r.subcategory_id == parsed.subcategory_id
+            and _in_own_subtree
         ):
+            _dom_slug = derived.get('dom_cat_url_slug') or ''
             _derived_subcat_id = ''
-            for _part in reversed((derived.get('dom_cat_url_slug') or '').split('_')):
+            for _part in reversed(_dom_slug.split('_')):
                 if _part.isdigit():
                     _derived_subcat_id = _part
                     break
             if _derived_subcat_id and _derived_subcat_id != parsed.subcategory_id:
-                _skip_rescue_override = True
-                if reliability_score < 50:
-                    final_score = 60
-                    final_tier = get_reliability_tier(final_score)
-                    final_reason = (r.reason or '') + (
-                        ' [V31: kept matcher result; search-derived suggested '
-                        f"different subcat '{derived.get('dom_cat_name','')}']"
-                    )
+                # Stand aside when a query token the destination leaves
+                # unrepresented actually names the dominant category, and that
+                # category has enough products behind it to be evidence.
+                _dom_is_child = bool(_dest_slug) and _dom_slug.startswith(_dest_slug + '_')
+                _left62 = _tokens_not_represented(keyword_words, ' '.join(filter(None, [
+                    redirect_cat_name or '',
+                    r.facet_value_names or '',
+                    r.redirect_url or '',
+                ])))
+                _dom_named = any(
+                    len(_t) >= 4
+                    and _names_category(_t, derived.get('dom_cat_name', '') or '',
+                                        allow_morpheme=_dom_is_child)
+                    for _t in _left62
+                )
+                _dom_evidence = (search_derived_dom_count or 0) >= V62_DOM_COUNT_FLOOR
+                if not (_dom_named and _dom_evidence and derived.get('redirect_url')):
+                    _skip_rescue_override = True
+                    if reliability_score < 50:
+                        final_score = 60
+                        _v62_restored = True
+                        final_tier = get_reliability_tier(final_score)
+                        final_reason = (r.reason or '') + (
+                            ' [V31: kept matcher result; search-derived suggested '
+                            f"different subcat '{derived.get('dom_cat_name','')}']"
+                        )
 
         if reliability_score < 50 and derived.get('redirect_url') and not _skip_rescue_override:
             # Preserve any /c/<facet> the original URL carried — search-derived
@@ -2730,10 +2992,17 @@ def process_url_v2(args):
             _synonym_src = ''
             if local_match_used and getattr(local_match, 'match_type', '') == 'synonym':
                 _synonym_src = getattr(local_match, 'keyword', '') or ''
+            # V62: tell the guard which category the rescue picked, and whether
+            # it sits under the r-url's own subcategory.
+            _dom_is_desc = bool(parsed.subcategory_name) and (
+                (derived.get('dom_cat_url_slug') or '')
+                .startswith(str(parsed.subcategory_name) + '_'))
             _reject_tok = _rescue_long_unmatched_token(
                 parsed.keyword,
                 ' '.join(filter(None, [derived.get('dom_cat_name', ''),
                                        appended_value_name, _synonym_src])),
+                names_cat=derived.get('dom_cat_name', '') or '',
+                names_cat_morpheme=_dom_is_desc,
             )
             if _reject_tok:
                 # V33: before giving up, try a multi-facet assembly. A single
@@ -2848,6 +3117,17 @@ def process_url_v2(args):
                         'success': True,
                         'reason': _xfb['reason'] + f" (after: {reject_reason})",
                     }
+                # V62: before shipping nothing, try the V50 relaxation. This
+                # branch returns on the spot, so the relaxation at the end of the
+                # cascade never saw these rows — and "over-specific query" is
+                # exactly what the reject just diagnosed. Only reached when the
+                # cross-maincat fallback above found nothing either, so it can
+                # only ever replace an empty redirect.
+                _rel50 = _v50_relaxed_result(r, parsed, multi_facet, _relax_depth,
+                                             search_derived_dom_count, 0)
+                if _rel50:
+                    _rel50['reject_reason'] = ''
+                    return _rel50
                 # Fall through to the return; the V31 leftover block (score>=50)
                 # and the maincat validator (needs a redirect URL) both no-op.
                 return {
@@ -2981,7 +3261,12 @@ def process_url_v2(args):
         # (including subcategory_name), even when the keyword token has
         # zero lexical or semantic representation in the target.
         local_leftover_tokens = []
-        if has_matchable and reliability_score >= 50 and final_redirect_url:
+        # V62: `or _v62_restored` — the guard-restored rows are the ones that most
+        # need a second facet ("betontegel 60x60 antraciet" kept only
+        # kleurtint~Antraciet while materiaal~Beton sat unused in the same
+        # subcat), and they were the only rows this pass could never see: the
+        # guard raises final_score, not the reliability_score gated on here.
+        if has_matchable and (reliability_score >= 50 or _v62_restored) and final_redirect_url:
             from src.validation_rules import GENERIC_ADJECTIVES
             from src.reliability_scorer import _keyword_bridges_value as _kbv_leftover
             target_text = ' '.join(filter(None, [
@@ -3013,7 +3298,7 @@ def process_url_v2(args):
                 local_leftover_tokens.append(w)
 
         if (
-            reliability_score >= 50
+            (reliability_score >= 50 or _v62_restored)  # V62
             and final_redirect_url
             and local_leftover_tokens
             and derived.get('dom_cat_url_slug')
@@ -3102,10 +3387,19 @@ def process_url_v2(args):
         # stray adjective can never anchor a brand. Same-subcat + lexical-bridge
         # + axis-not-present make this safe and additive ("ronde schaal" gains
         # vorm~Rond, "grote plastic wasmand" gains f_woonacc~Groot).
-        if (has_matchable and reliability_score >= 50 and final_redirect_url
+        if (has_matchable and (reliability_score >= 50 or _v62_restored)  # V62
+                and final_redirect_url
                 and '/r/' not in final_redirect_url):
             from src.validation_rules import STRICT_FACETS
-            _DESCRIPTOR_PREFIXES = ('vorm', 'kleur', 'materiaal', 'opties', 'optie', 'f_', 'formaat')
+            # V62: 'met_'/'zonder_' added. They are attribute axes like the rest
+            # ("Met lade", "Met matras"), but the whitelist left them out, so
+            # /r/bed_140x200_met_laden/ shipped with only afmeting~'140 x 200'
+            # while met_matras_bed~'Met lade' (8.678 products, same subcategory)
+            # sat one lexical step away. The value still has to match the
+            # leftover token whole-token-wise, so a stray adjective cannot
+            # attach itself to a boolean axis.
+            _DESCRIPTOR_PREFIXES = ('vorm', 'kleur', 'materiaal', 'opties', 'optie',
+                                    'f_', 'formaat', 'met_', 'zonder_')
             _base = final_redirect_url.split('/c/', 1)[0].rstrip('/')
             _subslug = _base.rsplit('/', 1)[-1]
             _ex_part = (final_redirect_url.split('/c/', 1)[1].rstrip('/')
@@ -3135,9 +3429,11 @@ def process_url_v2(args):
                 for _tok in _qual:
                     # V61: was next(...) over row order; pick the most-stocked
                     # matching value, url as the stable last resort.
+                    _tok_vars = _compound_head_variants(_tok, redirect_cat_name or '')
                     _hits = [fv for fv in _cand
                              if fv.facet_name.lower() not in _ex_axes
-                             and _qualifier_matches_value(_tok, fv.facet_value_name)]
+                             and any(_qualifier_matches_value(_tv, fv.facet_value_name)
+                                     for _tv in _tok_vars)]
                     _hit = min(_hits,
                                key=lambda fv: (-(getattr(fv, 'count', 0) or 0), fv.url)
                                ) if _hits else None
@@ -3904,58 +4200,17 @@ def process_url_v2(args):
         except Exception:
             is_cross_category = True
 
-    # V50: over-specific query relaxation. A multi-token R-URL whose full query
-    # AND-collapses to a near-empty result (dom_count <= 2) has its category
-    # chosen from statistical noise — "playmobil family fun grote camping"
-    # (1 product) lands on Poppenvoertuigen, but dropping the trailing junk gives
-    # "playmobil family fun" -> Bouwstenen + the Playmobil Family Fun series (95).
-    # Re-run the WHOLE cascade on the query minus its last significant token and
-    # adopt the relaxed result ONLY if it scores much higher (>= +25) — so a
-    # low-count-but-correct pick ("hot wheels ultimate garage" -> Speelgoed
-    # garages) is never churned. Bounded to 2 steps; curated overrides win first.
-    _RELAX_MARGIN = 25
-    if (_relax_depth == 0 and not _ov
+    # V50: over-specific query relaxation — "playmobil family fun grote camping"
+    # (1 product) lands on Poppenvoertuigen, while "playmobil family fun" gives
+    # Bouwstenen + the Playmobil Family Fun series (95). See
+    # _v50_relaxed_result for the rule; curated overrides win first.
+    if (not _ov
             and final_match_type in ('category_fallback', 'search_derived_samecat',
-                                     'search_derived_samecat_faceted')
-            and search_derived_dom_count is not None
-            and search_derived_dom_count <= 2):
-        _sig = [w for w in re.split(r'[\s\-_]+', (parsed.keyword or '').lower())
-                if len(w) >= 3 and w not in STOPWORDS and w not in SHOP_NAMES
-                and not w.isdigit()]
-        if len(_sig) >= 4:
-            # Only include a subcat segment when the source URL actually has one
-            # (parser sets subcategory_name to the maincat when it doesn't, which
-            # would build a duplicated /products/mc/mc/r/... path).
-            _sub = (parsed.subcategory_name
-                    if (parsed.subcategory_id
-                        and parsed.subcategory_name != parsed.main_category)
-                    else None)
-            _best = None  # (score, result_dict)
-            # Try dropping 1..K trailing significant tokens; a single drop can
-            # stall on a mediocre intermediate ("playmobil family fun grote" ->
-            # Poppen 70), so evaluate each relaxation and keep the strongest.
-            for _k in range(1, min(3, len(_sig) - 1) + 1):
-                _rkw = '_'.join(_sig[:-_k])
-                _rbase = (f"/products/{parsed.main_category}/{_sub}/r/{_rkw}/"
-                          if _sub else f"/products/{parsed.main_category}/r/{_rkw}/")
-                try:
-                    _rel = process_url_v2((_rbase, multi_facet, _relax_depth + 1))
-                except Exception:
-                    _rel = None
-                if _rel and _rel.get('redirect_url'):
-                    _rs = _rel.get('reliability_score') or 0
-                    if _best is None or _rs > _best[0]:
-                        _best = (_rs, _rel, _rkw)
-            if _best and _best[0] >= final_score + _RELAX_MARGIN:
-                _rel = dict(_best[1])
-                _rel['original_url'] = r.original_url
-                _rel['keyword'] = r.keyword
-                _rel['reason'] = (
-                    f"[V50 relaxed] full query collapsed to "
-                    f"{search_derived_dom_count} product(s); relaxed to "
-                    f"'{_best[2].replace('_', ' ')}'; " + (_rel.get('reason') or ''))
-                return _rel
-
+                                     'search_derived_samecat_faceted')):
+        _rel50 = _v50_relaxed_result(r, parsed, multi_facet, _relax_depth,
+                                     search_derived_dom_count, final_score)
+        if _rel50:
+            return _rel50
     # V51: H1 + generic-descriptor guard on cross-category facet jumps. The
     # url_builder "redirected to valid category" path lets a facet value living
     # in a DIFFERENT subcategory pull the redirect there. That's right when the
@@ -4113,6 +4368,44 @@ def process_url_v2(args):
                 final_reason = ((final_reason or '')
                                 + f"; [V61] dropped {', '.join(_drop)} "
                                   "(not present on the destination page)")
+
+    # V62: re-test the V31 guard's restore, now that every append and prune has
+    # had its say. The guard hands out a flat 60 on the strength of "the matcher
+    # found a facet in the URL's own subcategory" alone — it never asks how much
+    # of the QUERY that facet accounts for. "karlsson matrassen vildar hr" ->
+    # Topdekmatrassen /c/type_topdekmatras~'Latex topdekmatrassen' accounts for
+    # one token of four, and not even that one honestly ('matrassen' fuzzy-hit
+    # the tail of the value; 'latex' appears nowhere in the query), yet it
+    # shipped at 60 = tier C, "review nodig", with 2 products behind it. A row
+    # that still leaves the majority of the query unrepresented is not a
+    # moderate-confidence answer; it goes back to the score the scorer gave it.
+    # Only when the destination is still the one the guard vouched for. A later
+    # path (Fix D, V36, RC5) may have replaced the category outright; that url is
+    # not the guard's doing and carries its own score, so re-testing the restore
+    # against it would punish a decision the guard never made. Appended facets
+    # (same category, more /c/ pieces) are exactly what SHOULD be credited.
+    _v62_same_cat = (final_redirect_url or '').split('/c/')[0] == (
+        (r.redirect_url or '').split('/c/')[0])
+    if _v62_restored and final_redirect_url and _v62_same_cat:
+        _cov_all = _tokens_not_represented(keyword_words, '')
+        _cov_left = _tokens_not_represented(keyword_words, ' '.join(filter(None, [
+            final_redirect_cat_name or '',
+            out_facet_value_names or '',
+            final_redirect_url or '',
+        ])))
+        if _cov_all:
+            _cov62 = (len(_cov_all) - len(_cov_left)) / len(_cov_all)
+            if _cov62 < V62_MIN_RESTORE_COVERAGE:
+                final_score = reliability_score
+                final_tier = get_reliability_tier(final_score)
+                final_reason = ((final_reason or '')
+                                + f"; [V62] restore withdrawn — destination accounts "
+                                + f"for {int(round(100 * _cov62))}% of the query "
+                                + f"(unrepresented: {', '.join(_cov_left)})")
+                if not reject_reason:
+                    reject_reason = (_v27_reject_reason(
+                        matched_keywords, unmatched_keywords,
+                        match_type=final_match_type) or '')
 
     # V61 last resort. A builder REJECTION is truthy (RedirectResult has no
     # __bool__), so `if not result` above never fired for one and the row shipped

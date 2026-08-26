@@ -95,6 +95,14 @@ SYNONYMS = {
     "bbq": ["barbecue", "barbeque", "grill", "buitenkeuken", "kamado"],
     "vloerkleed": ["tapijt", "karpet", "kleed"],
     "bijzettafel": ["salontafel", "hoektafel"],
+    # V62: een zwevende plank is in de taxonomie een BLINDE plank (de dragers
+    # zitten in de plank, niet eronder) — t_droogrek 'Blind' in Wandplanken,
+    # 6.090 producten. Zonder deze brug matchte /r/zwevende_planken/ alleen op
+    # 'planken' en belandde het cross-category op type_sp 'Broodplanken' in
+    # Snijplanken. 'Blind' komt als facetwaarde alleen in t_droogrek voor (en als
+    # merk, waar de merk-guards het tegenhouden), dus de reikwijdte is smal.
+    "zwevend": ["blind"],
+    "zwevende": ["blind"],
 
     # ==========================================================================
     # BEDDENGOED — "zonder hoes" / "hoesloos" => facetwaarde
