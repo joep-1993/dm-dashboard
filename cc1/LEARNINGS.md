@@ -1,6 +1,54 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een tweede account is niet één constante erbij (2026-08-26, DMA+)
+
+NL draait sinds 2026-08-20 op twee Google Ads-accounts, en de DMA exclusions-tool en DMA bidding waren
+daar toen al op aangepast. DMA+ niet — die pakte nog steeds één `customer_id` uit `COUNTRY_CONFIG` en
+zocht per rij exact één campagnenaam. Gevolg: een winkel die uit een categorie viel bleef gewoon
+doorserveren in `4089798584`, 2.100 campagnes lang.
+
+**De tweede naamconventie is het echte werk, niet het account-id.** DMA NL heeft 9.834 campagnes
+`PLA/<cat>_<tier>`; DMA NL 2 heeft er 2.100, allemaal `PLA/<cat>_<tier>_limit` of `_label`. Eén
+`(deepest_cat, cl1)`-slot resolvet daarmee naar één tot drie campagnes verdeeld over twee accounts, en
+elke mutate moet naar de `customer_id` van *die* campagne. De twee conventies sluiten elkaar uit
+(`PLA/X_a` matcht nooit het gesuffixte patroon en omgekeerd), dus per account probet de lookup alleen
+de vormen die daar voorkomen.
+
+**Wat stilletjes meekantelt zodra één slot meerdere campagnes kan opleveren:**
+- *Missing-campagnes.* Als je de gesuffixte namen naïef opzoekt, wordt elke categorie zonder NL 2-
+  tegenhanger tweemaal "missing" — dat zijn er ~8.800. Een slot mag pas missing heten als géén enkel
+  account 'm heeft, en dan onder de naam van het primaire account.
+- *Dekkingspercentage.* `campaigns_found / slots` gaat over de 100% zodra één slot uit twee accounts
+  komt. Coverage moet per slot geteld worden, campagnes zijn een apart getal.
+- *Log-parsers.* `_parse_affected_entities` leest de campagnenaam tot `(N ad group(s))`, dus een
+  account-tag kan erachter maar niet ertussen. De ad groups in DMA NL 2 heten zónder suffix, dus de
+  per-ad-group-regels lijken dubbel; de kopregel erboven is wat ze onderscheidt.
+
+**Exclude en reverse-exclude horen bij elkaar, ook al vroeg niemand om de tweede.** Alleen de add-kant
+verbreden bouwt in het nieuwe account stille, permanente uitsluitingen op: een winkel die terugkomt
+wordt in DMA NL losgelaten en blijft in DMA NL 2 geblokkeerd. Dat is geen symmetrie-om-de-symmetrie —
+DMA+ beheert daar exclusion-*state*, en state die je aanmaakt moet je kunnen opruimen. Bewust níet
+meeverbreed: inclusion, de validators, de check-sheets en de coverage-rapportage, want DMA NL 2's
+campagnes worden niet vanuit DMA+ aangemaakt of onderhouden.
+
+**Verifiëren zonder te schrijven kon in drie lagen, en dat was de moeite waard.** (1) Offline tests met
+fakes voor de routing — welk account krijgt welke mutate. (2) Een read-only match-check tegen productie:
+alle 2.100 echte NL 2-namen terugvoeren door `find_category_campaigns()`, 0 unreachable — dat bewijst de
+naamopbouw zonder één aanname. (3) Een dry-run door de live tool, want pas dáár zie je de boekhouding
+(dekking 56/62, 6 missing, 56 vs 28 campagnes per account). Laag 2 ving wat laag 1 niet kan zien
+(kloppen mijn aannames over productie?), laag 3 wat laag 2 niet ziet (klopt de rapportage?).
+
+**Vooraf gecheckt dat de listing trees in DMA NL 2 al een INDEX3-niveau hebben**, met bestaande
+shop-negatives. Zonder dat zou `add_shop_exclusions_batch` daar het pad in lopen dat positieve leaf
+UNITs verwijdert en als SUBDIVISION herbouwt — een structurele verbouwing van 2.100 trees als
+neveneffect van "even ook dit account meenemen".
+
+**Bijvangst:** `_parse_affected_entities` kapte een categorienaam met een spatie doormidden
+(`PLA/Philips 1000 series_a` → `PLA/Philips`) omdat de missing-regex op `\S+` matchte, en de afwijkende
+bewoording van de combined-run (`not found in cache:` zonder "Google Ads") werd helemaal niet opgepikt.
+Beide in één regex verholpen.
+
 ## Drie gaten achter één "die is al geredirect" (2026-08-26, Redirect-tool)
 
 Joep wilde `/products/r/peter+gevaert+leffingestraat+oostende/` naar de homepage, maar de tool zei dat

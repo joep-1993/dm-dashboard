@@ -8,6 +8,24 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### DMA+ single-account-onderdelen tegen het licht houden (logged 2026-08-26)
+
+De shop-exclusions van DMA+ lopen sinds `24958df` over beide NL-accounts. Bewust níet meeverbreed,
+omdat DMA NL 2's campagnes niet vanuit DMA+ worden aangemaakt of onderhouden:
+
+- **Inclusion / reverse-inclusion** — maakt ad groups en listing trees aan. Zou in DMA NL 2 nieuwe
+  structuur bouwen in campagnes die iemand anders beheert. Alleen aanpassen als DMA+ ook het beheer
+  van dat account overneemt.
+- **`validate_cl1` / `validate_ads` / `validate_trees`** — dezelfde reden; die repareren structuur.
+  Wél de vraag waard of DMA NL 2 überhaupt gevalideerd wordt, en zo niet, door wie.
+- **Coverage-rapport** (`_fetch_pla_campaign_names` in `dma_plus_monthly.py`) — leest één account en
+  meldt per categorie of a/b/c bestaat. Dat is de structuurkant, dus single-account is nu correct,
+  maar het rapport zegt niet dát het maar naar één account kijkt. Een regel in de kop scheelt een
+  verkeerde conclusie.
+
+Trigger om dit op te pakken: zodra DMA NL 2 campagnes zou moeten krijgen die er nog niet zijn, of als
+iemand het coverage-rapport als "dekking over heel NL" gaat lezen.
+
 ### Bestaande `/r/`-redirects missen hun `+`-vorm (logged 2026-08-26)
 
 De write-side is gerepareerd (zie TASKS/LEARNINGS 2026-08-26), dus nieuwe redirects krijgen beide

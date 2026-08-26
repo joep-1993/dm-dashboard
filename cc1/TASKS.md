@@ -4,6 +4,62 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-26 — DMA+: shop-exclusions liepen langs DMA NL 2 heen
+
+Aanleiding: DMA exclusions en DMA bidding waren op 2026-08-20 al op het tweede NL-account gezet, DMA+
+niet. Die pakte nog één `customer_id` en zocht per rij exact één campagnenaam, dus `4089798584` werd
+nooit geraakt. Details in LEARNINGS (zelfde datum). Commit `24958df`.
+
+Gedaan:
+
+- [x] **Naamconventie van DMA NL 2 live geverifieerd** — 2.100 campagnes, exact 1.050 `_limit` +
+      1.050 `_label`, allemaal `PLA/<cat>_<tier>_<suffix>` met dezelfde `deepest_cat`-namen. DMA NL
+      heeft 9.834 plain + wat named campagnes. Alle 1.050 NL 2-slots bestaan óók in DMA NL.
+- [x] **Listing trees in DMA NL 2 vooraf gecheckt** — die hebben al een INDEX3 (winkel) niveau met
+      bestaande negatives, dus `add_shop_exclusions_batch` hangt er gewoon bij en het tree-rebuild-pad
+      (leaf UNIT → SUBDIVISION) komt er niet aan te pas.
+- [x] **Account-laag in `backend/campaign_processor.py`** — `EXCLUSION_ACCOUNTS`,
+      `ACCOUNT_CAMPAIGN_SUFFIXES`, `ACCOUNT_NAMES` + `exclusion_account_ids()`,
+      `prefetch_pla_campaigns_for_accounts()`, `find_category_campaigns()`, `_account_tag()`. De
+      bestaande single-account `prefetch_pla_campaigns_and_ad_groups` is ongemoeid gelaten; die heeft
+      nog vijf andere afnemers (check-sheets, legacy exclusion).
+- [x] **Doorgevoerd in de drie exclusion-entrypoints** — `process_exclusion_sheet_v2` (Exclude Shops),
+      `process_reverse_exclusion_sheet` (Reverse Exclude) en beide helften van
+      `process_combined_exclusion_v2` (monthly-delta). Elke mutate gaat naar de `customer_id` van de
+      campagne zelf.
+- [x] **Reverse-exclude bewust meegenomen** (Joep akkoord) — anders stapelt DMA NL 2 stille,
+      permanente uitsluitingen op voor winkels die wél weer in DMA NL mogen draaien.
+- [x] **Boekhouding gecorrigeerd** — slot telt pas als missing als géén account 'm heeft; dekking per
+      slot i.p.v. per campagne (anders >100%); nieuwe logregels `Accounts in scope`, `[DMA NL 2]`-tag
+      achter de campagnenaam en `Campaigns matched per account`.
+- [x] **Log-parser gefikst** (`backend/dma_plus_service.py`) — de missing-regex matchte op `\S+` en
+      kapte `PLA/Philips 1000 series_a` af tot `PLA/Philips`; ook de combined-run-bewoording
+      (`not found in cache:` zonder "Google Ads") werd niet opgepikt. Beide in één regex.
+- [x] **Getest** — `backend/test_dma_plus_multi_account.py` (10 offline tests met fakes), een
+      read-only match-check waarin alle 2.100 NL 2-campagnes bereikbaar bleken (0 unreachable), en
+      twee dry-runs door de live tool op Huishoudelijk/cl1=a: 84 batch calls, 56 campagnes in DMA NL
+      en 28 in DMA NL 2, dekking 56/62 (90%), 6 missing alleen onder de plain naam. De NL 2-campagnes
+      komen ook in de export/history terecht.
+- [x] **Backend herstart** — `fuser -k 8003/tcp` + relaunch, PID 45759. Daarmee is en passant ook de
+      redirect-tool-fix van dezelfde dag live (die stond hieronder nog als open punt).
+- [x] **Memory bijgewerkt** — `dma_nl_second_account.md` beschrijft nu ook de DMA+-kant en welke
+      onderdelen bewust single-account blijven.
+
+Open:
+
+- [ ] **Echte (niet-dry) run naar DMA NL 2 is nog niet gedaan.** De `customer_id`-routing zit in de
+      offline tests en de trees zijn geschikt bevonden, maar er is nog geen negative daadwerkelijk
+      weggeschreven in `4089798584`. Eén shop + één categorie draaien en de tree terugleze is genoeg.
+- [ ] **Runtime van de monthly-delta stijgt** — er komen 2.100 ad groups bij (12.211 → 14.311, +17%),
+      en de rate-limit-pauze is 0,3s per ad group. Meten bij de eerstvolgende maandrun.
+- [ ] **Pre-existing testfalen, los hiervan**:
+      `backend/test_kopteksten_faq_audit.py::test_faq_delete_route_single_and_clears_url_validation`
+      — de DELETE-handler in `main.py` ruimt `pa.url_validation` niet meer op (finding #3 uit de
+      2026-06-12 audit is geregresseerd).
+- [ ] **Cosmetisch**: `_parse_affected_entities` zet via de brede fallback-regex ook varianten met een
+      afsluitend quote (`PLA/X_a'`) in de campagnelijst, waardoor de export ~2× zoveel campagnenamen
+      telt als er zijn. Bestaat al langer, raakt alle exclusion-runs.
+
 ### 2026-08-26 — Redirect-tool: de `+`-vorm van `/r/`-URL's werd nooit weggeschreven
 
 Aanleiding: `/products/r/peter+gevaert+leffingestraat+oostende/` bleef op NL én BE bereikbaar terwijl de
@@ -41,8 +97,10 @@ Gedaan:
 
 Open:
 
-- [ ] **Backend op :8003 draait zonder `--reload`**, dus deze fix is pas actief na kill+relaunch
-      (`fuser -k 8003/tcp`) plus Ctrl+Shift+R. Niet gedaan — een restart sloopt een lopende Tier-A-run.
+- [x] ~~**Backend op :8003 draait zonder `--reload`**, dus deze fix is pas actief na kill+relaunch
+      (`fuser -k 8003/tcp`) plus Ctrl+Shift+R. Niet gedaan — een restart sloopt een lopende Tier-A-run.~~
+      Alsnog gedaan om 15:03 in de DMA+-sessie (PID 45759), toen er niets liep — de facets-refresh was
+      om 12:51 klaar. Frontend nog wel hard herladen.
 - [ ] **Backfill**: bestaande `/r/`-rows waar de `+`-vorm ontbreekt. Niet te vinden via `equiv_key`,
       want die collapst `+` en `_` op één key (ook in `build_redirect_index`) — vraagt een aparte pass
       over `GET /api/redirects`. BACKLOG-punt.
