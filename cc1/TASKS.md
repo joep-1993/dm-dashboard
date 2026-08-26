@@ -4,6 +4,54 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-26 — Auto-redirects V63: de twee openstaande punten + review 280-309
+
+Vervolg op de V62-entry hieronder. Uitwerking in LEARNINGS (zelfde datum, "Het morfeem dat aan de
+staart van het ene woord en de kop van het andere zit"); code in `68621f0` en `2fc5f8f`.
+
+Gedaan:
+
+- [x] **Morfeem-dekking als rangschikking** (`_token_match_weight` + `_shared_morpheme_len`, 0,5 voor
+      een gedeeld morfeem, som van gewichten als sorteersleutel, bodem 1.0 per waarde, herhaald token
+      telt één keer). Regel 326 → `t_tuinstoelkussen~7224100` 'Loungekussens' [80 B], regel 345 →
+      `type_bouwblok~23800788` 'Magnetisch bouwspeelgoed' [80 B].
+- [x] **De V35-graft plakt geen as erbij die het coverage-resultaat al zegt.** Was de reden dat 345
+      `levensfase~'Babyspeelgoed'` naast het goede facet hield.
+- [x] **Zaagbladen gated + de V43-poort geldt nu ook voor pass 1** (`filter_by_subcategory` neemt
+      afstammelingen mee, dus de poort hoorde daar ook). Regel 335 →
+      `klussen_486173_4468911/c/merk~486285~~t_zaagmachines~10437046`, wat Joep vroeg.
+- [x] **Fix-D merk-append: `_isb` betekende "is een merk-as", niet "de query noemt het merk".** Derde
+      plek met de omkering die V57 op de twee V28-plekken repareerde. `/r/camping_kooktoestel/` kreeg
+      `merk~Campingaz`.
+- [x] Regels 280-309 doorgelopen. Prima: 281-283, 285-287, 290, 291, 293, 294, 296-299, 302, 303,
+      306, 309. Verbeterd sinds augustus: 289, 304, 305, 307.
+- [x] **Hoofdletters in een facetnaam live getoetst**: `/c/Productvorm~24050624` geeft 200 mét het
+      facet toegepast, de lowercase variant 301't naar de kále categorie. Niet normaliseren.
+- [x] A/B V62 → V63: 19 urls anders, A 118 → 121, B 117 → 118, D 517 → 514. Eén regressie gevonden
+      en verholpen (platenspeler), twee rijen zakken uit A/B (schooltassen 95 → 74 met dezelfde
+      bestemming, pokemon_booster_packs 76 → 66 mét `merk~Pokémon` erbij).
+
+Open, uit de review van 280-309 — alle vier van V62-tijdperk, geen van deze is door V63 veroorzaakt:
+
+- [ ] **Regel 292: V51 zegt "kept source subcategory" maar valt terug op de parent.**
+      `/meubilair_389374_389512/r/opklapbed_in_kast/` (Logeerbedden): de sprong naar Hoogslapers wordt
+      terecht onderdrukt, maar de fallback landt op `meubilair_389374` (Bedden) i.p.v. op de
+      bronsubcategorie. In augustus stond hier Logeerbedden + `met_matras_bed~'Opklapbed'` op 66, nu
+      de bovenliggende categorie op 45. Scherpste van de vier. #priority:medium
+- [ ] **Regel 284: de V62-dekkingstest is te streng bij een lange productnaam.** Drie juiste facetten
+      (Aquafresh, Pasta, Pomp) op 0/D, omdat "aquafresh triple protection tandpasta pomp 100 ml"
+      tokens overhoudt die geen facet kán dekken ('triple', 'protection', '100', 'ml'). Overweeg
+      maat-/hoeveelheidstokens en merkloze ruis uit de noemer te halen.
+- [ ] **Regel 280: facetten kloppen, categorie niet.** `inbouw_stopcontact_met_usb_oplader_rvs` →
+      Stekkerdozen + RVS + Met USB (0/D), terwijl de query om inbouwstopcontacten vraagt. De
+      dominantie voor de volledige query is 0,5 en haalt de 0,75-poort niet.
+- [ ] **Regel 308: de maincat-brede 2-facet-assemblage pint de parent.** De philips-TL-query komt uit
+      op `klussen_486171` (Elektra) + kleur + merk i.p.v. op Lampen (`klussen_486171_486136`).
+- [ ] **Regel 295 "met accu"**: er is geen lexicale brug van 'accu' naar het enige bruikbare
+      attribuut `opties_stoel~'Elektrisch'` (2.236 producten in Fauteuils). Synoniem accu → elektrisch
+      is denkbaar maar breed (bij gereedschap betekent 'Elektrisch' juist netstroom) — apart wegen.
+- [ ] Joep liep het reviewbestand van onder naar boven door; **onder regel 280 is nog niet gekeken**.
+
 ### 2026-08-26 — DMA+: shop-exclusions liepen langs DMA NL 2 heen
 
 Aanleiding: DMA exclusions en DMA bidding waren op 2026-08-20 al op het tweede NL-account gezet, DMA+

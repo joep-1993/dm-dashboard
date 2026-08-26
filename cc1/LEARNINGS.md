@@ -1,6 +1,104 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Het morfeem dat aan de staart van het ene woord en de kop van het andere zit (2026-08-26, Auto-redirects V63)
+
+Vervolg op V62 (zelfde datum): de twee punten die daar openbleven, plus wat het doorlopen van regel
+280-309 nog opleverde. Code: `68621f0` en `2fc5f8f`.
+
+**Het probleem was rangschikking, niet matchen.** Als het **categoriewoord** van de query even goed op
+álle waarden van een as matcht, besliste de tiebreak op producttelling — systematisch de verkeerde
+waarde:
+
+| query | koos | terwijl | het beslissende token |
+|---|---|---|---|
+| "kussens voor loungeset" | `t_tuinstoelkussen~'Zitkussens'` (3.625) | 'Loungekussens' (371) | 'loungeset' ~ **lounge**kussens |
+| "speelgoed magneten" | `levensfase~'Babyspeelgoed'` | `type_bouwblok~'Magnetisch bouwspeelgoed'` (323) | 'magneten' ~ **magnet**isch |
+| "bosch mini cirkelzaag" | `merk~Bosch` in Gereedschap | + `t_zaagmachines~'Cirkelzaagmachines'` | 'cirkelzaag' ~ cirkel**zaag**machines |
+
+Dat is één patroon: het onderscheidende token deelt met de goede waarde alleen een **morfeem**, en
+`_tokens_equal_modulo_morphology` vergelijkt hele tokens (meervoud, dubbele klinker, en een fuzz-tak
+met `abs(len)<=2` — dus 'kussens' vs 'zitkussens' valt af op lengteverschil 3).
+
+`_token_match_weight` geeft nu 1.0 voor het token zelf en **0,5** als de twee alleen een morfeem
+delen: `_shared_morpheme_len` = de langste van gemeenschappelijke kop en staart, ≥ 5 tekens, beide
+tokens ≥ 6. Een gedeeld *midden* telt niet — dat is geen morfeemgrens in Nederlandse samenstellingen
+en precies de valse positief die de substring-toetsen elders in deze engine blijven produceren
+('bor' in 'bordeauxrood'). De coverage-scorer rangschikt op de **som** van die gewichten in plaats van
+op het aantal gematchte tokens, dus twee morfemen verslaan één exact token en één exact token blijft
+vóór één morfeem — 'eettafel' hoort 'Voetbaltafels' te verslaan, waar de gedeelde staart alles is wat
+er is.
+
+Drie randvoorwaarden die alle drie nodig bleken, en die je pas op het corpus ziet:
+
+1. **Een half gewicht mag niet alléén winnen** (bodem 1.0 per waarde). Deze scorer keert direct terug
+   uit `match_with_partial`, dus een losse halve match zou het legacy per-woord-pad vóór zijn.
+2. **Een herhaald token telt één keer.** "platenspeler platenspeler" telde tweemaal een half morfeem,
+   kwam zo aan 1.0 en liep van Platenspelers naar `s_kasten~'Platenspelerkasten'` (87 → 0). Eén
+   regressie in de A/B, en de enige.
+3. **De as die het al zei, mag er niet nóg een keer bij.** 345 hield `levensfase~'Babyspeelgoed'`
+   náást `type_bouwblok~'Magnetisch bouwspeelgoed'` — 323 producten werden er 111, mét 'baby' erin
+   dat de query nergens zegt.
+
+Punt 3 kostte drie pogingen op de verkeerde laag, en dat is de les: **de twee facetten worden niet in
+de passes van `match_multi_word` gecombineerd maar in de V35-graft bovenaan die functie.** Die roept de
+coverage-scorer aan voor het hele keyword, en dán zichzelf recursief met `use_token_coverage=False` om
+matches op *andere* assen erbij te halen. Het inner-pad draait per token en ziet het coverage-resultaat
+niet, dus een guard in pass 2 (`results` is daar nog leeg) en een guard in de eind-dedup (die loopt in
+het inner-pad, over één rij) doen beide niets. Debugmethode die het uitwees: een print bij élke
+`results.append` mét het regelnummer erin, plus één die `results` afdrukt bij binnenkomst van de pass —
+één append, twee resultaten, dus komt het tweede van buiten de passes.
+
+**Zaagbladen, en een poort die op één van de twee plekken stond.** `/klussen_486173/r/bosch_mini_cirkelzaag/`
+kwam uit op **Zaagbladen**: de as `t_zaagmachines` wordt in die accessoire-categorie hergebruikt —
+waarde 'Cirkelzaagmachines' betekent daar "bladen VOOR cirkelzaagmachines" — en er zijn meer bladen dan
+machines (5.780 vs 585), dus de count-dedup koos de bladen. Exact de vorm waarvoor
+`GATED_SUBCATEGORIES` (V43, Horlogebandjes) bestaat, maar die poort werd **alleen op de maincat-brede
+pass** toegepast terwijl `filter_by_subcategory` óók afstammelingen meeneemt — dus pass 1 liep eromheen.
+Poort nu op beide; `/r/bosch_cirkelzaagblad/` bereikt Zaagbladen nog steeds via zijn intent-tokens.
+
+**En de derde append-plek met de omgekeerde merk-guard.** `/r/camping_kooktoestel/` kreeg
+`merk~Campingaz` aangeplakt. In de Fix-D-append is de vierde tupelwaarde
+`_fn.lower() in ('merk','winkel')` — of dit een merk-as *is*. Het commentaar erboven beweert het
+andere ("append only when the query literally names the brand, via `_isb`") en de filterregel
+`if _isb or …` laat op grond daarvan élke merkkandidaat door; het enige echte filter is het bewust
+losse `_keyword_bridges_value`, en 'camping' brugt naar 'Campingaz'. V57 repareerde deze precieze
+omkering al op de twee V28-plekken; dit was de derde. Zelfde patroon als V62's kapotte
+`r.subcategory_id`-test: **een conditie die iets anders meet dan het commentaar erboven beweert leest
+niet als een bug, want de code doet jarenlang precies wat er staat.**
+
+### Hoofdletters in een facetnaam zijn niet cosmetisch
+
+Drie assen in de taxonomie hebben een hoofdletter en die gaat zo de `/c/`-URL in: `Productvorm` (1
+rij), `Type_elekgadget` (4), `Aantal_monokanalen` (8). Live getoetst met de whitelisted UA:
+
+```
+/products/gezond_mooi/gezond_mooi_561633_561639/c/merk~82680~~Productvorm~24050624~~t_verpakking~23588197
+  → 200, H1 "Aquafresh - Pasta - Pomp Tandpasta"        (facetten toegepast)
+/products/gezond_mooi/gezond_mooi_561633_561639/c/productvorm~24050624
+  → 301 → /products/gezond_mooi/gezond_mooi_561633_561639/   (facet valt weg!)
+```
+
+De lowercase variant redirect **niet** naar de mixed-case vorm maar naar de kále categorie: je verliest
+het filter stil. De engine neemt de naam letterlijk uit `facets.csv` over en doet het dus goed, maar
+elke plek die een `/c/`-fragment "opschoont" of normaliseert breekt deze dertien rijen. Niet fixen.
+
+### Wat de review van 280-309 verder opleverde
+
+Prima: 281-283, 285-287, 290, 291, 293, 294, 296-299, 302, 303, 306, 309. Verbeterd sinds augustus:
+289 (Fietstassen → Elektrische fietsen), 304 (een `type_zakl`-waarde die de query nooit noemde → kale
+Zaklampen), 305 (Vlamverdelers → Keukenhulpjes), 307 (merk met 1 product weg). Vier rijen die nog
+zwak staan en alle vier van V62-tijdperk zijn, staan als open punten in TASKS — waarvan regel 292 het
+scherpst: **V51 zegt "kept source subcategory" maar valt terug op de parent** (Bedden i.p.v.
+Logeerbedden), waardoor een redirect die in augustus op Logeerbedden + `met_matras_bed~'Opklapbed'`
+stond nu op de bovenliggende categorie uitkomt.
+
+**Meting** (998 rijen uit het reviewbestand, `--reuse-data-cache`, zonder `--enable-facet-probe`):
+V62 → V63 19 urls anders, A 118 → 121, B 117 → 118, D 517 → 514. Twee rijen uit A/B: de
+schooltassen-rij houdt exact dezelfde bestemming maar zakt 95 → 74 (meer gedekte tokens verschuiven
+coverage én adjacency in de formule), en pokemon_booster_packs pakt een andere route naar dezelfde
+subcategorie mét `merk~Pokémon`, 76 → 66.
+
 ## Een tweede account is niet één constante erbij (2026-08-26, DMA+)
 
 NL draait sinds 2026-08-20 op twee Google Ads-accounts, en de DMA exclusions-tool en DMA bidding waren
