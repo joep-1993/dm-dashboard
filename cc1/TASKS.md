@@ -4,6 +4,65 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-26 — Auto-redirects V62: reviewronde op `redirects_global_828a73ad`
+
+Achttien rijen door Joep aangewezen. Vijf ervan waren dezelfde bug (de V31-guard testte
+`r.subcategory_id`, een veld dat `url_builder` uit de ingevoerde url kopieert). Volledige uitwerking
+in LEARNINGS (zelfde datum); code in `4bf7350`.
+
+Gedaan:
+
+- [x] **V31-guard**: eigen-subcategorie-test nu op de redirect-url, met de eigen subtree als grens.
+      Stopt het beschermen van cross-subcat-sprongen (regels 383, 389, 357).
+- [x] **V31-guard**: staat af als een ongedekt querytoken de dominante categorie noemt, met
+      `V62_DOM_COUNT_FLOOR = 25` en morfeem-match alleen voor een kind van de bestemming
+      (regels 364 → Grillpannen, 369 → Loungebanken + Tuin).
+- [x] **Append-gates** op `or _v62_restored`: guard-herstelde rijen kunnen nu een tweede facet
+      krijgen (regel 372 → `+ materiaal~Beton`).
+- [x] **Restore hertoetsen** op dekking na alle appends (`V62_MIN_RESTORE_COVERAGE`), alleen als de
+      bestemming nog die van de guard is (regel 396 → tier D, wat Joep vroeg).
+- [x] **V27 stopwoord-only op 99/A** i.p.v. 60/C — de bestemming is de r-url minus het
+      `/r/`-segment, er is geen match om fout te hebben. 23 rijen in het reviewbestand.
+- [x] `'abonnement'` als stopwoord + `DANGLING_QUALIFIERS` voor een 'zonder'/'met' die niets meer
+      bepaalt (regel 352 → schone categorie-url op 99).
+- [x] `_is_semantic_match`: spatie-rest toegestaan met lengtebodem 0,6 (regel 395 →
+      'Doorzichtige slips'), en rest toegestaan als het de eigen kop van de as is (regel 335 → de
+      juiste twee facetten).
+- [x] `MIN_KEYWORD_LENGTH_FOR_FUZZY` 3 → 4 (regel 388, 'gel' → 'Geel').
+- [x] `_keyword_bridges_value`: ≥ 4-bodem ook op de stam (regels 310/311, `kleurtint~'Bordeauxrood'`
+      voor "zonder boren").
+- [x] `met_`/`zonder_` op RC4's descriptor-witlijst (regel 351 → `+ met_matras_bed~'Met lade'`).
+- [x] RC4 splitst een samenstelling op de eigen categoriekop ("betontegel" in Tuintegels → 'beton').
+- [x] `_v50_relaxed_result` uitgetild zodat de V28-hard-reject hem ook kan aanroepen
+      (`/r/cavia_kooi_twee_verdieping/` 0 → 95).
+- [x] A/B over de 998 rijen van het reviewbestand: 155 urls anders, tier omhoog 97 / omlaag 61,
+      A 92 → 119, D 539 → 525.
+
+Open:
+
+- [ ] **Morfeem-dekking als rangschikking** in `match_by_token_coverage`. "kussens voor loungeset"
+      → 'Zitkussens' (3.625) i.p.v. 'Loungekussens' (371) en "speelgoed magneten" → 'Babyspeelgoed'
+      i.p.v. `type_bouwblok~'Magnetisch bouwspeelgoed'`: het categoriewoord matcht op álle waarden die
+      erop eindigen en de tiebreak is producttelling, terwijl het onderscheidende token alleen een
+      morfeem deelt. Raakt het primaire matchpad voor elke query met 2+ tokens — apart nemen.
+      #priority:medium
+- [ ] **`/r/bosch_mini_cirkelzaag/` landt in Zaagbladen i.p.v. Zaagmachines.** De juiste twee
+      facetten (`merk~Bosch` + `t_zaagmachines~Cirkelzaagmachines`) staan er nu wel op, maar de waarde
+      'Cirkelzaagmachines' bestaat op beide assen en de count-dedup in de facetpool kiest de verkeerde
+      subcategorie. Taxonomie-artefact; nagaan of de dedup op subcat-diepte moet kijken.
+- [ ] **`/r/kleine_gas_bbq_camping/` zou naar Gasbarbecues + `formaat_barbecue~Klein` moeten.** Het
+      merk dat letterlijk 'BBQ' heet is nu weg (de size-facet kwam ervoor), maar het afdalen naar het
+      kind gebeurt niet: search-derived heeft er te weinig bewijs voor. Zie ook: een merkwaarde die
+      gelijk is aan het generieke productwoord glipt door `brand_mention_is_distinctive` heen, want
+      het woord staat wél in de query.
+- [ ] **`/r/zwevende_planken/`** staat nu op tier D i.p.v. een verkeerde tier C. Het synoniem
+      zwevend → blind is toegevoegd (t_droogrek 'Blind', 6.090 producten in Wandplanken), maar de
+      rescue mag niet vuren: dominantie 0,56 < 0,75. Losse vraag of die drempel per maincat moet.
+- [ ] **Tien rijen zakken van A/B naar C/D**; drie ervan zijn eerder een correctie dan schade
+      ("plint verwarming" verliest een sprong naar Plintboilers, "dweil" houdt zijn vastgezette
+      facet). De rest verliest punten binnen C. Nog niet één voor één nagelopen.
+- [ ] Joep liep het reviewbestand van onder naar boven door; onder regel 310 is nog niet gekeken.
+
 ### 2026-08-25 — isSeoFacet: waar de vlag leeft, en een checklist voor IT
 
 Analyse, geen code in dit repo. Vervolg op 2026-08-19. Volledige uitwerking:

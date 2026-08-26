@@ -1,6 +1,137 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een guard die zijn eigen voorwaarde nooit gemeten heeft (2026-08-26, Auto-redirects V62)
+
+Review van Joep over `redirects_global_828a73ad`: achttien rijen, één voor één "waarom dit en niet
+dat?". Vijf ervan kwamen uit op dezelfde plek — de V31-guard in `main_parallel_v2.py` (~2657), die
+zegt: *als de matcher al een net facet in de eigen subcategorie vond, laat search-derived het niet
+overrulen.*
+
+**Hij testte `r.subcategory_id == parsed.subcategory_id`. Beide komen uit de ingevoerde URL.**
+`url_builder` zet `subcategory_id=parsed_url.subcategory_id` op vrijwel elk pad (17 van de 19
+constructies), dus de conditie was structureel waar — ook als de redirect in een heel andere
+subcategorie landde. De guard beschermde precies wat zijn docstring uitsluit:
+
+| r-url | bestemming | wat de guard deed |
+|---|---|---|
+| `meubilair_389374_9002167/r/beter_bed_aanbieding/` (Seniorenbedden) | Tafels `/c/type_tafels~Bed` | scorer 0 → 60 |
+| `tuin_accessoires_504072/r/fietsen_berging/` (Tuinhuisjes) | Hogedrukreinigers `/c/t_hdrukrein~Fietsen` | scorer 0 → 60 |
+| `huis_tuin_505130_559116/r/zwevende_planken/` (Wandrekken) | Snijplanken `/c/type_sp~Broodplanken` | scorer 0 → 60 |
+
+Dat is het duurste patroon in dit bestand: de scorer had ze correct afgekeurd, en de guard zette ze
+terug op tier C — "review nodig" — waar ze plausibel genoeg uitzien om doorgelaten te worden. Lees de
+bestemming uit `r.redirect_url` (`extract_subcategory_id_from_url` staat er al), niet uit het
+resultaatobject. Met de eigen **subtree** als grens, want afdalen naar een kind is een normale
+cascade-uitkomst en moet beschermd blijven — anders zakt elke `/subcat_x/` → `/subcat_x_y/`-rij mee
+(in de meting: 67 rijen C→D voordat die correctie erin zat).
+
+**En hij vroeg nooit of de query de categorie die hij overrulede wél noemt.** `/r/loungebank_tuin_sale/`
+hield Tuinbanken `/c/ruimte~Tuin` vast. Twee dingen die je pas ziet als je de cijfers erbij haalt:
+`ruimte~Tuin` heeft 91.936 van de ~100k producten in Tuinbanken (een facet die niets filtert, want de
+categorienaam impliceert hem al), en Loungebanken had 8.696 van de 9.980 treffers voor die query.
+Het token dat de categorie noemt — 'loungebank' — was het enige ongematchte token. De guard staat nu
+af als een ongedekt token de dominante categorie **noemt**, met twee bodems:
+
+- `V62_DOM_COUNT_FLOOR = 25`. Een share van 1.0 over 11 producten is een taxonomie-ongeluk:
+  "kledingkast 260 hoog" → Kastonderdelen zit op precies dat (share 1.0, count 11) en moet niet
+  winnen van Kasten.
+- "noemt" = stamgelijkheid, niet `_keyword_bridges_value`. Die functie is expliciet los ("it only
+  gates a hard-floor, so a false bridge just leaves the normal score in place") en zegt True op
+  'antislipmat' × 'Badmatten'. Als *beslissing* is dat te grof. Alleen voor een kind van de
+  bestemming mag het via een gedeeld morfeem ('grillplaat' → Grillpannen onder Pannen); zijwaarts
+  zou datzelfde van een waterkoker naar een waterfilter lopen.
+
+**De guard herstelde `final_score` maar niet `reliability_score` — en daar gate't elke append op.**
+Dus de rijen die de guard net besloot te vertrouwen waren de enige die nooit een tweede facet konden
+krijgen. `/r/betontegel_60x60_antraciet/` reed weg met alleen `kleurtint~Antraciet` terwijl
+`materiaal~Beton` (406 producten) in dezelfde subcategorie lag. Drie gates in
+`main_parallel_v2` (V31-leftover ×2, RC4) staan op `reliability_score >= 50`; nu `or _v62_restored`.
+
+**De vlakke 60 zei "de matcher vond een facet", niet "dit dekt de vraag".**
+`/r/karlsson_matrassen_vildar_hr/` → Topdekmatrassen `/c/type_topdekmatras~'Latex topdekmatrassen'`
+dekt één token van vier, en dat token niet eerlijk: 'matrassen' fuzz-hitte de staart van de waarde en
+'latex' staat nergens in de query. Twee producten erachter. De restore wordt nu ná alle appends
+opnieuw getoetst tegen de dekking van de uiteindelijke URL (`V62_MIN_RESTORE_COVERAGE = 0.5`), en
+**alleen als de bestemming nog die van de guard is** — een latere override (Fix D, V36, RC5) draagt
+zijn eigen score, en die straffen voor een beslissing die de guard niet nam kostte
+`/r/led_sensorlamp_met_bewegingssensor/` 80 punten voordat die conditie erin zat.
+
+Bij die dekkingstest moet een samenstelling zijn delen mogen inleveren: 'antislipmat' laat geen
+spoor na in "Douchematten + Antislip" als één string, maar beide helften staan er. Zonder die
+split-credit las de test de query als 0% gedekt en gooide hij een correcte redirect weg.
+
+### Zes losse vondsten uit dezelfde review
+
+1. **`_is_semantic_match` las een spatie als compound-vervolg.** De regel tegen "meubel" →
+   "meubelsets" (rest moet een meervoudsuitgang zijn) verwierp ook "doorzichtige" →
+   `type_erotische_slips~'Doorzichtige slips'` (740 producten), waardoor `/r/doorzichtige_string/` op
+   'G-strings' (228) uitkwam. Een spatie-rest is iets anders dan een geplakte kop. **Wel met een
+   lengtebodem** (keyword ≥ 0,6 van de waarde): zonder die bodem matcht 'inductie' via
+   `fuzz.partial_ratio` = 100 op `type_kh~'Inductie beschermer'` en verlaat
+   `/r/grillplaat_voor_inductie/` Pannen voor Keukenhulpjes. Twee rijen die eerst goed stonden gingen
+   daaraan onderuit; de bodem haalde ze terug.
+2. **Diezelfde regel mag de rest ook doorlaten als het de eigen kop van de as is.**
+   `t_zaagmachines~'Cirkelzaagmachines'` plakt 'machines' achter 'cirkelzaag' en de as heet zelf
+   zaagmachines: de waarde is het product van de query, niet een ander. 'sets' komt in geen enkele
+   `t_badmeubel`-as voor, dus meubel/meubelsets blijft afgewezen. Vandaar `facet_name` als extra
+   parameter op `_is_semantic_match` — de twee fuzzy-call-sites hebben `fv` al in de hand.
+3. **`MIN_KEYWORD_LENGTH_FOR_FUZZY` stond op 3, en op drie letters is één afwijking al 86.**
+   "verkoelende gel" in Dekbedden landde op `/c/kleur~Geel`, en 'verkoelende' — het woord dat de
+   vraag stelt — bleef liggen. Naar 4. Exacte en synoniem-matches lopen niet via die check, dus
+   'usb', 'led', 'xxl' en 'bio' matchen onveranderd; `_tokens_equal_modulo_morphology` (V29) hield
+   die bodem al aan voor zijn eigen fuzz-tak.
+4. **Een brug van drie letters is geen brug.** `_bridge_stem('boren')` = `'bor'`, en dat zit in
+   `'bordeauxrod'` — zo kreeg een Gordijnroedes-redirect `kleurtint~'Bordeauxrood'` aangeplakt voor
+   de restanttokens "zonder boren". De ≥ 4-bodem in `_keyword_bridges_value` gold alleen voor de
+   *tokens*, niet voor de stammen die eruit komen; de docstring beschreef al de bedoelde regel.
+5. **`met_`/`zonder_` stonden niet op RC4's descriptor-witlijst.** `/r/bed_140x200_met_laden/` reed
+   weg met alleen `afmeting~'140 x 200'` terwijl `met_matras_bed~'Met lade'` (8.678 producten,
+   zelfde subcategorie) één lexicale stap verderop lag. Het zijn attribuut-assen als de rest, en de
+   waarde moet nog steeds heel-token matchen, dus een losse bijvoeglijke naamwoord kan zich niet aan
+   een boolean-as hangen.
+6. **De V50-relaxatie zat achter een `return`.** De V28-hard-reject ("lang ongematcht producttoken")
+   stopt ter plekke, dus de rijen waar "te specifieke query" net was vastgesteld waren precies de
+   rijen die nooit verkort werden. `/r/cavia_kooi_twee_verdieping/` (2 producten achter
+   'Konijnenhokken') vertrok zónder redirect, terwijl verkorten tot 'cavia' 95 op Cavia's oplevert.
+   Nu een aanroepbare `_v50_relaxed_result`, op de reject-plek alleen als de cross-maincat-fallback
+   óók niets vond — hij kan dus enkel een lege redirect vervangen.
+
+### Methode: A/B op het reviewbestand zelf, zonder facet-probe
+
+De 998 old-urls uit de xlsx als input-CSV, oude code vs nieuwe, `--reuse-data-cache` en **zonder**
+`--enable-facet-probe`. Dat laatste is het verschil tussen 60 seconden en uren: de stage-2
+filter-probes doen ~1 call/s tegen de live Search API, en een run over 998 rijen was na 25 minuten pas
+op 737 probes. De `search_derived`-prefetch is wél goedkoop (913 verse entries in ~10 min) en warmt de
+cache voor beide kanten, dus draai de baseline eerst en de variant erna.
+
+Twee dingen die de bisect vertraagden, allebei te voorkomen:
+
+- **Een import in een gewijzigd bestand maakt `git stash push -- <één bestand>` misleidend.** Ik
+  stash'te `validation_rules.py` terug terwijl `main_parallel_v2` een nieuwe `DANGLING_QUALIFIERS`
+  daaruit importeerde: worker crasht, rij verdwijnt stil uit de output, en dat leest als "de
+  wijziging deed niets".
+- **Een verschil kan cache-drift zijn.** Voordat je een regressie aan je eigen diff toeschrijft:
+  zet de oude code terug en draai die rij opnieuw tegen de *huidige* cache. Bij
+  `/r/cavia_kooi_twee_verdieping/` gaf dat 95 — dus het was wél mijn wijziging; bij twee andere
+  rijen was het de cache.
+
+Uitkomst over 996 vergelijkbare rijen: 155 redirect-URLs anders, tier omhoog 97 / omlaag 61,
+A 92 → 119, B 104 → 110, D 539 → 525. De C→D-groep is het bedoelde effect (ingetrokken 60'jes), de
+D→C/B/A-groep zijn rescues die eerst geblokkeerd waren ("hoek loungebank tuin" → Loungebanken + Tuin
+85, "opbergpoef" → Poefs 81, "mini diesel aggregaat" → Aggregaten 84).
+
+### Nog open, één thema
+
+'Zitkussens' i.p.v. 'Loungekussens' voor "kussens voor loungeset", en 'Babyspeelgoed' i.p.v.
+`type_bouwblok~'Magnetisch bouwspeelgoed'` voor "speelgoed magneten". Beide keer matcht het
+**categoriewoord** ('kussens', 'speelgoed') even goed op álle waarden die erop eindigen, en beslist de
+tiebreak op producttelling: Zitkussens 3.625 vs Loungekussens 371. Het token dat het verschil zou
+moeten maken ('loungeset', 'magneten') deelt alleen een *morfeem* met de goede waarde — 'lounge',
+'magnet' — en de matcher vergelijkt hele tokens. Dat is één mechanisme (morfeem-dekking als
+rangschikking, niet als filter) en het raakt `match_by_token_coverage`, het primaire pad voor elke
+query met 2+ tokens. Apart nemen, niet meeliften.
+
 ## Waar seoPriority op categorieniveau leeft, en waarom de legacy-spiegel niet "exact" is (2026-08-25, SEO-facetlinks)
 
 Vervolg op het onderzoek van 2026-08-19 (`SEO_FACETLINKS_DEPENDENT_FACETS.md`). Vraag vanuit IT:
