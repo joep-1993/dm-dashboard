@@ -510,10 +510,21 @@
         // rebuilds every <tr> on each filter/sort change.
         let previewSelected = new Set();
 
+        // An "already redirected" row can still be missing a separator form:
+        // the backend matches any form (`_` / space / `%20` / `+`) when it decides
+        // a URL already redirects, but only the `_` and `+` forms actually resolve
+        // independently — so a `+` URL can read as covered off its `_` row while
+        // the `+` URL itself still serves a live 200 page. Those rows carry
+        // `topup_variants` and DO have API calls to make.
+        function hasTopup(row) {
+            return !!(row.already_correct && (row.topup_variants || []).length);
+        }
+
         // Only rows Submit would actually act on can be selected. A skipped or
         // already-correct row has no API call to make, so offering a checkbox for
-        // it would imply something would happen.
+        // it would imply something would happen — unless it needs a top-up.
         function isSelectableRow(row) {
+            if (hasTopup(row)) return true;
             return !row.already_correct && !effectiveSkipReason(row);
         }
 
@@ -610,7 +621,10 @@
         function recomputeStats() {
             if (!preflight) return;
             const rows = preflight.processed;
-            const alreadyCount = rows.filter(r => r.already_correct).length;
+            // Top-up rows are already_correct but DO make API calls, so they
+            // count as ready — otherwise the preview promises 0 writes and the
+            // submit then performs some.
+            const alreadyCount = rows.filter(r => r.already_correct && !hasTopup(r)).length;
             // Skipped excludes already-correct rows since those are green,
             // not red. Ready excludes them too — there's no API call to make.
             const skipped = rows.filter(r => !r.already_correct && !!effectiveSkipReason(r)).length;
@@ -663,6 +677,12 @@
                 let skipBadge = '';
                 if (row.already_correct) {
                     skipBadge = `<br><span class="badge bg-success">URL already redirected</span>`;
+                    if (hasTopup(row)) {
+                        const forms = (row.topup_variants || [])
+                            .map(v => `<code>${escapeHtml(v)}</code>`).join(' + ');
+                        skipBadge += `<br><span class="badge badge-flatten">will add any missing separator form</span>`
+                                   + `<span class="small-muted ms-1">${forms}</span>`;
+                    }
                 } else if (effSkip) {
                     const target = row.existing_target
                         ? `<span class="small-muted ms-1"> → <code>${escapeHtml(row.existing_target)}</code></span>`
@@ -687,7 +707,7 @@
                     ? `<td><input class="form-check-input preview-row-check" type="checkbox"
                              data-idx="${origIndex}" ${previewSelected.has(origIndex) ? 'checked' : ''}></td>`
                     : `<td><span class="small-muted" title="${row.already_correct
-                            ? 'Already redirected — nothing to submit'
+                            ? 'Already redirected in every separator form — nothing to submit'
                             : 'Skipped — nothing to submit'}">—</span></td>`;
                 tr.innerHTML = `
                     ${checkCell}
@@ -710,9 +730,9 @@
             const effSkip = effectiveSkipReason(row);
             switch (filter) {
                 case 'flattened': return !!row.flatten_from;
-                case 'already':   return !!row.already_correct;
+                case 'already':   return !!row.already_correct && !hasTopup(row);
                 case 'skipped':   return !row.already_correct && !!effSkip;
-                case 'ready':     return !row.already_correct && !effSkip;
+                case 'ready':     return hasTopup(row) || (!row.already_correct && !effSkip);
                 default:          return true; // 'all'
             }
         }
@@ -1182,7 +1202,16 @@
                 // available on hover via the title attribute so power
                 // users can still see SQLSTATE etc.
                 const rawMsg = r.raw_message || api.message || api.error || '';
-                const noteText = r.skip_reason || r.friendly_message || rawMsg;
+                // A topped-up row is `already_correct` with a skip_reason, so
+                // without this it would read as "skipped" while it in fact wrote
+                // the missing separator row(s).
+                const topupNote = (r.topup || []).length
+                    ? (r.topup_added
+                        ? `added ${r.topup_added} missing separator form` + (r.topup_added === 1 ? '' : 's')
+                        : 'all separator forms already present')
+                      + ': ' + r.topup.map(t => `${t.fromUrl} (${t.action})`).join(', ')
+                    : '';
+                const noteText = topupNote || r.skip_reason || r.friendly_message || rawMsg;
                 const noteTitle = r.friendly_message && rawMsg ? rawMsg : '';
                 // Mirror the Preview's "→ <existing target>" affordance so
                 // preflight-skipped and submit-failed rows that hit the
@@ -1251,7 +1280,8 @@
                 case 'to':      return r.final_new || '';
                 case 'country': return r.country || '';
                 case 'code':    return Number(r.statusCode) || 0;
-                case 'note':    return r.skip_reason || r.friendly_message || rawMsg || '';
+                case 'note':    return (r.topup_added ? `topped up ${r.topup_added}` : '')
+                                    || r.skip_reason || r.friendly_message || rawMsg || '';
                 default:        return origIndex;
             }
         }

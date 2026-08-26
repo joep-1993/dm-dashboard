@@ -155,6 +155,47 @@ def normalize_path(path: str) -> str:
     return urllib.parse.unquote(path.strip())
 
 
+def encode_from_url(path: str, query_param: bool = False) -> str:
+    """Escape a `fromUrl` for the urldecode passes the redirect API applies.
+
+    The API decodes `fromUrl` on the way in while echoing your *input* back in
+    the 201 response, so a wrong escape fails completely silently. Measured
+    against the live API 2026-08-26 (throwaway rows, read back via the uncached
+    `GET /api/redirects`):
+
+    ==============================  ======  ============================
+    call                            passes  send this for a stored ``+``
+    ==============================  ======  ============================
+    ``POST /api/redirect`` (body)   1       ``%2B``
+    ``DELETE ?fromUrl=`` (query)    2       ``%252B``
+    ``GET ?searchterm=`` (query)    1       ``%2B`` (requests supplies it)
+    ==============================  ======  ============================
+
+    Unescaped, a raw ``+`` in `fromUrl` is stored as ``_`` — so the ``+`` form
+    silently collapses onto the underscore row and the ``+`` URL never
+    redirects. That is the 2026-08-26 `peter+gevaert+leffingestraat+oostende`
+    bug: run #36 POSTed the ``+`` form, got 201 with the input echoed back, and
+    no ``+`` row ever existed.
+
+    `%` is escaped first so the `%` introduced for `+` is not escaped twice.
+    This also fixes re-POSTing a stored row that itself contains an escape
+    (``%2f`` for a slash inside an ``/r/`` search term needs ``%252f``).
+
+    Pass ``query_param=True`` only for a value handed to something that does
+    NOT percent-encode for us; `requests`' ``params=`` supplies the outer pass
+    itself, so the DELETE call uses the default.
+
+    `toUrl` is stored VERBATIM (measured: both a raw ``+`` and ``%2B`` land
+    unchanged) and must never be passed through here.
+    """
+    if not path:
+        return path
+    out = path.replace("%", "%25").replace("+", "%2B")
+    if query_param:
+        out = out.replace("%", "%25")
+    return out
+
+
 def equiv_key(path: str) -> str:
     """Canonical comparison key — treats space/underscore/%20/+ as identical."""
     return normalize_path(path).replace("_", " ").replace("+", " ")
@@ -181,21 +222,69 @@ def url_variants(path: str) -> list[str]:
     return out
 
 
-def _submit_variants(primary: str) -> list[str]:
-    """Return the space / underscore / + forms of a path, excluding the primary.
+# `/r/` and `/k/` introduce a free-text SEARCH TERM; everything before the
+# marker is category path, where an underscore is structural and must not be
+# rewritten into a `+`. The old global replace produced junk like
+# `/products/huis+tuin/r/marva+verlichting+oostende/` — a path that exists
+# nowhere — and POSTed a row for it.
+_SEARCH_MARKERS = ("/r/", "/k/")
 
-    Called after a successful POST so the redirect API also contains the
-    other separator forms.  Only produces variants that actually differ
-    from *primary*.
+
+def _split_search_term(path: str) -> tuple[str, str | None]:
+    """Split `path` into (prefix-including-marker, search-term).
+
+    Returns (path, None) when the path has no search term, i.e. a plain
+    category path, where no separator variants apply at all.
     """
-    base = normalize_path(primary).replace("_", " ").replace("+", " ")
-    if " " not in base:
+    best, marker = -1, ""
+    for m in _SEARCH_MARKERS:
+        i = path.rfind(m)
+        if i > best:
+            best, marker = i, m
+    if best == -1:
+        return path, None
+    return path[:best + len(marker)], path[best + len(marker):]
+
+
+def separator_forms(path: str) -> list[str]:
+    """The separator forms of `path` that each need their OWN redirect row.
+
+    Measured 2026-08-26 against the live site and the resolver:
+
+    * ``_`` == space == ``%20`` — the site decodes ``%20`` to a space and the
+      resolver normalizes a space to ``_``, so ONE underscore row covers all
+      three. Verified: the ``%20`` URL 301s while only the ``_`` row exists.
+    * a literal ``+`` is NOT normalized. In a URL *path* ``+`` is a plus
+      character, not a space; the site hands it to the resolver verbatim and
+      the resolver answers NO_REDIRECT. The ``+`` form needs its own row or
+      the URL simply does not redirect.
+
+    So full coverage is exactly two rows: underscore and plus. The old
+    `_submit_variants` also posted a space form, which is pure redundancy (and
+    the API collapses it onto the underscore row anyway).
+
+    Ordered underscore-first: `check_url_is_fromUrl` probes these in order and
+    stops at the first hit, and the resolver Varnish-caches NEGATIVE answers
+    for an hour — so probing a form that does not exist yet poisons the live
+    lookup. The underscore form is the likelier of the two to exist (an
+    unescaped write lands there), so trying it first avoids most poisoning.
+    """
+    p = normalize_path(path)
+    if not p:
         return []
-    variants = []
-    for v in (base, base.replace(" ", "_"), base.replace(" ", "+")):
-        if v != primary and v not in variants:
-            variants.append(v)
-    return variants
+    prefix, term = _split_search_term(p)
+    if term is None:
+        return [p]          # category path — nothing to vary
+    base = term.replace("_", " ").replace("+", " ")
+    if " " not in base:
+        return [p]          # single-word search term — one form only
+    return [prefix + base.replace(" ", "_"), prefix + base.replace(" ", "+")]
+
+
+def _submit_variants(primary: str) -> list[str]:
+    """`separator_forms` minus the form the caller already POSTed itself."""
+    prim = normalize_path(primary)
+    return [v for v in separator_forms(primary) if v != prim]
 
 
 def normalize_country(raw: str) -> str:
@@ -300,8 +389,16 @@ def _resolve_one(url: str, country: str = DEFAULT_COUNTRY,
 
 def check_url_is_fromUrl(path: str, country: str = DEFAULT_COUNTRY,
                          raise_on_error: bool = False) -> dict | None:
-    """Return {url, statusCode, matched_variant} if `path` is a fromUrl in the DB."""
-    for variant in url_variants(path):
+    """Return {url, statusCode, matched_variant} if `path` is a fromUrl in the DB.
+
+    Probes `separator_forms` rather than `url_variants`: the space and `%20`
+    forms are resolver-equivalent to the underscore form (measured), so probing
+    them can only repeat the same answer, and the underscore form is tried
+    first so we usually never touch the `+` key — a resolver miss is
+    Varnish-cached as a negative for an hour. Also cuts the preflight from up
+    to 5 resolver calls per URL to at most 2.
+    """
+    for variant in separator_forms(path):
         hit = _resolve_one(variant, country, raise_on_error=raise_on_error)
         if hit:
             return {**hit, "matched_variant": variant}
@@ -363,9 +460,12 @@ def delete_redirect_by_fromurl(from_url: str) -> tuple[int, Any]:
     The body may be empty on success; we never raise from here so the
     caller can decide whether a 404 (rule already gone) is fatal or fine.
     """
+    # DELETE decodes the query param TWICE; `params=` supplies one pass, so we
+    # supply the other. Without this a row whose fromUrl holds a literal `+`
+    # (or a `%2f`) can never be deleted — the API 404s. Measured 2026-08-26.
     r = _HTTP.delete(
         f"{REDIRECT_API}/api/redirect",
-        params={"fromUrl": from_url},
+        params={"fromUrl": encode_from_url(from_url)},
         timeout=HTTP_TIMEOUT,
     )
     try:
@@ -379,7 +479,8 @@ def post_redirect(from_url: str, to_url: str, country: str, status_code: int) ->
     r = _HTTP.post(
         f"{REDIRECT_API}/api/redirect",
         json=[{
-            "fromUrl": from_url,
+            # `fromUrl` is urldecoded once on write, `toUrl` is stored verbatim.
+            "fromUrl": encode_from_url(from_url),
             "toUrl": to_url,
             "country": country,
             "statusCode": status_code,
@@ -572,6 +673,23 @@ def preflight_rows(
             if equiv_key(existing_url) == equiv_key(item["final_new"]):
                 item["skip_reason"] = "URL already redirected"
                 item["already_correct"] = True
+                # `check_url_is_fromUrl` matches ANY separator form, so
+                # "already redirected" can be true of the `_` row while the
+                # `+` form of the same URL resolves to nothing and serves a
+                # live 200 page. Hand the submitter both forms so it tops up
+                # whatever is missing instead of dropping the row: without
+                # this, re-running the tool on a half-covered URL is a no-op
+                # forever (the 2026-08-26 peter+gevaert case, where the tool
+                # kept reporting "already redirected to the homepage" while
+                # the `+` URL stayed reachable).
+                #
+                # Deliberately NOT probed here to find out which form is
+                # missing: the resolver Varnish-caches a NEGATIVE answer for
+                # an hour, so asking first would take the redirect we are
+                # about to create offline for that hour. We POST both and read
+                # a duplicate-key bounce as "already present".
+                _forms = separator_forms(old)
+                item["topup_variants"] = _forms if len(_forms) > 1 else []
             else:
                 item["skip_reason"] = SKIP_REASON_EXISTING
                 item["existing_id"] = existing.get("id")
@@ -993,6 +1111,49 @@ def explain_submit_failure(item: dict, body: Any) -> dict:
     return out
 
 
+def _is_duplicate_key(body: Any) -> bool:
+    """True when a failing POST body is a `url_UNIQUE` collision, i.e. the row
+    we tried to insert already exists. Expected, not an error, during a top-up."""
+    return bool(_DUP_URL_RE.search(_raw_error_text(body)))
+
+
+def _topup_separator_forms(item: dict) -> tuple[int, list[dict]]:
+    """POST every separator form of an already-redirected row toward the target
+    it already points at, so a URL covered in only one form gains the other.
+
+    Safe by construction: never deletes, never changes a target, and only ever
+    adds a row for a form of the SAME source URL. Each POST either creates the
+    missing row or bounces off `url_UNIQUE` because that form already exists —
+    and the bounce is the expected outcome for whichever form made the row
+    "already redirected" to begin with, so it is reported as `already_present`
+    rather than a failure.
+
+    Returns (rows_added, per_form_audit).
+    """
+    target = item.get("final_new") or item.get("existing_target") or ""
+    # Mirror the existing rule's scope, not the input row's: topping up a
+    # "nl, be" rule with a country="nl" row would half-cover the new form.
+    country = item.get("existing_country") or item.get("country")
+    status_code = item.get("existing_statusCode") or DEFAULT_STATUS_CODE
+    added, audit = 0, []
+    for form in item.get("topup_variants") or []:
+        try:
+            code, body = post_redirect(form, target, country, status_code)
+        except Exception as exc:
+            audit.append({"fromUrl": form, "action": "error", "error": str(exc)})
+            continue
+        if 200 <= code < 300:
+            added += 1
+            audit.append({"fromUrl": form, "status": code, "action": "added"})
+        elif _is_duplicate_key(body):
+            audit.append({"fromUrl": form, "status": code,
+                          "action": "already_present"})
+        else:
+            audit.append({"fromUrl": form, "status": code,
+                          "action": "failed", "body": body})
+    return added, audit
+
+
 def _restore_redirect(from_url: str, to_url: str, country: str,
                       status_code: int) -> dict:
     """Best-effort re-POST of a rule we DELETEd but then failed to replace, so a
@@ -1042,8 +1203,26 @@ def submit_rows(processed: list[dict], task: dict | None = None,
             and item.get("skip_reason") == SKIP_REASON_EXISTING
         )
         if item.get("skip_reason") and not is_replaceable:
-            skipped += 1
-            per_row.append({**item, "status": "skipped", "api_response": None})
+            # An "already redirected" row may still be missing a separator
+            # form (see `_topup_separator_forms`). Top it up rather than
+            # skipping, so the tool can actually fix a half-covered URL.
+            if item.get("already_correct") and item.get("topup_variants"):
+                added, audit = _topup_separator_forms(item)
+                row = {**item, "topup": audit, "api_response": None}
+                if added:
+                    success += 1
+                    row["status"] = "ok"
+                    row["topup_added"] = added
+                elif any(a.get("action") in ("failed", "error") for a in audit):
+                    warnings += 1
+                    row["status"] = "warning"
+                else:
+                    skipped += 1
+                    row["status"] = "skipped"
+                per_row.append(row)
+            else:
+                skipped += 1
+                per_row.append({**item, "status": "skipped", "api_response": None})
         else:
             replaced_target = None
             replace_error: dict | None = None
