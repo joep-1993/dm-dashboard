@@ -1,6 +1,55 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Vier stille fouten in een zoekvolume-pijplijn (2026-08-26, findfacetvalues)
+
+Joep vroeg om Type-kandidaten uit de productbeschrijvingen van Tegelaccessoires, met maandelijks
+zoekvolume, boven 50 naar Excel. Daar zaten vier dingen in die geen error gaven en toch het antwoord
+veranderden.
+
+**Keyword Planner laat in grote batches rijen weg, zonder error.** `GenerateKeywordHistoricalMetrics`
+gaf op een batch van 10.000 keywords 9.355 rijen terug, en op 8.449 keywords 7.985 — ruim 1.100
+keywords verdwenen stil. `keyword_planner_service.get_search_volumes` mapt een ontbrekende rij naar
+`search_volume: 0`, dus zo'n weggevallen keyword is niet te onderscheiden van een keyword met écht nul
+volume. `wiesbaden` kwam als 0 uit de bulk-run terwijl het 6.600/maand is. Het wegvallen is
+**niet-deterministisch**: dezelfde 205 ontbrekende keywords losten in vier retry-rondes op
+(184 → 15 → 5 → 1). Werkende aanpak: batches van 500, per batch bijhouden wat er wél terugkwam
+(`k in response`), en de rest herhalen in batches van ~40. Per customer_id komt er na ~3 calls van 500
+een gRPC 429; de rotatie over `CUSTOMER_IDS` vangt dat op. Zie BACKLOG — de backend-functie heeft dit
+nog steeds.
+
+**Zelfbedachte meervouden halen volume op van een ander woord.** Een naïeve NL-inflector (`+en`, `+s`,
+verdubbeling, `raam`→`ramen`) maakte van echte termen nonsens die tóch bestaat: `kit` → `kitten`
+(33.100/mnd, katten), `toilet` → `toileten`, `zwart` → `zwarten`, `weather` → `weatheren`, `mat` →
+`mats`, `spie` → `spies`. Die kwamen bovenaan de volumelijst en zagen eruit als vondsten. De fix is
+niet een betere inflector maar een goedkopere check: **voeg een variant alleen toe als die vorm
+letterlijk in het corpus voorkomt.** Meervouden die echt gebruikt worden (`hoekprofielen`) staan er
+toch in; verzonnen vormen verdwijnen. Kandidaten 18.469 → 6.014, kwaliteit omhoog.
+
+**`total` van de Search API verandert tijdens het pagineren.** Bij `/search/products` op categorie
+9003066 stond `total` de eerste dertien pagina's op 1320 en vanaf offset 1300 op 2375 — dat is het
+aantal dat er uiteindelijk ook uitkwam. De categorielijst in dezelfde response zegt 1319. Voor "hoeveel
+producten heeft deze categorie" is geen van die getallen betrouwbaar; tel wat je binnenhaalt, en
+controleer met `deepestCategoryId` dat het allemaal de gevraagde categorie is (dat was hier zo, 2375/2375).
+
+**De legacy-ids in een product-URL kent de Taxonomy API niet.** `/products/klussen/klussen_486172_638250/`
+levert bij `/api/Categories/638250` en `/api/Categories/486172` niets op (leeg pad, geen 404-JSON).
+De echte categorie-id staat in de `categories`-lijst die de Search API bij een `mainCategory`-call
+meelevert, waar `urlName` exact het URL-segment is: `klussen_486172_638250` → **9003066**
+(Tegelaccessoires), `klussen_486172_9134130` → **9005004** (Zonnepaneelaccessoires). De hoofdcategorie
+komt uit de slug: `klussen` → 35000. `/api/Categories?locale=nl-NL` geeft alleen de 32 top-levels,
+`parentId=` als filter wordt genegeerd, en `/api/Categories/tree` bestaat niet.
+
+**Wat de strengheid per facetsoort oplevert.** Voor het `/findfacetvalues`-command bleek de taxonomie
+zelf de beste maatstaf: hetzelfde facet bestaat elders al mét waarden. 188 facetten heten 'Opties',
+samen 303 waarden — *Inklapbaar, Waterdicht, Met standaard, Op wielen, Snelladen*. Een kandidaat
+matchen tegen die verzameling is een sterk precisiesignaal, maar **alleen voor facetten die over
+categorieën heen dezelfde vorm hebben** (Opties, Kleur, Materiaal). Bij 'Type' zijn er 724 facetten met
+291 waarden die per categorie totaal verschillen — daar zegt het niets en moet er op definitie
+geschift worden. Nog een detail: de n-gram-extractie gooide `met`/`op`/`voor` als beginwoord weg,
+precies de vorm van de helft van de Opties-referentiewaarden; die stopwoorden moeten aan het begin van
+een kandidaat wél mogen.
+
 ## Een guard die zijn eigen voorwaarde nooit gemeten heeft (2026-08-26, Auto-redirects V62)
 
 Review van Joep over `redirects_global_828a73ad`: achttien rijen, één voor één "waarom dit en niet

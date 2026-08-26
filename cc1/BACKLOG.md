@@ -8,6 +8,28 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### `get_search_volumes` maakt van een weggevallen API-rij een 0 (logged 2026-08-26)
+- [ ] `backend/keyword_planner_service.py` heeft `BATCH_SIZE = 10000`, en
+  `GenerateKeywordHistoricalMetrics` geeft bij zulke batches **niet voor elk keyword een rij terug**
+  (gemeten: 10.000 → 9.355, 8.449 → 7.985). De mapping-lus zet een ontbrekende rij op
+  `search_volume: 0`, dus een weggevallen keyword ziet eruit als een keyword zonder zoekvolume.
+  `wiesbaden` kwam zo als 0 uit een batch en is in werkelijkheid 6.600/mnd.
+- [ ] **Vijf callers** kunnen hierdoor stille nullen hebben, en bij minstens twee ervan gaat dat
+  ergens in: `backend/healthscore_service.py:460` (volume weegt mee in de score),
+  `backend/category_keyword_service.py:238` en `:389`, `backend/run_facet_volumes_new.py:98`,
+  en de twee endpoints in `backend/main.py:4816`/`:4849` (de Keyword-Planner-tool in de UI).
+  Hoe groot het effect is is niet gemeten — bij ~11% weggevallen rijen op grote batches is het
+  niet verwaarloosbaar.
+- [ ] **Werkende oplossing staat al in de repo**: `scripts/findfacetvalues/volumes.py::get_volumes`
+  vraagt op in batches van 500, houdt per batch bij welke keywords wél terugkwamen, en herhaalt de
+  ontbrekende in kleinere batches tot alles een waarde heeft (vier rondes was genoeg voor 205
+  ontbrekende keywords). Die logica optillen naar `keyword_planner_service` en `get_search_volumes`
+  een derde categorie laten teruggeven — `no_data` naast `successful` en `no_volume` — zodat een
+  caller onderscheid kan maken tussen "nul volume" en "niets teruggekregen".
+- [ ] Let op bij de refactor: kleinere batches raken sneller de per-customer-quota (na ~3 calls van
+  500 een gRPC 429). De bestaande `CUSTOMER_IDS`-rotatie vangt dat op, maar het aantal calls per run
+  gaat wel omhoog.
+
 ### V28 kiest een categorie op een handvol producten zonder dat de query er iets van noemt (logged 2026-08-18)
 - [ ] Na V57/V58 blijven er **4 rijen** over die naar een KALE categorie springen terwijl 0% van
   de query in de bestemming terugkomt: `anwb` -> Fietssloten (8 producten), `purdey outlet` ->

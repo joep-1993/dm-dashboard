@@ -4,6 +4,47 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-26 — Tegelaccessoires Type-kandidaten + `/findfacetvalues` command
+
+Twee dingen: eerst de eenmalige vraag (Type-kandidaten voor Tegelaccessoires met zoekvolume), daarna
+op verzoek een herbruikbaar command dat het voor elk facetsoort doet. Details in LEARNINGS (zelfde datum).
+
+Gedaan:
+
+- [x] **Tegelaccessoires (9003066)**: 2.375 producten via de Search API, 2.331 met beschrijving.
+      6.009 kandidaten uit titel + beschrijving, alle met een echte Keyword-Planner-waarde.
+      Excel met 234 rijen shortlist + 2.270 rijen alles-boven-50 →
+      `Downloads\claude\Tegelaccessoires_type_kandidaten_20260826.xlsx`.
+      Top: voegenstift 5.400, hoekprofiel 4.400, voegmortel 2.900, tegelprofiel 2.900,
+      overgangsprofiel 2.900, uitvulplaatjes 1.600, tegelkruisjes 720.
+- [x] **Batch-drop van Keyword Planner ontdekt en omzeild** — batches van 500 + retries op
+      ontbrekende rijen. `wiesbaden` kwam als 0 uit de bulk-run en is 6.600/mnd.
+- [x] **Corpus-verificatie van meervouden** — verzonnen vormen (`kitten`, `toileten`, `zwarten`)
+      haalden volume op van een ander woord.
+- [x] **`/findfacetvalues`** — `~/.claude/commands/findfacetvalues.md` +
+      `scripts/findfacetvalues/{scan,volumes,common}.py` + README. Drie stappen: `scan.py` resolvet
+      categorie/facet en extraheert kandidaten, het model schift streng op facetsoort, `volumes.py`
+      haalt volume op en schrijft de Excel. `--mode measure` voor Afmetingen/Maat/Formaat.
+- [x] **Schiftregel per facetsoort** in het command (Type / Opties / Kleur / Materiaal / Afmetingen /
+      Merk / Geschikt voor), met de bestaande waarden van hetzelfde facet elders in de taxonomie als
+      vormreferentie.
+- [x] **End-to-end getest** op Joeps eigen voorbeeld: Opties in Zonnepaneelaccessoires (9005004),
+      2.869 kandidaten → 23 gehouden → 23 boven 50 →
+      `Downloads\claude\Zonnepaneelaccessoires_Opties_kandidaten_20260826.xlsx`.
+      En een koude-cache-smoketest op Type in Tegelaccessoires.
+
+Open:
+
+- [ ] `keyword_planner_service.get_search_volumes` heeft de batch-drop nog wél (BACKLOG-punt).
+      Vijf callers kunnen stille nullen hebben.
+- [ ] Verbogen bijvoeglijke vormen (`draagbare`, `oplaadbare`, `elektrische`) komen als kandidaat
+      uit het corpus, maar een facetwaarde moet `Draagbaar`/`Oplaadbaar`/`Elektrisch` zijn.
+      Nu handmatig te canonicaliseren; het command laat de corpusvorm staan omdat die de echte
+      producttelling draagt.
+- [ ] Voor categorieën boven ~3.000 producten wordt een steekproef gebruikt (`--max-products`).
+      Zonnepaneelaccessoires heeft er 19.904; nooit gecontroleerd of een grotere steekproef
+      wezenlijk andere kandidaten oplevert.
+
 ### 2026-08-26 — Auto-redirects V62: reviewronde op `redirects_global_828a73ad`
 
 Achttien rijen door Joep aangewezen. Vijf ervan waren dezelfde bug (de V31-guard testte

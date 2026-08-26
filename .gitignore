@@ -121,3 +121,6 @@ backend/data/rurl_optimizer_v2_history.json
 scripts/google_ads/
 notes/bothits.txt
 scripts/analysis/compare_prompts.py
+
+# findfacetvalues: taxonomie-cache (facetlijst + facetwaarden, opnieuw op te halen)
+scripts/findfacetvalues/.cache/
