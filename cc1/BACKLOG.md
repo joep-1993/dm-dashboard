@@ -8,6 +8,25 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### Bestaande `/r/`-redirects missen hun `+`-vorm (logged 2026-08-26)
+
+De write-side is gerepareerd (zie TASKS/LEARNINGS 2026-08-26), dus nieuwe redirects krijgen beide
+separator-vormen. Maar elke `/r/`-redirect die vóór vandaag is aangemaakt heeft alleen de
+underscore-vorm — een rauwe `+` werd door de API als `_` opgeslagen, dus de plus-vorm bestond nooit.
+Elke geïndexeerde `+`-spelling van zo'n URL geeft dus nog steeds een live 200 in plaats van een 301.
+
+Waarom dat niet met de bestaande index te vinden is: `build_redirect_index` keyt op `equiv_key(fromUrl)`,
+en die collapst `+`, `_`, spatie en `%20` op één key. Een underscore-row en een plus-row zijn in die
+index niet van elkaar te onderscheiden, en een ontbrekende plus-row al helemaal niet. Vraagt een aparte
+pass over `GET /api/redirects` (ongecacht, gepagineerd) die per row op de **rauwe** `fromUrl` kijkt:
+alle rows met `/r/` of `/k/` waarvan de zoekterm een separator heeft, gegroepeerd op
+`separator_forms()`, en dan de groepen met minder dan twee leden.
+
+Omvang onbekend — `urlContains=oostende` gaf 5 van de 7 rows als `/r/`-rows met underscores, dus het
+kunnen er veel zijn. Eerst tellen, dan beslissen of het een bulk-POST waard is of alleen voor URL's met
+verkeer/impressies. Let bij een bulk-run op de les uit 2026-08-20: maak de rows aan *vóórdat* iemand de
+URL opvraagt, want één browsercheck zet een 200 in CloudFront voor >1u en een negatief in Varnish.
+
 ### `get_search_volumes` maakt van een weggevallen API-rij een 0 (logged 2026-08-26)
 - [ ] `backend/keyword_planner_service.py` heeft `BATCH_SIZE = 10000`, en
   `GenerateKeywordHistoricalMetrics` geeft bij zulke batches **niet voor elk keyword een rij terug**

@@ -1,6 +1,58 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Drie gaten achter één "die is al geredirect" (2026-08-26, Redirect-tool)
+
+Joep wilde `/products/r/peter+gevaert+leffingestraat+oostende/` naar de homepage, maar de tool zei dat
+die er al stond — voor NL én BE — terwijl de URL op beide domeinen gewoon een pagina gaf. Geen
+cacheverhaal: `Miss from cloudfront`, `age: 0`, en de underscore-vorm 301'de wél. Alleen de plus-vorm
+niet.
+
+**In een URL-*pad* is `+` een plus-teken, geen spatie.** De site geeft de zoekterm na `/r/` verbatim
+aan de resolver, en die normaliseert alleen `_` ≡ spatie ≡ `%20`. Probe met `%2B` → `NO_REDIRECT`,
+probe met `_` → `HAS_REDIRECT`. De eerdere aanname ("spatie == underscore == %20 == +, dus je hoeft
+alleen de underscore-vorm op te slaan") kwam uit een test met een rauwe `+` in de *querystring* van de
+resolver — die decodeert server-side naar een spatie. Testartefact, niet het gedrag van de site.
+
+**Volledige dekking van een `/r/`-URL is precies twee rows.** Gemeten: met alleen een underscore-row
+301't de live `%20`-URL óók (de site decodeert `%20` naar een spatie). Dus `_` dekt `_`/spatie/`%20`, en
+de letterlijke `+` heeft z'n eigen row nodig. De oude code postte ook een spatie-vorm — pure redundantie.
+
+**Het encoding-contract per call is verschillend, en dat is met wegwerp-rows uitgemeten** (aangemaakt,
+teruggelezen via het ongecachte `GET /api/redirects`, opgeruimd):
+
+| call | decode-passes | stuur dit voor een opgeslagen `+` |
+|---|---|---|
+| `POST /api/redirect` (JSON-body) | 1 | `%2B` |
+| `DELETE /api/redirect?fromUrl=` (query) | 2 | `%252B` |
+| `GET /api/redirect?searchterm=` (query) | 1 | `%2B` |
+
+`fromUrl` met een **rauwe `+` wordt opgeslagen als `_`** — de plus-vorm collapst dus op de
+underscore-row. En de API antwoordt `201` en echoot je input terug, dus dit faalt volledig stil: run #36
+van 3 augustus kreeg een 201 met id 8665150 voor de plus-vorm, en die row heeft nooit bestaan.
+`toUrl` wordt daarentegen **verbatim** opgeslagen (zowel `+` als `%2B` blijven onveranderd) en mag dus
+nooit mee-geëscaped worden. Zelfde escape dekt de `%2f`-case uit de entry van 2026-08-20.
+
+**De check-kant loog mee, en dat was het echte gat.** `check_url_is_fromUrl` matcht op *elke*
+separator-vorm en zet dan `skip_reason = "URL already redirected"`, waarna de row volledig geskipt werd.
+Een half-gedekte URL was daardoor met de tool niet meer te repareren — re-runs waren eeuwig no-ops. Dat
+is precies wat Joep zag: "de tool zegt dat ie al geredirect ís".
+
+**En de frontend zou de fix hebben doodgelegd.** `selectedRowIndices()` filtert op `isSelectableRow()`,
+die `already_correct`-rows uitsloot — die werden dus nooit naar de backend gestuurd. Een backend-only
+top-up zou nooit gevuurd hebben. Les: bij een fix in de submit-pijplijn eerst nagaan of de row de
+backend überhaupt bereikt.
+
+**Een globale separator-replace maakt paden die nergens bestaan.** `url_variants` verving álle
+underscores, dus voor `/products/huis_tuin/r/marva_verlichting_oostende/` genereerde hij ook
+`/products/huis+tuin/r/marva+verlichting+oostende/` en POSTte daar een row voor. Vóór de `/r/`- of
+`/k/`-marker is een underscore structureel; alleen de zoekterm erna mag variëren.
+
+**Niet proben vóór je schrijft.** Een resolver-miss wordt een uur als negatief in Varnish gezet en de
+site leest dezelfde key. De top-up POST daarom beide vormen blind en leest de duplicate-key-bounce
+(HTTP 500) als "already_present". Zelf ook in gestapt tijdens de diagnose: de `%2B`-probe zette het
+negatief dat de live 301 daarna een uur tegenhield.
+
 ## Vier stille fouten in een zoekvolume-pijplijn (2026-08-26, findfacetvalues)
 
 Joep vroeg om Type-kandidaten uit de productbeschrijvingen van Tegelaccessoires, met maandelijks

@@ -4,6 +4,52 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-26 — Redirect-tool: de `+`-vorm van `/r/`-URL's werd nooit weggeschreven
+
+Aanleiding: `/products/r/peter+gevaert+leffingestraat+oostende/` bleef op NL én BE bereikbaar terwijl de
+tool meldde dat hij al naar de homepage geredirect was. Drie gaten, niet één. Details in LEARNINGS
+(zelfde datum).
+
+Gedaan:
+
+- [x] **Datalaag voor Joeps URL gerepareerd** — row 8665290 aangemaakt met `%2B`-escape, staat er met
+      een echte `+`, `nl, be`, 301 → `/`. Resolver bevestigt `HAS_REDIRECT` voor beide landen.
+- [x] **`encode_from_url()`** in `backend/redirect_tool_service.py` — `%` → `%25`, dan `+` → `%2B`.
+      Toegepast op `fromUrl` in `post_redirect()` en (vóór `params=`) in
+      `delete_redirect_by_fromurl()`, want DELETE decodeert twee passes en een row met een letterlijke
+      `+` was niet te verwijderen (404). **Niet** op `toUrl` — die wordt verbatim opgeslagen.
+- [x] **`separator_forms()` + `_split_search_term()`** vervangen de globale replace: splitst op de
+      laatste `/r/` of `/k/` en varieert alleen de zoekterm, zodat er geen junkpaden als
+      `/products/huis+tuin/r/...` meer gePOST worden. Levert precies twee vormen, underscore eerst.
+- [x] **Probe-lus van max 5 resolver-calls per URL naar max 2** — `check_url_is_fromUrl` gebruikt nu
+      `separator_forms`; de spatie- en `%20`-vorm zijn resolver-equivalent aan `_`, dus die probes
+      konden alleen hetzelfde antwoord herhalen. Underscore eerst zodat de niet-bestaande `+`-key
+      meestal geen Varnish-negatief krijgt. `url_variants` blijft voor de `equiv_key`-vergelijkingen.
+- [x] **Top-up van half-gedekte rows** — preflight zet `topup_variants` op een `already_correct`-row,
+      `_topup_separator_forms()` POST beide vormen naar het bestaande doel. Nooit een DELETE, nooit een
+      ander doel, mirrort `existing_country`. Duplicate-key wordt via `_is_duplicate_key()` als
+      `already_present` gelezen.
+- [x] **Frontend meegetrokken** (`frontend/redirect-tool.html`) — `selectedRowIndices()` filtert op
+      `isSelectableRow`, dus `already_correct`-rows werden nooit naar de backend gestuurd en de top-up
+      zou nooit gevuurd hebben. `hasTopup()` toegevoegd: zulke rows zijn selecteerbaar, tellen als
+      *ready* i.p.v. *already*, zitten in het `ready`-filter, en de resultatentabel toont per vorm wat
+      er gebeurde.
+- [x] **Getest** — 15 asserts op de pure functies + 10 tegen de echte API: half-gedekte URL → top-up
+      voegt precies de `+`-row toe, tweede run is no-op, proefrows opgeruimd.
+- [x] **Memory bijgewerkt** — `redirect_api_behavior.md` had de foute `+`-equivalentie; contract nu
+      volledig uitgemeten. Nieuwe memory `redirect_plus_form_structural_fix.md`.
+
+Open:
+
+- [ ] **Backend op :8003 draait zonder `--reload`**, dus deze fix is pas actief na kill+relaunch
+      (`fuser -k 8003/tcp`) plus Ctrl+Shift+R. Niet gedaan — een restart sloopt een lopende Tier-A-run.
+- [ ] **Backfill**: bestaande `/r/`-rows waar de `+`-vorm ontbreekt. Niet te vinden via `equiv_key`,
+      want die collapst `+` en `_` op één key (ook in `build_redirect_index`) — vraagt een aparte pass
+      over `GET /api/redirects`. BACKLOG-punt.
+- [ ] Joeps URL was om 15:12 nog een gecachte 200. Varnish-negatief klaart ~15:50, CloudFront daarna
+      (TTL is een ondergrens van 74 min, nooit tot expiry gemeten). Lukt dat niet, dan is een
+      CloudFront-invalidation bij teamsearch de enige route.
+
 ### 2026-08-26 — Tegelaccessoires Type-kandidaten + `/findfacetvalues` command
 
 Twee dingen: eerst de eenmalige vraag (Type-kandidaten voor Tegelaccessoires met zoekvolume), daarna
