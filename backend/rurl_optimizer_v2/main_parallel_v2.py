@@ -1940,7 +1940,18 @@ def process_url_v2(args):
     facet_values = []
     if parsed.subcategory_id:
         filtered_facets = facet_filter.filter_by_subcategory(parsed.subcategory_id)
-        facet_values = facet_filter.get_facet_values(filtered_facets)
+        # V63: the V43 gate also belongs here, not only on the maincat-wide pass.
+        # filter_by_subcategory includes DESCENDANTS, so an accessory child can
+        # absorb pass 1 the same way it absorbed the maincat pass: for
+        # /klussen_486173/r/bosch_mini_cirkelzaag/ the only surviving
+        # 'Cirkelzaagmachines' row after the count dedup was the Zaagbladen one
+        # (5.780 blades vs 585 machines), which is what put a machine query on a
+        # blade page. The exemptions carry over unchanged — a query naming the
+        # accessory, or an r-url already living in it, still reaches it.
+        _gated_p1 = _gated_excluded_slugs(
+            parsed.keyword, getattr(parsed, 'subcategory_name', '') or '')
+        facet_values = facet_filter.get_facet_values(
+            filtered_facets, exclude_subcat_slugs=_gated_p1)
 
     # 1. SUBCATEGORY FACETS - Multi-facet matching
     if not result and facet_values:

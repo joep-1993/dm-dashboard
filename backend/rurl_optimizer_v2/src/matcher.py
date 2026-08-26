@@ -91,6 +91,32 @@ def _numeric_signature(text: str) -> set:
     return sig
 
 
+# V63: a token pair that shares only a COMPOUND MORPHEME counts as half a match
+# in the coverage scorer. Dutch glues its compounds, so the token that decides
+# between two facet values often shares nothing but a head or a tail with it:
+# 'loungeset' vs 'Loungekussens' (head 'lounge'), 'magneten' vs 'Magnetisch
+# bouwspeelgoed' (head 'magnet'). Half, never whole — 'eettafel' must keep
+# beating 'voetbaltafel', where the shared tail is all there is.
+MORPHEME_MATCH_WEIGHT = 0.5
+MIN_SHARED_MORPHEME = 5
+MIN_MORPHEME_TOKEN_LEN = 6
+
+
+def _shared_morpheme_len(t1: str, t2: str) -> int:
+    """Longest morpheme two tokens share at the SAME end: the longer of their
+    common prefix and their common suffix. A shared middle is not a morpheme
+    boundary in Dutch compounding and is exactly the false-positive the
+    substring tests elsewhere in this engine keep producing."""
+    n = min(len(t1), len(t2))
+    pre = 0
+    while pre < n and t1[pre] == t2[pre]:
+        pre += 1
+    suf = 0
+    while suf < n and t1[-1 - suf] == t2[-1 - suf]:
+        suf += 1
+    return max(pre, suf)
+
+
 def _strip_plural_suffix(s: str) -> str:
     """Strip a single trailing Dutch plural suffix ('en' or 's'), suffix-aware.
     Replaces the old `s.rstrip('s').rstrip('en')`, which stripped the CHARACTER
@@ -518,6 +544,19 @@ class KeywordMatcher:
                 return True
         return False
 
+    def _token_match_weight(self, kt: str, ft: str) -> float:
+        """V63: how much a keyword token is explained by a facet-value token.
+        1.0 for the token itself (modulo Dutch morphology), MORPHEME_MATCH_WEIGHT
+        when the two only share a compound morpheme, 0 otherwise. Both tokens
+        have to be long enough that a shared morpheme means something: at 5
+        characters out of 4 you get 'bor' in 'bordeauxrood' territory."""
+        if self._tokens_equal_modulo_morphology(kt, ft):
+            return 1.0
+        if (len(kt) >= MIN_MORPHEME_TOKEN_LEN and len(ft) >= MIN_MORPHEME_TOKEN_LEN
+                and _shared_morpheme_len(kt, ft) >= MIN_SHARED_MORPHEME):
+            return MORPHEME_MATCH_WEIGHT
+        return 0.0
+
     def match_by_token_coverage(self, keyword: str,
                                 facet_values: list[FacetValue],
                                 exclude_winkel: bool = False,
@@ -575,12 +614,34 @@ class KeywordMatcher:
             # they're the "phrase inside the phrase" while the unmatched
             # token between them just modifies the rest.
             matched_positions: list = []
+            matched_weight = 0.0
+            _weighted_toks = set()
             for i, kt in enumerate(kw_tokens):
-                if any(self._tokens_equal_modulo_morphology(kt, ft)
-                       for ft in fv_tokens):
+                w = max((self._token_match_weight(kt, ft) for ft in fv_tokens),
+                        default=0.0)
+                if w:
                     matched_positions.append(i)
+                    # A repeated token is one piece of evidence, not two:
+                    # "platenspeler platenspeler" otherwise sums two halves into
+                    # a full match and clears the >= 1.0 bar below on a single
+                    # morpheme, which walked it from Platenspelers into
+                    # s_kasten 'Platenspelerkasten'.
+                    if kt not in _weighted_toks:
+                        matched_weight += w
+                        _weighted_toks.add(kt)
             matched_kw = len(matched_positions)
             if matched_kw == 0:
+                continue
+            # V63: a morpheme is evidence but not an answer. Require a value to
+            # account for at least one whole keyword token's worth before it may
+            # win here at all, so a lone half-match can no longer pre-empt the
+            # legacy per-word path (this scorer returns straight out of
+            # match_with_partial). One exact token = 1.0 = unchanged behaviour;
+            # two morphemes also reach 1.0, and that is the new case:
+            # 'kussens voor loungeset' explains BOTH tokens against
+            # t_tuinstoelkussen 'Loungekussens' (371 products) and only one
+            # against 'Zitkussens' (3.625), which used to win on count alone.
+            if matched_weight < 1.0:
                 continue
 
             # V40: a strict (merk/winkel) facet must not be anchored solely on a
@@ -619,7 +680,11 @@ class KeywordMatcher:
             count = getattr(fv, "count", 0) or 0
             # V61: `fv.url` closes the tie. (matched_kw, score, count) leaves
             # equal-ranking values to be decided by facets.csv row order.
-            cand = (matched_kw, score, count, fv)
+            # V63: rank on the WEIGHT, not the token count — that is what lets a
+            # value explaining two morphemes outrank one explaining a single
+            # token exactly, while keeping the exact match ahead of a single
+            # morpheme.
+            cand = (matched_weight, score, count, fv)
             if (best is None
                     or cand[:3] > best[:3]
                     or (cand[:3] == best[:3] and fv.url < best[3].url)):
@@ -628,7 +693,7 @@ class KeywordMatcher:
         if best is None:
             return MatchResult(keyword=keyword, facet_value=None,
                                match_type='none', score=0, matched_text='')
-        matched_kw, score, _, fv = best
+        _matched_weight, score, _, fv = best
         return MatchResult(
             keyword=keyword, facet_value=fv,
             match_type='token_coverage',
@@ -888,12 +953,29 @@ class KeywordMatcher:
                     self.use_token_coverage = True
                 merged = [tc]
                 seen_axes = {tc_axis}
+                # V63: don't graft an axis whose single matched token tc already
+                # carries. The inner cascade runs per token and cannot see tc, so
+                # "speelgoed magneten" grafted levensfase 'Babyspeelgoed' onto
+                # type_bouwblok 'Magnetisch bouwspeelgoed' for the token
+                # 'speelgoed' — a word the chosen value already says — narrowing
+                # a 323-product page to 111 and adding 'baby', which the query
+                # never does. Compound morphemes count ('speelgoed' inside
+                # 'bouwspeelgoed'); a multi-token match is left alone, so a real
+                # second attribute ("nederlands elftal" + "Trainingsshirts")
+                # still combines.
+                _tc_tokens = self._coverage_tokens(tc.matched_text or '')
                 for r in others:
                     ax = (r.facet_value.facet_name.lower()
                           if r.facet_value else '')
-                    if ax and ax not in seen_axes:
-                        merged.append(r)
-                        seen_axes.add(ax)
+                    if not ax or ax in seen_axes:
+                        continue
+                    _rk = (getattr(r, 'keyword', '') or '').strip().lower()
+                    if (_rk and ' ' not in _rk
+                            and any(self._token_match_weight(_rk, t) > 0
+                                    for t in _tc_tokens)):
+                        continue
+                    merged.append(r)
+                    seen_axes.add(ax)
                 return merged
 
         words = keyword.split()
@@ -1004,7 +1086,8 @@ class KeywordMatcher:
         # v6: Also skip stopwords and words used in synonym pairs
         # v13: Also skip words covered by category name
         matched_words = {r.keyword.lower() for r in results}
-        non_strict_facets = [fv for fv in non_priority_facets if fv.facet_name.lower() not in STRICT_FACETS]
+        non_strict_facets = [fv for fv in non_priority_facets
+                             if fv.facet_name.lower() not in STRICT_FACETS]
         for word in words:
             if (len(word) >= 3 and
                 word.lower() not in matched_words and

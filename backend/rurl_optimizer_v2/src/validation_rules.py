@@ -109,6 +109,16 @@ GATED_SUBCATEGORIES = {
         'onderdeel', 'onderdelen', 'reparatie', 'reparatieset', 'uurwerk',
         'gereedschap', 'batterij', 'batterijen', 'horlogeglas', 'part', 'parts',
     }),
+    # V63: Zaagbladen onder Gereedschap. De as `t_zaagmachines` wordt in deze
+    # accessoire-categorie hergebruikt — waarde 'Cirkelzaagmachines' betekent
+    # daar "bladen VOOR cirkelzaagmachines" — en er zijn meer bladen dan
+    # machines (5.780 vs 585), dus de count-dedup koos Zaagbladen voor
+    # /klussen_486173/r/bosch_mini_cirkelzaag/. Zelfde vorm als Horlogebandjes.
+    'klussen_486173_4488335': frozenset({  # Zaagbladen (saw blades)
+        'zaagblad', 'zaagbladen', 'blad', 'bladen', 'cirkelzaagblad',
+        'cirkelzaagbladen', 'decoupeerzaagblad', 'decoupeerzaagbladen',
+        'reciprozaagblad', 'reciprozaagbladen', 'zaagbladset',
+    }),
 }
 
 
