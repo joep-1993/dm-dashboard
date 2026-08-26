@@ -3569,9 +3569,23 @@ def process_url_v2(args):
                     # 'Asics Gel'. Brand facets keep the existing Q1 rule (append
                     # only when the query literally names the brand, via _isb).
                     from src.facet_probe import _value_distinctive_match as _distinct_fd
-                    _kept_fd = [(_fn, _vid, _vn, _isb) for _fn, _vid, _vn, _isb in _bridged_fd
-                                if _isb or _name_link or _all_repr
-                                or (not _isb and _distinct_fd(parsed.keyword, _vn))]
+                    # V63: `_isb` says "this is a brand axis", not "the query names
+                    # the brand" — so every brand candidate was waved through here,
+                    # while the comment above believed the opposite. The only
+                    # upstream filter is the deliberately loose
+                    # _keyword_bridges_value, and 'camping' bridges 'Campingaz':
+                    # /r/camping_kooktoestel/ shipped Gasbranders + merk~Campingaz
+                    # for a query that names no brand at all. This is the third
+                    # append site; V57 fixed the same inversion on the two V28 ones.
+                    # A brand now has to be distinctively mentioned; non-brand
+                    # facets keep their own rule unchanged.
+                    _kept_fd = [
+                        (_fn, _vid, _vn, _isb) for _fn, _vid, _vn, _isb in _bridged_fd
+                        if (_spurious_brand_facet(_fn, _vn, parsed.keyword, _dom_name, matcher) is False
+                            if _isb
+                            else (_name_link or _all_repr
+                                  or _distinct_fd(parsed.keyword, _vn)))
+                    ]
                     # V48 (RC2): drop a brand facet a kept specific facet already
                     # subsumes — populaire_serie 'Asics Gel' covers the brand token
                     # 'asics', so merk~Asics is redundant noise on the same page.
