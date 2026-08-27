@@ -1,6 +1,85 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een maat is geen inhoudswoord, en een gate die het verkeerde type vergelijkt (2026-08-27, Auto-redirects V65)
+
+De openstaande punten uit de V63- en V64-entry, in één set. Code: `c853b1e`. A/B: 110 rijen anders,
+A 504 → 503, B 709 → 707, C 1162 → 1211, D 2623 → 2577, 0 verloren redirects.
+
+### De dekkingsmaat meet nu wat hij beweert te meten
+
+Twee gebreken in `_tokens_not_represented`, en beide maakten de teller én de noemer onbetrouwbaar:
+
+**Het -en-meervoud.** `_present()` stripte alleen een `e`/`s` van het QUERY-token en zocht die string
+in de rúwe doeltekst. Op de DOEL-kant gebeurde niets, dus 'aggregaat' liet geen spoor na in
+"Aggregaten", 'speelkleed' niet in "Speelkleden", 'houten' niet in "Hout", 'treinbaan' niet in
+"Treinbanen". Vier keer hetzelfde woord, vier keer "onvertegenwoordigd". `_bridge_stem` (al gedeeld
+met de brugtoets) doet -eren/-en/-s plus de stemwisseling en dubbele klinker, dus beide kanten vallen
+op één stam samen. **Op gelijkheid vergelijken, niet op bevatting** — stam-bevatting is precies wat
+kleurtint 'Bordeauxrood' aan "zonder boren" plakte ('bor' in 'bordeauxrod'), en het is hier niet
+nodig omdat de bestaande substring-toets de samenstellingen al dekt.
+
+**De maat in de noemer.** Geen facetwaarde kan '100', 'ml' of '190x100' representeren. Zolang ze
+meetellen, lijkt élke lange productnaam half gedekt: "aquafresh triple protection tandpasta pomp 100
+ml" landde drie juiste facetten (Aquafresh, Pasta, Pomp) en zakte alsnog op 43% door de V62-toets →
+0/D. Nu 66/C.
+
+Het verrassende deel: **het snijdt beide kanten op, en beide zijn juist.** 17 rijen die tier C haalden
+omdat álleen de maat matchte gaan naar 0 — "meelwormen 10 kg" → Voer via '10 kg', "washandje 200
+stuks" → **Mondkapjes** via '200 stuks', "glyfosaat 5 liter" → Tuinaarde via '5 liter', "koelkast
+tafelmodel 80 cm hoog" → **Ventilatoren** via '80 cm'. Daar deed de maat het hele werk en de dekking
+van 67% verhulde dat het product zelf nergens stond. Netto 64 rijen D → C, 17 C → D. Een betere
+meting verlegt de grens in twee richtingen; als een "verbetering" alleen maar promoveert, meet je iets
+anders dan je denkt.
+
+### Een gate die het verkeerde veld vergelijkt is onvindbaar in een diff
+
+Regel 308 (philips-TL op de parent Elektra i.p.v. Lampen) leek een facet-bestaansprobleem: RC4 had
+`vorm_afdr~'Rond'` aangeplakt, dat bestaat in geen van beide categorieën, en V53's alles-of-niets-toets
+leest zo'n stuk als "Lampen kan onze facetten niet dragen". Die theorie was plausibel, de fix
+(doemde stukken niet laten meestemmen) is ook juist — en veranderde niets aan deze rij.
+
+De echte oorzaak vond ik met vier regels debug-print op de gate zelf: `final_match_type` was
+**`'multi_with_qualifier'`**, en V53 vergeleek `== 'multi'`. Dezelfde RC4-append die het facet
+toevoegde had het type omgedoopt, dus de rijen die net verrijkt waren, waren precies de rijen die de
+subcat-uitlijning niet meer mochten hebben. `multi_with_probe_facet` (61 rijen) viel er net zo buiten.
+**Les: bij een guard die "niet vuurt" is de eerste vraag niet welke conditie faalt, maar welke waarden
+de condities überhaupt zien.** `_V45_DOM_SCORED_TYPES` noemt de drie types al één familie; V53 deed dat
+niet, en niets in de code wees erop.
+
+### De fallback die weggooide wat de rij al verdiend had
+
+V51 onderdrukt een verkeerde cross-category sprong en viel terug op de kále bronsubcategorie. Bij
+`/meubilair_389374/r/opklapbed_in_kast/` kostte dat twee dingen die de rij al had: de RC4-append
+`met_matras_bed~'Opklapbed'` (uit het eigen token van de query) en de Search-leider Logeerbedden, een
+KIND van de bron, met 0,51 over 92 producten. In augustus stond deze url op Logeerbedden + Opklapbed
+op 66. Een guard mag een fout antwoord weghalen, maar hij hoeft niet ook het goede deel weg te
+gooien: nu daalt hij af naar de leider mits die binnen de bron-subtree ligt, met de facetstukken die
+daar bestaan (`_facet_pieces_under`, dezelfde in-memory facets.csv-lookup als V53 — geen live call,
+dus nooit een dode pagina). Verlaat de subtree nooit, dus de net onderdrukte sprong kan niet
+terugkomen.
+
+### Een merk is een uitspraak over het product
+
+`/r/sonos/` in Platenspelers stond op Piano's `/c/merk~'Sono Luminus'` — een platenlabel — met **96 =
+tier A**. Eén token, volledig gedekt door de facetwaarde, dus de token-verliestoets van V64 kon hier
+per definitie niets. Het bewijs lag ongebruikt in dezelfde rij: de Search-leider voor 'sonos' is
+Platenspelers, share 1,0 — de BRON. Als de producten een andere categorie noemen dan de merkwaarde, is
+die waarde een homoniem en geen bestemming. **Lexicale merklijsten kunnen dit niet beslissen**
+('parkside' hoort écht bij Hogedrukreinigers, 'sono luminus' niet bij Sonos); de leider wel.
+
+Wat V65 hiermee NIET dekt, en het staat bovenaan de risicolijst: dezelfde vorm zonder merk-as. 'op
+batterij' → Keukenweegschalen (79, drie keer), 'klem' → Vloerkleden (79), 'vivo' → Spiegels (85),
+'radiator' → Verf (75), 'cien' → Gezichtscrèmes (89). Zie BACKLOG.
+
+### Nevenschade, expliciet
+
+Twee rijen zakken B → C: 'mini diesel aggregaat diesel' 84 → 66 en 'kabelgoot onder bureau' 89 → 66.
+Zelfde bestemming, ánder scorepad: nu `_left62` 'aggregaat' wél terugvindt in "Aggregaten", staat de
+V31-guard niet meer opzij voor de search-derived rescue en houdt hij het matcherresultaat (66) in
+plaats van de rescue-score (84). Voor een query met een onvertegenwoordigd 'mini' is 66 het eerlijkere
+getal, maar het is een reële verschuiving in de A/B-telling en geen gratis winst.
+
 ## Een facetwaarde die een query-token draagt zegt niets over wat de pagina verkoopt (2026-08-27, Auto-redirects V64)
 
 Uit Joeps review van `redirects_9ef6180c` (23 rijen, manual input). Code: `20ec744`. Vijf van de zeven

@@ -8,6 +8,21 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### Enkeltoken-ATTRIBUUTsprongen: een facetwaarde die de hele query dekt is nog geen categorie (logged 2026-08-27, merk-helft opgelost in V65)
+
+**Update 2026-08-27 (V65, `c853b1e`):** de MERK-helft is gedicht — een merk/winkel-sprong waarvan de
+Search-leider een andere categorie noemt valt terug op de bron, en `sonos` → Piano's staat nu op
+45/D. Wat overblijft is dezelfde vorm zonder merk-as, en dat is de grotere groep. Uit de risicolijst
+(`Downloads\claude\auto_redirects_AB_risico_20260827.xlsx`): 'op batterij' → Keukenweegschalen (79,
+drie R-urls), 'klem' → Vloerkleden (79), 'vivo' → Spiegels (85), 'radiator' → Verf (75, twee),
+'geluid' → Spelaccessoires (79), 'cien' → Gezichtscrèmes (89), 'compacte' → Overkappingen (85),
+'gordijnen' → Tuinhuisonderdelen (76). Alle acht: één token, volledig "gedekt", categorie
+onbereikbaar vanuit de query. De merk-toets werkt hier niet omdat er geen merk-as in zit; wat wél
+overal geldt is dat de Search-leider de bestemming niet aanwijst. Dat is dus de kandidaat-toets:
+**een enkeltoken-query mag geen andere subcategorie kiezen dan waar de producten hem zetten.** Weeg
+hem tegen de 232 rijen in die lijst, niet tegen de drie voorbeelden hierboven.
+
+Oorspronkelijke entry:
 ### Enkeltoken-merksprongen: een facetwaarde die de hele query dekt is nog geen categorie (logged 2026-08-27)
 
 `/r/sonos/` in Platenspelers landt op **Piano's** `/c/…~'Sono Luminus'` met score **96, tier A** — Sono

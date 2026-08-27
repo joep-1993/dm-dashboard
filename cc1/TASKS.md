@@ -4,6 +4,64 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-27 — Auto-redirects V65: de openstaande punten uit de V63- en V64-entry
+
+Alles hieronder afgevinkt in één set, code in `c853b1e`, uitwerking in LEARNINGS (zelfde datum,
+"Een maat is geen inhoudswoord"). A/B over 5.000 urls: 110 rijen anders, A 504 → 503, B 709 → 707,
+C 1162 → 1211, D 2623 → 2577, 0 verloren redirects.
+
+Gedaan:
+
+- [x] **`_present()` stemt nu het -en-meervoud** (`_bridge_stem`, op GELIJKHEID van stammen — niet
+      bevatting, dat is de 'bor'-in-'bordeauxrod'-valkuil). 'aggregaat' ~ "Aggregaten", 'speelkleed' ~
+      "Speelkleden", 'houten' ~ "Hout", 'treinbaan' ~ "Treinbanen".
+- [x] **Maat-tokens uit de dekkingsnoemer** (`_is_measure_token`): regel 284 (aquafresh … 100 ml) van
+      0/D naar 66/C mét zijn drie juiste facetten. Snijdt beide kanten op: 17 rijen die tier C haalden
+      omdat álleen de maat matchte gaan naar 0 ("meelwormen 10 kg" → Voer via '10 kg', "washandje 200
+      stuks" → Mondkapjes, "glyfosaat 5 liter" → Tuinaarde). Netto 64 rijen D → C, 17 C → D.
+- [x] **Regel 292: de V51-fallback houdt zijn facetten en daalt af naar de leider in de bron-subtree.**
+      `/meubilair_389374/r/opklapbed_in_kast/` staat weer op Logeerbedden + `met_matras_bed~'Opklapbed'`
+      (60), zoals in augustus, i.p.v. de kale parent op 45. Nieuw: `_facet_pieces_under`.
+- [x] **`sonos` → Piano's `/c/merk~'Sono Luminus'` (96/A) onderdrukt.** Een merk/winkel-sprong waarvan
+      de Search-leider een ándere categorie noemt (share ≥ 0,5, categorienaam ongebrugd, buiten de
+      bron-subtree) valt terug op de bron. Nu Platenspelers, 45/D.
+- [x] **Regel 308: de V53-poort accepteert de hele `multi*`-familie.** `== 'multi'` sloot
+      `multi_with_qualifier` en `multi_with_probe_facet` uit — precies de rijen die RC4/de probe net
+      verrijkt hadden. Philips-TL staat nu op Lampen i.p.v. de parent Elektra. Plus: een facetstuk dat
+      op de HUIDIGE bestemming ook ongeldig is blokkeert de verhuizing niet meer (V61 gooit het toch weg).
+
+Open, met wat er nu over bekend is:
+
+- [ ] **Regel 18 ('tuin bad') — mijn advies is: niet bouwen, maar het is jouw call.** Drie metingen:
+      (a) de AND-leider voor 'tuin bad' in `main_sanitair` is **Doucheslangen** (0,67 over 32 producten),
+      niet Baden; (b) onder Baden staat **geen enkele tuin/buiten-facetwaarde** — het assortiment daar is
+      badkamerbaden (Vrijstaand, Inbouw, Rechthoekig, Polysan, Riho); (c) 'bad' is drie letters en valt
+      onder de bodem die V62 bewust op 4 zette. Een brug bad → baden is dus niet het enige obstakel: de
+      producten wijzen Baden ook niet aan. Nu blijft hij in de bron (Zwembaden, waar Jacuzzi's leidt met
+      0,41 over 128 producten). Wil je hem toch in Baden, dan is dat een lexicale override tegen het
+      bewijs in — zeg het en ik bouw hem. #priority:low
+- [ ] **Regel 280 ('inbouw stopcontact met usb oplader rvs') vraagt een productbesluit.** Er ís een
+      categorie **Stopcontacten** (`klussen_486171_486134`) en de query noemt hem; de rij staat op
+      Stekkerdozen (`_486133`) omdat de twee gematchte facetwaarden dáár leven. De kosten van verhuizen:
+      `opties_stekkerdozen~'Met USB'` is een stekkerdozen-as en bestaat niet in Stopcontacten, dus je
+      ruilt Stekkerdozen + RVS + Met USB voor Stopcontacten + RVS. Wat is beter? De rij staat nu op 0/D,
+      dus hij wordt niet toegepast — er gaat niets stuk zolang dit open staat.
+- [ ] **Regel 295 ('met accu') — advies: geen globaal synoniem accu → elektrisch.** In de 5.000 rijen
+      landen alle drie de 'met accu'-queries op een échte accu-as (Heggenscharen `o_heggenschaar~'Met
+      accu'`, Ventilatoren `voeding_ventilator~'Accu'`, Ratelsleutels `type_gereedschap~'Accu'`). Het
+      Fauteuils-geval heeft geen accu-as en vraagt een mapping op FACETWAARDE-niveau
+      (`opties_stoel~'Elektrisch'` in relaxmeubilair), niet op woordniveau — bij gereedschap betekent
+      'Elektrisch' juist netstroom, dus een lexicaal synoniem zou daar schade doen.
+- [ ] **Mogelijk betere bestemming voor regel 10** (Limonadesiropen i.p.v. Sportvoeding) — dun bewijs,
+      Joep achtte de huidige bestemming acceptabel. Stond hier al.
+- [ ] **Onder regel 280 van het grote reviewbestand: nu een risicolijst i.p.v. een leesbeurt.**
+      `Downloads\claude\auto_redirects_AB_risico_20260827.xlsx` — 232 van de 1.210 A/B-rijen waar de
+      bestemming < 50% van de query representeert of de categorienaam ongebrugd is bij een
+      cross-category sprong, gesorteerd op risico. Bovenaan staat de klasse die V65 niet dekt: 'op
+      batterij' → Keukenweegschalen (79, 3×), 'klem' → Vloerkleden (79), 'vivo' → Spiegels (85),
+      'radiator' → Verf (75, 2×), 'geluid' → Spelaccessoires (79), 'cien' → Gezichtscrèmes (89). Zelfde
+      vorm als `sonos` maar zonder merk-as, dus de V65-poort raakt ze niet. Zie BACKLOG.
+
 ### 2026-08-27 — Auto-redirects V64: de review van `redirects_9ef6180c` (7 punten)
 
 Joeps review van het 23-rijen-bestand `redirects_9ef6180c_20260826_150805.xlsx`. Uitwerking in
@@ -37,11 +95,13 @@ Open, uit deze sessie:
       is drie letters, onder de `MIN_KEYWORD_LENGTH_FOR_FUZZY` die V62 bewust op 4 zette (de
       'gel' → 'Geel'-fix). Vraagt een expliciete meervoudsbrug bad → baden, apart te wegen.
       #priority:medium
-- [ ] **`sonos` in Platenspelers → Piano's `/c/…~'Sono Luminus'` staat op 96 = tier A.** Sono Luminus
+- [x] **`sonos` in Platenspelers → Piano's `/c/…~'Sono Luminus'` staat op 96 = tier A.** Gefixt in
+      V65 (`c853b1e`): merk-sprong zonder search-steun valt terug op de bron. Sono Luminus
       is een platenlabel. De nieuwe V51-poort laat hem bewust staan (één token, volledig gedekt door de
       facetwaarde), dus dit vraagt een eigen toets voor enkeltoken-merksprongen. Gevonden in de A/B, dus
       hij staat nu live op A. Zie BACKLOG. #priority:medium
-- [ ] **`_present()` in `_tokens_not_represented` stript geen Nederlands -en.** 'aggregaat' laat geen
+- [x] **`_present()` in `_tokens_not_represented` stript geen Nederlands -en.** Gefixt in V65
+      (`c853b1e`), samen met de maat-tokens uit de noemer. 'aggregaat' laat geen
       spoor na in "Aggregaten", 'speelkleed' niet in "Speelkleden", 'houten' niet in "Hout". Omzeild met
       de bridge-toets (die stemt wél) i.p.v. de helper te verbouwen, want die is gedeeld met V62 en
       vraagt zijn eigen A/B. Zelfde klasse als "regel 284" hieronder.
@@ -79,19 +139,22 @@ Gedaan:
 
 Open, uit de review van 280-309 — alle vier van V62-tijdperk, geen van deze is door V63 veroorzaakt:
 
-- [ ] **Regel 292: V51 zegt "kept source subcategory" maar valt terug op de parent.**
+- [x] **Regel 292: V51 zegt "kept source subcategory" maar valt terug op de parent.** Gefixt in V65
+      (`c853b1e`): de fallback houdt zijn facetten en daalt af naar de leider binnen de bron-subtree.
       `/meubilair_389374_389512/r/opklapbed_in_kast/` (Logeerbedden): de sprong naar Hoogslapers wordt
       terecht onderdrukt, maar de fallback landt op `meubilair_389374` (Bedden) i.p.v. op de
       bronsubcategorie. In augustus stond hier Logeerbedden + `met_matras_bed~'Opklapbed'` op 66, nu
       de bovenliggende categorie op 45. Scherpste van de vier. #priority:medium
-- [ ] **Regel 284: de V62-dekkingstest is te streng bij een lange productnaam.** Drie juiste facetten
+- [x] **Regel 284: de V62-dekkingstest is te streng bij een lange productnaam.** Gefixt in V65
+      (`c853b1e`): maat-/hoeveelheidstokens staan niet meer in de noemer. Drie juiste facetten
       (Aquafresh, Pasta, Pomp) op 0/D, omdat "aquafresh triple protection tandpasta pomp 100 ml"
       tokens overhoudt die geen facet kán dekken ('triple', 'protection', '100', 'ml'). Overweeg
       maat-/hoeveelheidstokens en merkloze ruis uit de noemer te halen.
 - [ ] **Regel 280: facetten kloppen, categorie niet.** `inbouw_stopcontact_met_usb_oplader_rvs` →
       Stekkerdozen + RVS + Met USB (0/D), terwijl de query om inbouwstopcontacten vraagt. De
       dominantie voor de volledige query is 0,5 en haalt de 0,75-poort niet.
-- [ ] **Regel 308: de maincat-brede 2-facet-assemblage pint de parent.** De philips-TL-query komt uit
+- [x] **Regel 308: de maincat-brede 2-facet-assemblage pint de parent.** Gefixt in V65
+      (`c853b1e`): de V53-poort accepteert de hele `multi*`-familie. De philips-TL-query komt uit
       op `klussen_486171` (Elektra) + kleur + merk i.p.v. op Lampen (`klussen_486171_486136`).
 - [ ] **Regel 295 "met accu"**: er is geen lexicale brug van 'accu' naar het enige bruikbare
       attribuut `opties_stoel~'Elektrisch'` (2.236 producten in Fauteuils). Synoniem accu → elektrisch
