@@ -20,6 +20,14 @@
         .skip-cell { background-color: #f8d7da !important; }
         .ok-cell { background-color: #d1e7dd !important; }
         .stat-box.info { background: #cff4fc; border-color: #b6effb; }
+        /* Conflicts = collisions with rules that already exist in the redirect
+           API. Orange so it reads as "needs a look", distinct from the yellow
+           accent tile ("new" rewritten) and the red danger tile (skipped). */
+        .stat-box.warn { background: #ffe5d0; border-color: #fed7aa; }
+        /* Compact conflict chip. The full target URL lives in its title
+           attribute, NOT in the cell — spelling the URL out inline blew the
+           From column past its max-width (2026-08-27). */
+        .badge-conflict { background-color: #fd7e14; color: #fff; cursor: help; }
 
         .preview-table { min-width: 1500px; }
         .preview-table thead th {
@@ -241,10 +249,14 @@
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="row g-2 mb-3">
+                        <!-- row-cols-* so six tiles wrap instead of squeezing on a
+                             narrow viewport. Tiles are NOT mutually exclusive: a
+                             conflict row also counts under Skipped or Ready. -->
+                        <div class="row g-2 mb-3 row-cols-2 row-cols-md-3 row-cols-xl-6">
                             <div class="col"><div class="stat-box" data-filter="all"><div class="num" id="statTotal">0</div><div class="label">Total rows</div></div></div>
                             <div class="col"><div class="stat-box accent" data-filter="flattened"><div class="num" id="statFlattened">0</div><div class="label">"new" rewritten</div></div></div>
                             <div class="col"><div class="stat-box info" data-filter="already"><div class="num" id="statAlready">0</div><div class="label">Already redirected</div></div></div>
+                            <div class="col"><div class="stat-box warn" data-filter="conflicts" title="Rows that collide with rules already in the redirect API: other rules point at the old URL (rewire), or the old URL already redirects somewhere else (replace). Click to filter; hover a row's chip for the full target URL."><div class="num" id="statConflicts">0</div><div class="label">Conflicten</div></div></div>
                             <div class="col"><div class="stat-box danger" data-filter="skipped"><div class="num" id="statSkipped">0</div><div class="label">Skipped</div></div></div>
                             <div class="col"><div class="stat-box success" data-filter="ready"><div class="num" id="statSubmittable">0</div><div class="label">Ready to submit</div></div></div>
                         </div>
@@ -618,6 +630,27 @@
             if (replaceExistingOn() && isReplaceableRow(row)) return null;
             return row.skip_reason;
         }
+        // Conflict = this row collides with a rule that ALREADY exists in the
+        // redirect API. Two shapes:
+        //   - incoming_rules: other rules point at this row's old URL, so they
+        //     get repointed at the new target when the row submits.
+        //   - existing_target: the old URL already redirects somewhere else,
+        //     so the row is either skipped or DELETE+POST'd ("replace").
+        // already_correct rows carry existing_target too, but that IS the rule
+        // we want — green, not a conflict. Gated on effectiveSkipReason for the
+        // rewire half so this stays in lockstep with the badge in
+        // renderPreviewTable: a skipped row never rewires anything.
+        // Returns null when there's no conflict, so it doubles as a predicate.
+        function conflictInfo(row) {
+            if (!row || row.already_correct) return null;
+            const effSkip = effectiveSkipReason(row);
+            const incoming = (row.incoming_rules || []).length;
+            const rewire = (!effSkip && incoming > 0) ? incoming : 0;
+            const hasExisting = !!row.existing_target;
+            if (!rewire && !hasExisting) return null;
+            return { rewire, hasExisting, skipped: !!effSkip };
+        }
+
         function recomputeStats() {
             if (!preflight) return;
             const rows = preflight.processed;
@@ -634,6 +667,11 @@
             document.getElementById('statAlready').textContent = alreadyCount;
             document.getElementById('statSkipped').textContent = skipped;
             document.getElementById('statSubmittable').textContent = ready;
+            // Recomputed here (not read off preflight.stats) because the
+            // "Replace existing" toggle moves rows in and out of the conflict
+            // set without a new preflight.
+            document.getElementById('statConflicts').textContent =
+                rows.filter(r => !!conflictInfo(r)).length;
             return ready;
         }
 
@@ -684,21 +722,30 @@
                                    + `<span class="small-muted ms-1">${forms}</span>`;
                     }
                 } else if (effSkip) {
-                    const target = row.existing_target
-                        ? `<span class="small-muted ms-1"> → <code>${escapeHtml(row.existing_target)}</code></span>`
+                    // The current target used to be spelled out inline; it now
+                    // rides in the badge's tooltip so a long /products/… path
+                    // can't stretch the column. Same for the two chips below.
+                    const tip = row.existing_target
+                        ? ` title="currently redirects to → ${escapeHtml(row.existing_target)}"`
                         : '';
-                    skipBadge = `<br><span class="badge bg-danger">${escapeHtml(effSkip)}</span>${target}`;
+                    const mark = row.existing_target ? ' ⓘ' : '';
+                    skipBadge = `<br><span class="badge bg-danger"${tip}>${escapeHtml(effSkip)}${mark}</span>`;
                 } else if (willReplace) {
-                    const target = row.existing_target
-                        ? `<span class="small-muted ms-1">replaces → <code>${escapeHtml(row.existing_target)}</code></span>`
+                    const tip = row.existing_target
+                        ? ` title="replaces → ${escapeHtml(row.existing_target)}"`
                         : '';
-                    skipBadge = `<br><span class="badge badge-flatten">will replace existing rule</span>${target}`;
+                    skipBadge = `<br><span class="badge badge-conflict"${tip}>⚠ replaces</span>`;
                 }
                 if (willRewire) {
                     // Append (don't replace) since a row could conceivably
                     // have both a flatten_from on its toUrl AND incoming
                     // rules on its fromUrl.
-                    skipBadge += `<br><span class="badge badge-flatten">will rewire ${incomingCount} incoming rule${incomingCount === 1 ? '' : 's'} to → <code>${escapeHtml(row.final_new || row.input_new || '')}</code></span>`;
+                    const newTarget = row.final_new || row.input_new || '';
+                    const plural = incomingCount === 1 ? '' : 's';
+                    const tip = escapeHtml(
+                        `will rewire ${incomingCount} incoming rule${plural} to → ${newTarget}`);
+                    skipBadge += `<br><span class="badge badge-conflict" title="${tip}">`
+                               + `⚠ ${incomingCount} rewire${plural}</span>`;
                 }
                 // data-idx carries the ORIGINAL index, so the delegated change
                 // handler stays correct under any sort or filter.
@@ -732,6 +779,7 @@
                 case 'flattened': return !!row.flatten_from;
                 case 'already':   return !!row.already_correct && !hasTopup(row);
                 case 'skipped':   return !row.already_correct && !!effSkip;
+                case 'conflicts': return !!conflictInfo(row);
                 case 'ready':     return hasTopup(row) || (!row.already_correct && !effSkip);
                 default:          return true; // 'all'
             }
