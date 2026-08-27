@@ -4,6 +4,59 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-27 — Redirect-tool conflicttegel, Canonicals-knoppen, Parfumerie kolom R, SEO titles-combo
+
+Drie losse opdrachten. UI-code in `6e99900`, uitwerking in LEARNINGS (zelfde datum, "Een label dat
+een URL uitspelt").
+
+Gedaan:
+
+- [x] **Redirect-tool preview: conflicten hebben een eigen tegel** (`data-filter="conflicts"`, oranje
+      tussen Already redirected en Skipped, klikbaar als filter). Conflict = botsing met een regel die
+      al in de Redirect API staat: `incoming_rules` of `existing_target`. Gewone skips (homepage,
+      self-redirect, duplicate in batch, multi-value facet) blijven bij Skipped.
+- [x] **De drie brede badges zijn chips met de URL in een tooltip.** `⚠ 2 rewires`, `⚠ replaces`, en
+      de rode skip-badge met `ⓘ`. `.url-cell` heeft `max-width: 380px` + `break-all`, dus een
+      uitgespelde `/products/…`-URL duwde de rij over drie regels.
+- [x] **Tegelrij op `row-cols-2/md-3/xl-6`** — zes tegels knijpen samen op een smal venster, nu
+      breken ze af. `flattened from` en de topup-varianten bewust ongemoeid (buiten scope, dus
+      `badge-flatten` blijft in gebruik).
+- [x] **Chipcontrast gecorrigeerd vóór de commit:** wit op `#fd7e14` = 2,57:1, zwart = 8,17:1, en dat
+      matcht `badge-flatten`'s vorm (gevulde warme tint + zwarte tekst).
+- [x] **Canonicals: Push → `btn-run`, Download Excel → `btn-outline-orange`.** Ze stonden op
+      `btn-secondary` / `btn-outline-warning` en vielen daardoor correct-maar-verkeerd grijs uit
+      (groep 2c in `style.css`). Ontsnapt aan de 2026-08-19 opruiming omdat die op
+      `onmouseover="this.style` grepte en deze twee geen inline hex hadden.
+- [x] **Parfumerie-uitdraai kolom R gevuld** (`Parfumerie_facetvalues_zonder_SEO_visits_20260819.xlsx`,
+      tabblad `0 visits alle kanalen`, 1.775 rijen). 83% staat op de migratiebatch `2026-01-27`, dus
+      als leeftijdsmaat onbruikbaar; de 264 Merk-values van jul/aug 2026 zijn de echte instroom.
+      Koppeling geverifieerd op `updatedAt` (1775/1775 gelijk aan kolom M).
+- [x] **SEO titles: combo `productlijn_koffiepads~s_boon~s_smaak` op cat 9002870** (Koffiepads)
+      toegevoegd als `built`. Nieuw (404 op de store-GET), URL live, geen unique title die hem
+      overschrijft.
+
+Open:
+
+- [ ] **De SEO-titles-combo is nog niet gepubliceerd.** Staat op `built`; Publish schrijft naar
+      productie en gaat vrijwel direct live. Eén klik in de tool, of zeg het en ik push hem.
+      #priority:medium
+- [ ] **`build_blueprint()`'s description herhaalt de frase nog steeds.** De renderer vult een
+      `!!facet!!` alleen op de eerste plek, dus de tweede helft rendert leeg — 84.881 bestaande
+      blueprints zijn zo aangetast. Voor het ene nieuwe record heb ik het lokaal gefixt
+      (`!!sub_category!!` op de tweede plek); de template globaal fixen betekent een re-push van die
+      84.881, en dat is een besluit van Joep. #priority:medium
+- [ ] **`grep -rE 'btn-(secondary|outline-(secondary|primary|info|success|warning|danger))' frontend/`
+      nalopen.** Elke hit is een knop die óf bewust neutraal is óf stil zijn betekenis kwijt is, en
+      dat verschil staat niet in de klasse. De Canonicals-twee waren hier een steekproef van, geen
+      uitputtende ronde. Los daarvan staat het oude punt over de elf `btn-outline-danger`-knoppen nog
+      open in UI_BLUEPRINT. #priority:low
+- [ ] **`.stat-box .label` (`#6c757d`) haalt op geen van de zes tegelvullingen AA** — 3,51 tot 4,45:1
+      bij 0,75rem uppercase. App-breed en pre-existent, niet door de nieuwe tegel veroorzaakt. Fix
+      hoort op `.stat-box .label` in één keer, niet per tegel. #priority:low
+- [ ] **`suggestions.txt` staat nog uncommitted** — de review-notities van `redirects_9ef6180c` (de
+      input voor V64/V65). Bewust buiten `6e99900` gehouden, want dat was een UI-commit. #priority:low
+
+
 ### 2026-08-27 — Auto-redirects V65: de openstaande punten uit de V63- en V64-entry
 
 Alles hieronder afgevinkt in één set, code in `c853b1e`, uitwerking in LEARNINGS (zelfde datum,

@@ -542,6 +542,29 @@ Note the collision: **SEO stats also has a `.stat-card`, but that is the chart's
 legend-and-toggle tile** (sparkline, `.metric-on`/`.metric-off` border) — same class
 name, different job. A page that needs both must rename one.
 
+**De klikbare filtertegel is een eigen variant: `.stat-box`** (Redirect-tool preview,
+Canonicals). Label-onder-getal zoals `.stat-card`, maar plat (`#f8f9fa` + 1px rand) met een
+gekleurde vulling per betekenis — `accent` geel, `info` cyaan, `warn` oranje, `danger` rood,
+`success` groen — en `data-filter="<naam>"` als hij de tabel eronder filtert. De actieve tegel
+krijgt `.active` (ring in huispaars) via één `querySelectorAll('.stat-box[data-filter]')`-loop,
+dus **een tegel toevoegen is alleen markup + een `case` in de filterfunctie**; klik-wiring en
+active-state komen gratis mee.
+
+Twee dingen bij het toevoegen van een tegel:
+
+* **Reken de rij na, net als bij `.stat-card`.** Zes tegels in een `row g-2` met `col` knijpen
+  samen op een smal venster. Vastgelegd als `row-cols-2 row-cols-md-3 row-cols-xl-6`, dus hij
+  breekt af in plaats van te knijpen — bij een filterrij is afbreken onschuldig (anders dan bij
+  een KPI-rij, waar een enkele afgebroken tegel als een ándere soort tegel leest).
+* **De tellingen mogen overlappen, maar zeg het.** In de Redirect-tool telt een conflictrij óók
+  onder Skipped of Ready, zoals `"new" rewritten` dat al deed met Ready. Dat staat in de `title`
+  van de tegel en in een comment boven de rij; zonder dat leest een gebruiker de tegels als een
+  optelling die niet uitkomt.
+* **Een teller die van een toggle afhangt, hoort niet uit een backend-stat te komen.** De
+  conflicttegel wordt in `recomputeStats()` herberekend uit hetzelfde predicaat dat de chip in de
+  rij bepaalt (`conflictInfo()` → `effectiveSkipReason()`), niet uit `preflight.stats`. Twee
+  definities naast elkaar geven een tegel die iets anders telt dan de tabel toont.
+
 ### Donut / part-to-whole — the SEO stats ring
 
 `dashDonutVisits` / `dashDonutRevenue` / `dashDonutUrlType` in `seo-stats.html` are
@@ -656,6 +679,24 @@ inline the hexes.
 Wil je betekenis, pak dan `btn-run` (uitvoeren), `btn-outline-purple` (secundair) of
 `btn-outline-orange` (toevoegen/exporteren). Dit is de reden dat DMA Exclusions' Preview van
 `btn-outline-primary` naar `btn-outline-purple` ging (2026-08-14).
+
+**En dit is de klasse knoppen die de opruiming van 2026-08-19 niet kon vinden** (Canonicals,
+2026-08-27). Die ronde grepte `onmouseover="this.style` — knoppen die hun kleur inline
+meebrachten. Een knop die al een *betekenisloze Bootstrap-naam* draagt heeft geen inline hex
+en geen handler, dus hij is voor die grep onzichtbaar en blijft stil grijs. Canonicals' **Push**
+stond zo op `btn-secondary` en **Download Excel** op `btn-outline-warning`; ze waren niet fout
+geconfigureerd, ze waren correct grijs volgens een regel die iets anders wilde zeggen dan de
+pagina bedoelde. Nu `btn-run` en `btn-outline-orange`.
+
+De tweede helft van de opruiming is dus een andere grep:
+
+```
+grep -rE 'btn-(secondary|outline-(secondary|primary|info|success|warning|danger))' frontend/
+```
+
+Elke hit is een knop die óf **bewust** neutraal is óf stil zijn betekenis kwijt is, en dat
+verschil kun je niet uit de klasse lezen — je moet per hit weten wat de knop dóet. Nog niet
+uitputtend nagelopen; zie `cc1/TASKS.md`.
 
 **Geen inline hexen en geen `onmouseover`-handlers meer — de hele app is om** (Joep,
 2026-08-19). De oude vorm was een knop die zijn kleur én zijn hover zelf meebracht:
@@ -1026,6 +1067,25 @@ silhouetten in één rij lezen als twee soorten dingen, terwijl het allebei gewo
 met de hues uit §Charts: **CPR lichtblauw `#1f99c4`, CPC roze `#be4693`** — het
 brandpaar dat elders op dit dashboard al "twee helften van één splitsing" betekent.
 Kies de vorm dus per tabel, niet per kolom, en laat het onderscheid van de tint komen.
+
+**Een badge hoort nooit een URL uit te spellen** (Redirect-tool preview, 2026-08-27). `will
+rewire 2 incoming rules to → /products/huishoudelijke_apparatuur/…/c/compatibel_koffie~3597874`
+stond voluit in de From-cel, en `.url-cell` heeft `max-width: 380px` met `word-break:
+break-all` — dus zo'n badge duwt de rij over drie regels en de tabel uit zijn ritme. De vorm
+die werkt: een **korte chip met het aantal, en de volle tekst in `title`**
+(`⚠ 2 rewires`, `⚠ replaces`, of de bestaande badge met een `ⓘ` erachter als er detail
+achter zit). `cursor: help` erbij, zodat de tooltip vindbaar is. Niets wordt onvindbaar, het
+is alleen niet langer breed. Let op: `title` is een attribuut, dus door `escapeHtml()` heen —
+die escapet ook `"` en `'`, anders breekt een URL met een quote de tag open.
+
+**Naast een gevulde badge blijft een nieuwe badge gevuld — het onderscheid komt van de tint.**
+Zelfde regel als de Model/Status-kolommen hierboven, maar dan de andere kant op: de outline-vorm
+is de voorkeur voor een *nieuwe* labelkolom, niet iets om er halverwege een rij in te zetten.
+`badge-conflict` staat naast `badge-flatten` (`#ffc107` + `color:#000`) en is daarom óók gevuld:
+`#fd7e14` + `color:#000`. Dat zwart is geen smaak — **wit op `#fd7e14` haalt 2,57:1, zwart
+8,17:1.** Een warme fill in het `#ffc107`–`#fd7e14`-bereik wil dus donkere tekst; wit werkt daar
+pas vanaf ongeveer `#CC5500` (4,32:1) en dan nog krap. Reken het na voor je een nieuwe
+`badge-*`-tint invoert.
 
 ## Info tooltips — the "i" button
 

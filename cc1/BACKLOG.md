@@ -8,6 +8,31 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### SEO titles: de description-template herhaalt de frase, en 84.881 gepushte blueprints renderen daardoor een halve zin (logged 2026-08-27)
+
+`build_blueprint()` zet de facetfrase twee keer in de description — `Zoek je <frase>? … Shop
+<frase> met !!DISCOUNT!! korting online!` — en de site-renderer vult een `!!facet!!` **alleen op
+zijn eerste voorkomen** (`!!sub_category!!` is de uitzondering, die resolvet elke keer). De tweede
+helft rendert dus leeg: live gezien als "Shop **Klussen** met 58% korting" (de merk/type-frase weg)
+en zelfs "Shop **met** 76% korting" als de noun een type-facet was in plaats van `sub_category`.
+Titel en H1 zijn ongedeerd — alleen de herhaling in de description. Geldt voor **84.881 van de
+85.167** gepushte blueprints; vastgesteld 2026-08-21, template sindsdien onveranderd.
+
+De fix in de template is één token (`!!sub_category!!` op de tweede plek, of de herhaling gewoon
+schrappen) en is op 2026-08-27 voor **één** nieuw record zo toegepast (cat 9002870, key
+`productlijn_koffiepads~s_boon~s_smaak`) om niet bewust een halve zin te shippen. Dat record wijkt
+nu dus af van de andere ~85k.
+
+Wat het een besluit maakt en geen taak: **globaal fixen betekent 84.881 records opnieuw pushen.**
+Punten om af te wegen — (a) `/page-titles` valideert een POST atomair, dus één slechte record kelder
+een hele batch van 5.000 met 400 "Invalid record values" (de `MAX_H1_LEN`-les); (b) de push gaat
+vrijwel direct live, dus dit is een zichtbare wijziging op 84.881 pagina's in één keer, niet een
+stille datamigratie; (c) `!!sub_category!!` in de tweede helft geeft een kortere, generiekere zin dan
+de eerste — is dat beter dan de huidige mangeling, of wil je daar iets anders? (d) een re-push
+overschrijft óók de records waar iemand later handmatig aan gesleuteld heeft; check dat eerst tegen
+de store-GET. Zie LEARNINGS 2026-08-27 en de memory `page_titles_placeholder_first_occurrence`.
+
+
 ### Enkeltoken-ATTRIBUUTsprongen: een facetwaarde die de hele query dekt is nog geen categorie (logged 2026-08-27, merk-helft opgelost in V65)
 
 **Update 2026-08-27 (V65, `c853b1e`):** de MERK-helft is gedicht — een merk/winkel-sprong waarvan de

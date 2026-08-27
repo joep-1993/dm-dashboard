@@ -1,6 +1,108 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een label dat een URL uitspelt, een knop die aan de grijs-groep ontsnapte, en createdAt als batchstempel (2026-08-27, UI + Parfumerie + SEO titles)
+
+Drie losse opdrachten op één dag. Code: `6e99900` (UI). Geen A/B, dit is frontend en een uitdraai.
+
+### De 2026-08-19 knoppenopruiming heeft twee knoppen gemist, en de grep verklaart waarom
+
+Canonicals' **Push** stond op `btn-secondary` en **Download Excel** op `btn-outline-warning`. Beide
+vielen grijs uit terwijl de bedoeling oranje was, en dat is precies wat UI_BLUEPRINT §Buttons
+voorschrijft: die Bootstrap-namen zitten in groep 2c, "wat géén eigen betekenis heeft", dus
+`style.css` rendert ze neutraal grijs. De knoppen waren niet fout geconfigureerd — ze waren
+correct grijs volgens een regel die iets anders wilde zeggen dan de pagina bedoelde.
+
+**Waarom de sweep ze niet vond:** die ronde zocht `grep -r 'onmouseover="this.style' frontend/`,
+oftewel knoppen die hun kleur inline meebrachten. Een knop die al een *betekenisloze
+Bootstrap-naam* draagt heeft geen inline hex en geen handler, dus hij is voor die grep onzichtbaar
+— en blijft stil grijs. De omzettabel in de blueprint noemt `Download Excel` zelfs expliciet onder
+`btn-outline-orange`; deze ene stond er alleen niet in de vorm die de grep kon zien.
+
+De les voor de volgende ronde: **`onmouseover` is de ene helft, de kleurnamen zijn de andere.**
+`grep -rE 'btn-(secondary|outline-(secondary|primary|info|success|warning|danger))' frontend/`
+geeft de resterende kandidaten; elk hit is een knop die óf bewust neutraal is óf stil zijn
+betekenis kwijt is, en dat verschil kun je niet uit de klasse lezen. Push → `btn-run` (uitvoerende
+actie, huis-CTA, zelfde vorm als Generate op diezelfde pagina), Download Excel →
+`btn-outline-orange` (groep 2b, "oranje actie die niets uitvoert").
+
+### Een label dat een URL uitspelt, rekt de kolom op waar hij in staat
+
+Redirect-tool preview: `will rewire 2 incoming rules to → /products/huishoudelijke_apparatuur/huishoudelijke_apparatuur_19968034_19970341/c/compatibel_koffie~3597874`
+stond voluit in de From-cel. `.url-cell` heeft `max-width: 380px` met `word-break: break-all`, dus
+zo'n badge duwt de rij over drie regels. Drie badges droegen een URL; het zijn nu chips zónder URL
+met de volle tekst in `title`: `⚠ 2 rewires`, `⚠ replaces`, en de rode skip-badge met een `ⓘ`
+erachter als er een huidig doel is. Plus een eigen tegel `data-filter="conflicts"`.
+
+Vier dingen die daarbij bleken:
+
+**Een nieuwe teller die van een toggle afhangt, hoort niet in `preflight.stats`.** De "Replace
+existing"-toggle verplaatst rijen in en uit de conflictset zónder nieuwe preflight, dus
+`conflictInfo()` hangt aan `effectiveSkipReason()` en de teller wordt in `recomputeStats()`
+herberekend. Zo blijft de tegel synchroon met welke chip je in de rij ziet — een geskipte rij
+herbedraadt niets, dus die telt niet mee, precies de gating die `willRewire` al deed. Wie hier een
+tweede definitie naast zet (backend-stat vs. frontend-predicaat) krijgt een tegel die iets anders
+telt dan de tabel toont.
+
+**`already_correct` draagt óók een `existing_target`, en dat is géén conflict.** Dat ís de regel
+die we willen; die rijen staan groen onder Already redirected. De backend zet `existing_target`
+vóór hij beslist of het `already_correct` of `source has existing rule` wordt, dus het veld alleen
+is geen conflictbewijs.
+
+**Wit op `#fd7e14` haalt 2,57:1.** Ik gaf de chip eerst witte tekst — onder AA, en de fout was
+onzichtbaar tot ik hem narekende. Zwart op dezelfde vulling geeft 8,17:1, en dat is precies de
+vorm die de buur `badge-flatten` al had (`#ffc107` + `color:#000`, 12,88:1). Dus: **zelfde silhouet
+als de buurbadge, onderscheid uit de tint** — de regel uit UI_BLUEPRINT §Labels, hier toegepast op
+een *gevulde* badge omdat de rij al gevuld was. Een outlined chip naast een gevulde `badge-flatten`
+zou twee soorten dingen suggereren waar er één is.
+
+**De grijze tegel-labels liggen app-breed onder AA, dit is geen nieuwe schuld.** `.stat-box .label`
+is `#6c757d`; op de zes vullingen geeft dat 3,51 (danger) · 3,61 (success) · 3,88 (warn, nieuw) ·
+4,02 (info) · 4,23 (accent) · 4,45 (basis). De nieuwe tegel valt netjes middenin die familie. Wie
+dit ooit oplost, doet het op `.stat-box .label` in één keer en niet per tegel — zie BACKLOG.
+
+### Taxonomy API `createdAt` is hetzelfde soort batchstempel als `updatedAt`
+
+Voor de Parfumerie-uitdraai (`Parfumerie_facetvalues_zonder_SEO_visits_20260819.xlsx`, kolom R)
+1.775 facet values opgehaald via `GET /api/Facets/{id}/values`. **1.478 van de 1.775 (83%) staan op
+`2026-01-27`** — dezelfde migratiebatch die [taxonomy_api_bulk_timestamps] al voor categorieën
+vaststelde, en die dus óók voor facet values geldt. Uit "createdAt = 2026-01-27" kun je geen leeftijd
+afleiden; het betekent alleen "bestond al vóór de migratie".
+
+Wat er wél in zit: **264 Merk-values van juli/augustus 2026 zijn echt nieuw aangemaakt.** Dat is de
+interessante groep in een 0-visits-analyse — die hebben 0 visits omdat ze te vers zijn, niet omdat
+ze niet werken. Per facet: Collectie 516× jan / 3× mrt, Merk 960× jan / 105× jul / 159× aug, Inhoud
+27× mrt / 1× jan, Kenmerken en Verpakking 1-2 rijen.
+
+Twee praktische punten:
+
+* **Verifieer de koppeling op een veld dat je al hebt.** Dezelfde call geeft `updatedAt`, en die kwam
+  1775/1775 identiek uit met de bestaande kolom M. Dat sluit een verschoven join uit vóór je 1.775
+  nieuwe datums gaat interpreteren — goedkoper dan achteraf twijfelen.
+* **`GET /api/Facets/values?facetValueId=…` filtert niet.** De query-parameter wordt genegeerd en je
+  krijgt een ongefilterde dump (555.192 rijen) met HTTP 200 terug. Dat leest als een leeg resultaat
+  als je op het eerste item kijkt. Er is geen single-value GET; per facet pagineren of de hele dump
+  doorzoeken.
+* Merk-value **24306069 ('Roca')** stond op 19-08 in de uitdraai en bestaat nu in **geen enkel facet**
+  meer — bevestigd tegen de volledige dump, niet alleen tegen facet 3027. Een facet value uit een
+  export van twee weken oud kan simpelweg weg zijn; zet dat in de cel in plaats van een lege datum.
+
+### SEO titles: de description-herhaling is nog steeds niet in de template gefixt
+
+Combo `productlijn_koffiepads~s_boon~s_smaak` op cat **9002870** (Koffiepads) toegevoegd, status
+`built`. Bestond nergens: niet in `pa.seo_titles_blueprints`, en `GET /page-titles/9002870/record`
+geeft 404. Geen facet-dependency-probleem, URL live (200 via de SEO-UA), en géén rij in
+`pa.unique_titles_content` — dus de blueprint gaat écht renderen; er stond nog de generieke
+fallback-H1 "Senseo - Arabica - Caramel Koffiepads".
+
+Voor dít ene record heb ik de description-herhaling gefixt (`!!sub_category!!` op de tweede plek),
+want anders ship je bewust een halve zin: de renderer vult een `!!facet!!` alleen op de eerste plek,
+dus "Shop <frase> met korting" wordt "Shop  Koffiepads met korting". `build_blueprint()` zelf is
+**niet** aangeraakt — dat raakt alle toekomstige runs plus een re-push van 84.881 bestaande
+blueprints, en dat is een besluit van Joep. Zie [page_titles_placeholder_first_occurrence] en
+BACKLOG. Gevolg om te weten: dit record wijkt nu af van de andere ~85k.
+
+
 ## Een maat is geen inhoudswoord, en een gate die het verkeerde type vergelijkt (2026-08-27, Auto-redirects V65)
 
 De openstaande punten uit de V63- en V64-entry, in één set. Code: `c853b1e`. A/B: 110 rijen anders,
