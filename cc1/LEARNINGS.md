@@ -1,6 +1,60 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een PUT met een echte locale herordent het hele facet, en een collateral-check die `sequence` niet meet ziet dat niet (2026-08-27, Parfumerie seoPriority)
+
+990 facet values in maincat Parfumerie op `seoPriority=false` gezet — 960× `merk` (3027), 28×
+`inhoud_parfum_ml` (3441), 1× `kenmerken` (6272), 1× `verpakking` (6271). Geen code, wel een
+API-gedraging die de volgende keer een uur kost.
+
+### `nameLanguage` bepaalt of de hele facet-volgorde omvalt
+
+`PUT /api/Facets/values/{id}` met `nameLanguage: "global"` raakt de `sequence` van niets aan —
+gemeten over **988 PUTs** heen: 0 wijzigingen op 4.197 merk-waarden en 141 inhoud-waarden. Maar een
+PUT waarvan `nameLanguage` een **echte locale** is (`nl-NL`) **hersorteert elke waarde in dat facet
+alfabetisch op `nameInColumn`**. `kenmerken` verloor daarmee een gecureerde volgorde (Vegan, Mini,
+Dierproefvrij, Zonder alcohol, Refillable, Extrait, Natuurlijk, Limited edition → alfabetisch).
+
+Twee redenen waarom dit bijna wegkwam:
+
+**Het is onzichtbaar in een facet dat al alfabetisch stond.** Van de twee multi-locale waarden in
+deze batch triggerden er twee de hersortering, maar `verpakking` stond al A-Z, dus daar was het een
+no-op. Eén van de twee laat zich dus niet zien — als `kenmerken` óók al alfabetisch had gestaan, had
+ik dit gedrag helemaal niet gevonden en was het de volgende keer op een groter facet gebeurd.
+
+**Mijn collateral-check keek naar de verkeerde velden.** Ik vergeleek `seoPriority` en `labels` over
+alle 4.357 waarden van de vier facetten en kreeg 0 nevenschade terug — terwijl er op dat moment 8
+sequences verschoven waren. Het viel alleen op omdat de aangeraakte waarde *zelf* ook verschoof en
+dus in de doel-diff opdook. **Een diff over de velden die je verwacht te veranderen bewijst niets
+over de velden die je niet in de gaten had.** Bij een schrijfactie op een API waarvan je het
+volledige neveneffect niet kent: diff het hele record, over het hele facet, niet alleen je
+doelwaarden.
+
+Herstel: `PATCH /api/Facets/{facetId}/values/reorder` met `{"items":[{"id":…,"sequence":…}]}` → 204.
+De originele sequences kwamen uit de snapshot die vóór de eerste PUT was weggeschreven; zonder die
+snapshot was de gecureerde volgorde niet te reconstrueren.
+
+### Wat er verder uit deze batch te weten valt
+
+* **De PUT geeft het volledige record terug.** Dus verifieer per call inline op *zowel* de vlag als
+  de labels, in plaats van 990 records achteraf opnieuw te lezen. Dat ving meteen op dat de vier
+  locale-labels van de twee multi-locale waarden de PUT overleefden.
+* **`urlSlug` komt niet terug uit de values-GET** en kan dus niet geresend worden. Dat is veilig: de
+  `/c/`-URL gebruikt de *facet*-slug plus het numerieke value-id
+  (`/c/inhoud_parfum_ml~6638758`), niet de eigen slug van de waarde.
+* **Test één waarde vóór de batch.** Eén PUT, dan het hele record voor/na vergelijken, kost twee
+  minuten en bevestigde de vorm van de body (plat, met `nameLanguage`) vóór 989 andere records.
+* **Neem de live staat als startpunt bij hervatten, niet je snapshot.** De eerste batchpoging liep in
+  een timeout na 344 records terwijl de laatste voortgangsregel op 200 stond — de snapshot was dus
+  stil verouderd. Het hervattende script haalt daarom eerst opnieuw op wat er nu écht staat; de PUT
+  is idempotent, dus dubbel doen is onschuldig, maar "hoeveel er al gedaan is" moet je niet gokken.
+* Slug→facetId is tegen de API geverifieerd in plaats van uit memory overgenomen: één GET per facet,
+  en `labels[].urlSlug` bevat per locale de slug.
+
+Eindstand geverifieerd op een verse read: 990/990 op False, labels 990/990 identiek, sequences
+990/990 identiek, 0 nevenschade over de 4.357 waarden van de vier facetten, 0 failures.
+
+
 ## Een label dat een URL uitspelt, een knop die aan de grijs-groep ontsnapte, en createdAt als batchstempel (2026-08-27, UI + Parfumerie + SEO titles)
 
 Drie losse opdrachten op één dag. Code: `6e99900` (UI). Geen A/B, dit is frontend en een uitdraai.

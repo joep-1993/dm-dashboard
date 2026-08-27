@@ -4,6 +4,48 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-27 — Parfumerie: 990 facet values op seoPriority=false
+
+Vervolg op de uitdraai `Parfumerie_facetvalues_zonder_SEO_visits_20260819.xlsx`. Joep leverde de
+lijst; uitwerking in LEARNINGS (zelfde datum, "Een PUT met een echte locale herordent het hele
+facet"). Geen code gewijzigd.
+
+Gedaan:
+
+- [x] **990 waarden op `seoPriority=false`** via `PUT /api/Facets/values/{id}`, GET-merge-PUT met alle
+      velden geresend. 960× `merk` (3027), 28× `inhoud_parfum_ml` (3441), 1× `kenmerken` (6272), 1×
+      `verpakking` (6271). Geen duplicaten, alle 990 bestonden en stonden alle op `true`.
+- [x] **Vooraf gevalideerd**: slug→facetId tegen de API (niet uit memory), bestaan van elke waarde,
+      en één test-PUT met volledige voor/na-vergelijking van het record.
+- [x] **Eindcontrole op een verse read**: 990/990 False, labels 990/990 identiek, sequences 990/990
+      identiek, 0 nevenschade over de 4.357 waarden van de vier facetten, 0 failures.
+- [x] **Nevenschade gevonden én teruggedraaid**: de PUT op `kenmerken~23595421` (nameLanguage
+      `nl-NL`) herordende alle 8 waarden van facet 6272 alfabetisch. Gecureerde volgorde hersteld via
+      `PATCH /api/Facets/6272/values/reorder`.
+- [x] **Vastgelegd als memory** `taxonomy_put_namelanguage_resequences` — dit geldt buiten dit project.
+
+Open:
+
+- [ ] **De 264 verse Merk-values (jul/aug 2026) staan bewust nog op `true`.** Joeps lijst bevat exact
+      de 960 jan-batch merk-waarden, dus de recente instroom is overgeslagen — juist, want die hebben
+      0 visits omdat ze te vers zijn, niet omdat ze niet werken. Over een paar maanden opnieuw meten
+      voordat je daar iets uitzet. #priority:low
+- [ ] **Effect meten.** `seoPriority=false` haalt de noscript-facetlinks voor Googlebot weg
+      (`seoprio_noscript_facetlinks`), maar de site leest `isSeoFacet` uit de zoekindex, niet uit de
+      taxonomie — dus er zit catalogus-lag tussen deze schrijfactie en het live effect. Over 1-2 weken
+      controleren of de links echt weg zijn voordat je conclusies trekt over crawl budget.
+      #priority:medium
+- [x] **Rollback-snapshot weggezet** in `Downloads\claude\parfumerie_seoprio_rollback_20260827.json`
+      (4.357 waarden van de vier facetten met labels, sequence en de originele `seoPriority`; 2.087
+      stonden op dat moment op `true`), met de doellijst ernaast als
+      `parfumerie_seoprio_targets_20260827.txt`. Terugdraaien = die 990 opnieuw PUTten met
+      `seoPriority` uit dat bestand.
+- [ ] **Overweeg de snapshot-stap te structureren.** Nu handwerk per klus; een tabel
+      `pa.taxonomy_seoprio_history` (value_id, facet_id, veld, oud, nieuw, wie, wanneer) zou elke
+      seoPriority-schrijfactie terugdraaibaar maken zonder dat iemand aan een JSON in Downloads moet
+      denken. Zelfde vorm als het openstaande "revert deze push"-punt in BACKLOG. #priority:low
+
+
 ### 2026-08-27 — Redirect-tool conflicttegel, Canonicals-knoppen, Parfumerie kolom R, SEO titles-combo
 
 Drie losse opdrachten. UI-code in `6e99900`, uitwerking in LEARNINGS (zelfde datum, "Een label dat
