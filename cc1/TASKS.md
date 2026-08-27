@@ -4,6 +4,52 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-27 — Auto-redirects V64: de review van `redirects_9ef6180c` (7 punten)
+
+Joeps review van het 23-rijen-bestand `redirects_9ef6180c_20260826_150805.xlsx`. Uitwerking in
+LEARNINGS (zelfde datum, "Een facetwaarde die een query-token draagt zegt niets over wat de pagina
+verkoopt"); code in `20ec744`. A/B over 5.000 urls: 107 rijen anders, A 504 → 504, B 709 → 709,
+C 1193 → 1162, D 2592 → 2623, 0 verloren redirects.
+
+Gedaan:
+
+- [x] **Regel 13 was al gefixt** — `t_tuinstoelkussen~7224100` 'Loungekussens', 80/B. De export van
+      15:08 ligt vóór `68621f0` (15:51). Herrun de gerapporteerde urls altijd eerst.
+- [x] **Regel 17/18/19: de attribuutwaarde die een categorie kaapt.** V51 kreeg de RC6-vraag ("noemt
+      enig query-token de bestemmings-categorie?") plus twee poorten: bestemming buiten de
+      bronsubcategorie én de query verliest een token. 'fietsen berging' → **Tuinhuisjes**,
+      'tuin bad' → **Zwembaden**, 'beter bed aanbieding' → **Seniorenbedden**, alle drie tier D.
+- [x] **Regel 15: 45 → 60.** `and_mode` / `slug_agrees` / `verified` gesplitst in de V36-fallback;
+      slug-agreement + ≥25 producten + naam-match ≥95 = 60 (tier C), en de reason zegt nu welke helft
+      hij heeft.
+- [x] **Regel 10: 60 → 45**, bestemming ongewijzigd. Nieuwe V64-cap aan de staart van de cascade
+      (na V61): ≤25% dekking + ≥3 losse échte woorden onvertegenwoordigd + categorienaam noemt het
+      product niet.
+- [x] **Regel 23 uitgelegd** (was een vraag, geen bug): `fuzz.partial_ratio` in `match_with_partial` is
+      een substring-scorer, 'matrassen' zit in 'topdekmat**rassen**' → 100 −5 = 95. 'latex' lift mee uit
+      de waardenaam. Niet de grootste van de vier gelijk-scorende waarden won — de kandidatenvolgorde
+      van `process.extract` besliste.
+
+Open, uit deze sessie:
+
+- [ ] **Regel 18 landt niet waar Joep hem wil.** 'tuin bad' blijft nu in de bron (Zwembaden) i.p.v.
+      Baden / Bath buckets — die liggen in maincat `main_sanitair` (559432 / 559432_23451560) en 'bad'
+      is drie letters, onder de `MIN_KEYWORD_LENGTH_FOR_FUZZY` die V62 bewust op 4 zette (de
+      'gel' → 'Geel'-fix). Vraagt een expliciete meervoudsbrug bad → baden, apart te wegen.
+      #priority:medium
+- [ ] **`sonos` in Platenspelers → Piano's `/c/…~'Sono Luminus'` staat op 96 = tier A.** Sono Luminus
+      is een platenlabel. De nieuwe V51-poort laat hem bewust staan (één token, volledig gedekt door de
+      facetwaarde), dus dit vraagt een eigen toets voor enkeltoken-merksprongen. Gevonden in de A/B, dus
+      hij staat nu live op A. Zie BACKLOG. #priority:medium
+- [ ] **`_present()` in `_tokens_not_represented` stript geen Nederlands -en.** 'aggregaat' laat geen
+      spoor na in "Aggregaten", 'speelkleed' niet in "Speelkleden", 'houten' niet in "Hout". Omzeild met
+      de bridge-toets (die stemt wél) i.p.v. de helper te verbouwen, want die is gedeeld met V62 en
+      vraagt zijn eigen A/B. Zelfde klasse als "regel 284" hieronder.
+- [ ] **Mogelijk betere bestemming voor regel 10:** de Search-leider voor 'slush puppy siroop framboos'
+      in eten_drinken is **Limonadesiropen** (`eten_drinken_574929`), niet Sportvoeding — maar in
+      fallback-modus (143k hits), dus dun bewijs. Joep achtte de huidige bestemming acceptabel.
+- [ ] Onder regel 280 van het grote reviewbestand is nog niet gekeken (stond hier al).
+
 ### 2026-08-26 — Auto-redirects V63: de twee openstaande punten + review 280-309
 
 Vervolg op de V62-entry hieronder. Uitwerking in LEARNINGS (zelfde datum, "Het morfeem dat aan de

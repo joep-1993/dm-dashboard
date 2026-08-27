@@ -1,6 +1,118 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een facetwaarde die een query-token draagt zegt niets over wat de pagina verkoopt (2026-08-27, Auto-redirects V64)
+
+Uit Joeps review van `redirects_9ef6180c` (23 rijen, manual input). Code: `20ec744`. Vijf van de zeven
+punten waren code, één was al gefixt en één was een vraag.
+
+**Eerst de valkuil die een halve sessie kan kosten: kijk naar de tijdstempel van het reviewbestand.**
+`redirects_9ef6180c_20260826_150805.xlsx` is van 15:08; `68621f0` (het morfeem, V63) is van 15:51 en
+`2fc5f8f` van 16:09. Vijf van de zeven punten stonden er met "nog steeds" bij, en één daarvan —
+regel 13, `t_tuinstoelkussen~7224099` 'Zitkussens' i.p.v. `~7224100` 'Loungekussens' — was 43 minuten
+ná de export al verholpen. **Herrun de gerapporteerde URL's altijd eerst door de huidige code** (een
+CSV met één `r_url`-kolom, `--reuse-data-cache` als de pickle er nog staat) voordat je een oorzaak gaat
+zoeken. Kost 4 seconden voor 7 urls, en het antwoord op "nog steeds?" is dan een feit in plaats van een
+aanname.
+
+### De attribuutwaarde die een categorie kaapt
+
+Drie van de vijf punten waren hetzelfde mechanisme. Eén query-token matcht **exact** op een
+facetwaarde, maar die waarde is een attribuut van een product waar de query niet om vraagt:
+
+| query (bron) | landde op | de waarde betekent daar |
+|---|---|---|
+| 'fietsen berging' (Tuinhuisjes) | Hogedrukreinigers `/c/t_hdrukrein~'Fietsen'` | een reiniger VOOR fietsen |
+| 'tuin bad' (Zwembaden) | Windschermen `/c/r_windscherm~'Tuin'` | een windscherm VOOR de tuin |
+| 'beter bed aanbieding' (Seniorenbedden) | Tafels `/c/type_tafels~'Bed'` | een bed**tafel** |
+
+De guard hiervoor bestaat al (V51) maar toetste alleen H1-similarity, en deze drie zitten op **62, 57
+en 46** — boven de vloer van 45. Dat is geen ongelukkige drempel maar een structureel blinde vlek: de
+synthetische H1 wordt uit categorienaam + facetwaarde opgebouwd, dus het gedeelde token zit in beide
+kanten van de vergelijking en tílt de score juist. Hoe verkeerder de as, hoe geloofwaardiger de H1.
+
+De onderscheidende vraag stond al in de codebase, bij RC6 voor de search-derived strays: **noemt enig
+query-token de bestemmings-CATEGORIE?** (`_keyword_bridges_value`). Drie voorwaarden samen, want elk
+alleen is te breed:
+
+1. off-topic volgens die bridge-toets, én
+2. de bestemming ligt **buiten** de bronsubcategorie (self-or-child blijft vrij, anders sneuvelt een
+   legitieme drill-down Barbecues → Barbecue-accessoires), én
+3. de query **verliest** een token aan de bestemming (`_tokens_not_represented`).
+
+Voorwaarde 3 kwam er ná de eerste A/B bij en is de belangrijkste les: zonder haar zakten **60 rijen uit
+A/B** die het antwoord wél geven — 'retinol' → Gezichtscrèmes `/c/Retinol`, 'squishy' → Fidgets
+`/c/Squishy`, 'sleuteletui' → Portemonnees `/c/Sleuteletuis`. Een query van één token dat de facetwaarde
+volledig dekt is off-topic volgens de categorienaamtoets én toch een goed antwoord. "De categorie
+noemt de query niet" is dus pas een defect als er ook iets kwijt is.
+
+Prijs van die keuze, expliciet: **`sonos` in Platenspelers → Piano's `/c/…~'Sono Luminus'` blijft op
+96 = tier A staan.** Sono Luminus is een platenlabel. Eén token, volledig gedekt, dus voorwaarde 3
+houdt hem tegen. Enkeltoken-merksprongen vragen een eigen toets (BACKLOG).
+
+### Slug-agreement en share zijn twee claims, niet één
+
+De cross-maincat fallback (V36) verifieerde met één samengestelde test: AND-modus **en** share ≥ 0,6
+**en** de dominante slug is de gekozen categorie. Voor 'opbergkast voor balkon' in meubilair is de
+Search-leider wél Opbergkasten (168 producten) maar de share 0,38, omdat de query legitiem óók over
+Tuinkasten en Balkonkasten spreidt. Resultaat: 45, dezelfde score als een sprong zonder énig bewijs.
+Gesplitst in `and_mode` / `slug_agrees` / `verified`; slug-agreement + ≥ `V62_DOM_COUNT_FLOOR`
+producten + naam-match ≥ 95 geeft nu 60. **Een samengestelde conditie kan niet zeggen wélke helft
+ontbrak — en de reason-tekst kon dat dus ook niet.**
+
+### Een cap mag het cijfer veranderen, niet de route
+
+'slush puppy siroop framboos' → Sportvoeding `/c/smaak_voeding~'Framboos'` dekte één token van vier en
+stond op 60 (tier C). Twee dingen hielden hem daar: coverage van **exact** 25,0 valt in de −20 band in
+plaats van de −35 (`< 25.0`), en 'slush', 'puppy' en 'siroop' zijn alle drie korter dan de 8 tekens die
+V27's long-token-regel eist. De eerste twee reparatiepogingen waren fout, en beide fouten zijn het
+onthouden waard:
+
+- **Poging 1: de band inclusief maken (`<= 25.0`) in `calculate_reliability_score`.** Werkt voor de rij,
+  maar de score van die functie is niet alleen een cijfer — de cascade hangt er poorten aan
+  (`reliability_score >= 50` op drie plekken). Twee rijen verloren daardoor hun redirect **helemaal**
+  ('hallmark agenda forever friends', 'buitenlamp dag nacht sensor'): een andere route, uitkomend op een
+  V28-rescue-rejection. Getoetst met `git stash` + dezelfde twee urls op een warme cache, dus het was
+  aantoonbaar de code en geen cache-effect. **Een demotie hoort aan de staart van de cascade** (na V61),
+  waar hij niets meer kan omleiden.
+- **Poging 2: cappen bij ≥ 2 onvertegenwoordigde woorden.** 11 rijen uit A/B, waarvan de helft gelijk
+  had — onderuit gehaald door de zwakke morfologie van `_present()` in `_tokens_not_represented`: die
+  stript alleen `e`/`s`, geen Nederlands **-en**. Dus 'aggregaat' laat geen spoor na in "Aggregaten",
+  'speelkleed' niet in "Speelkleden", 'houten' niet in "Hout", 'treinbaan' niet in "Treinbanen". En
+  "antislipmat antislipmat" telde zijn éne missende woord twee keer (nu een set).
+
+Wat het werd: **drie** losse échte woorden (alpha, ≥ 4 tekens, gededupliceerd) onvertegenwoordigd, ≤ 25%
+dekking, **en** de categorienaam noemt het product niet — die laatste toets stemt het -en-meervoud wél
+en redt 'treinstation bij houten treinbaan' → Speelgoed treinbanen `/c/materiaal~'Hout'` (81). Drie
+woorden is precies waar de meting de stemmer overleeft, en het is ook wat de klacht beschrijft: product,
+merk én kwalificatie allemaal afwezig op de pagina waar je landt.
+
+**Cijfer- en modeltokens blijven bewust in de noemer**: 'campingaz gasbus cp 250' → Gasflessen
+`/c/merk~Campingaz` staat óók op 25% en heeft gelijk. Dat is hetzelfde punt als het openstaande
+"regel 284" in TASKS (V62-dekkingstest te streng bij een lange productnaam) en hoort daar thuis.
+
+### Hoe `type_topdekmatras~'Latex topdekmatrassen'` ontstaat (Joeps vraag bij regel 23)
+
+`match_with_partial` scoort kandidaten met **`fuzz.partial_ratio`** (`src/matcher.py:848`), een
+substring-scorer: 'matrassen' zit letterlijk in 'topdekmat**rassen**' → 100, minus de vaste −5
+fuzzy-penalty = 95, boven de drempel. 'latex' komt in de query niet voor en lift alleen mee omdat het
+in de waardenaam staat. Alle vier de waarden met 'matrassen' erin scoren dus 95 (Koudschuim 2915,
+Traagschuim 2234, Splittoppers 195, Latex 113) en de winnaar hangt aan de kandidatenvolgorde van
+`process.extract`, niet aan de producttelling — het is niet de grootste die won. Geen semantiek, puur
+een substring-treffer; de 0 die V62 er daarna op zet is dus terecht.
+
+### A/B, en waarom er vier van waren
+
+5.000 urls (`input_f364006b`), `--reuse-data-cache` zodat alleen de eerste run de ~90s cache bouwt.
+Eindstand: **107 rijen anders, A 504 → 504, B 709 → 709, C 1193 → 1162, D 2592 → 2623, 0 verloren
+redirects, 0 rijen uit A/B.** Onderweg: variant 1 (brede off-topic) −66 A/B, variant 2 (cap in de
+scorer) 2 verloren redirects, variant 3 (≥2 woorden) 11 rijen uit A/B. **Alle drie zagen er in de
+7-rijen-check perfect uit.** De 7 gerapporteerde rijen valideren een fix niet; de A/B doet dat.
+
+Praktisch: de search-derived SQLite-cache warmt tussen runs op, dus een rij die in A anders liep dan in
+B hoeft geen code-effect te zijn. Isoleren met `git stash` + dezelfde urls op de nu-warme cache is
+twee minuten werk en het verschil tussen een echte regressie en een artefact.
+
 ## Het morfeem dat aan de staart van het ene woord en de kop van het andere zit (2026-08-26, Auto-redirects V63)
 
 Vervolg op V62 (zelfde datum): de twee punten die daar openbleven, plus wat het doorlopen van regel

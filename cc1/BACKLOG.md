@@ -8,6 +8,25 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### Enkeltoken-merksprongen: een facetwaarde die de hele query dekt is nog geen categorie (logged 2026-08-27)
+
+`/r/sonos/` in Platenspelers landt op **Piano's** `/c/…~'Sono Luminus'` met score **96, tier A** — Sono
+Luminus is een platenlabel. Gevonden in de V64-A/B (`20ec744`), en de nieuwe V51-poort laat hem met opzet
+staan: die eist dat de query een token *verliest*, en 'sonos' wordt volledig gedekt door de facetwaarde.
+Die voorwaarde is nodig — zonder haar zakten 60 rijen uit A/B die het antwoord wél geven ('retinol' →
+Gezichtscrèmes `/c/Retinol`, 'squishy' → Fidgets `/c/Squishy`). Dus dit vraagt een andere toets.
+
+Vorm van het probleem: één token, geen verlies, categorienaam noemt de query niet, en de facetwaarde is
+een **merk of eigennaam** die toevallig zo heet. Kandidaat-signalen: is de waarde een merk-as
+(`merk`/`winkel`) of een eigennaam-achtige waarde in een andere as; hoeveel *andere* categorieën in de
+maincat dezelfde tokenmatch zouden geven; en de search-derived dominantie voor de query alleen
+(`sonos` in meubilair/audio zal Piano's niet als leider geven). `_spurious_brand_facet` (V57/V63) doet
+al iets in deze richting voor de append-paden en is het startpunt.
+
+Let op bij het bouwen: de A/B-maatstaf is hier niet "hoeveel rijen veranderen" maar "hoeveel A-rijen
+verdwijnen die goed waren" — dit soort sprongen zit juist ín tier A, want een volledig gedekte query
+met een exacte facetmatch krijgt de RC5-lift.
+
 ### DMA+ single-account-onderdelen tegen het licht houden (logged 2026-08-26)
 
 De shop-exclusions van DMA+ lopen sinds `24958df` over beide NL-accounts. Bewust níet meeverbreed,
