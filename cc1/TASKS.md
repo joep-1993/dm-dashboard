@@ -4,6 +4,45 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-27 — Tegelaccessoires: seoDisplayLimit 3 → 24, en de combo die al aan stond
+
+Vervolg op de entry van 26-08 ("Tegelaccessoires Type-kandidaten"): facet 7911 bestaat inmiddels met
+29 waarden. Uitwerking in LEARNINGS (zelfde datum, "Een slug die op ID's lijkt"). Geen code gewijzigd.
+
+Gedaan:
+
+- [x] **`seoDisplayLimit` van facet 7911 (`t_tegelacc`) op 24** via `PUT /api/Facets/7911`, HTTP 200.
+      Diff voor/na over het hele record: alleen `seoDisplayLimit` (3 → 24) en `updatedAt` gewijzigd,
+      alle vier de locale-labels identiek. Settings-rij 71228 en 29/29 facetwaarden ongemoeid
+      nagelezen op een verse GET.
+- [x] **De oorspronkelijke opdracht bleek een no-op**: de combo 9003066 × 7911 stond al op
+      `seoPriority: true` op alle drie de lagen (CategoryFacet 5093, settings-rij 71228, 29/29
+      waarden), gezet op 26-08 tussen 12:07 en 12:14. Niets geschreven voordat dat was teruggekoppeld.
+- [x] **ID's opgelost**: `t_tegelacc` = facet **7911** ("Type"), `klussen_486172_638250` = de nl-NL
+      `urlSlug` van categorie **9003066** (Tegelaccessoires, parent 9001284, maincat Klussen 35000).
+      Die getallen zijn géén taxonomie-ID's — alle zes de ID-lookups gaven 404.
+- [x] **Memory** `taxonomy_seodisplaylimit_master_facet` — waar het veld leeft, dat `name`/
+      `nameLanguage` required zijn, en dat de lokale swagger-kopie het veld mist.
+- [x] **Paginatie-advies** (losse vraag, geen code): `index,follow` + self-referencing canonical,
+      niet `noindex,follow` en niet `index,nofollow`. Onderbouwing in LEARNINGS.
+
+Open:
+
+- [ ] **Facet 7911 komt niet uit de Search API voor 9003066.** 1.510 producten, vijf facetten terug
+      en `t_tegelacc` zit er niet bij. Uitzoeken welke van de twee het is: catalogus-sync heeft het
+      facet van één dag oud nog niet opgepikt, óf er is nog geen product aan de 29 type-waarden
+      gemapt. Zolang dat niet rond is, doet die `seoDisplayLimit: 24` niets. Over een paar dagen
+      opnieuw kijken; als het dan nog leeg is, is het een mapping-vraag voor IT. #priority:medium
+- [ ] **`scripts/swagger_taxv2.json` is verouderd** — `seoDisplayLimit` komt er nul keer in voor
+      terwijl de live spec het in vier schema's heeft. Verse kopie trekken van
+      `$TAX/swagger/v1/swagger.json`, en meteen kijken welke velden er nog meer bij zijn gekomen.
+      #priority:low
+- [ ] **Skilldoc corrigeren**: `~/.claude/skills/beslist-apis/TAXONOMY_API.md` documenteert
+      `GET /api/Categories/tree?locale=nl-NL`, maar die route bestaat niet — hij matcht op
+      `/api/Categories/{id}` en geeft met HTTP 200 een validatiefout terug, wat als lege boom leest.
+      Vervangen door de werkende weg (`/api/Facets?searchTerm=` → `/api/CategoryFacets?facetId=`).
+      Buiten deze repo, dus los oppakken. #priority:low
+
 ### 2026-08-27 — Parfumerie: 990 facet values op seoPriority=false
 
 Vervolg op de uitdraai `Parfumerie_facetvalues_zonder_SEO_visits_20260819.xlsx`. Joep leverde de

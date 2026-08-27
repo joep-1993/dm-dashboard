@@ -1,6 +1,108 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een slug die op ID's lijkt, en een veld dat niet in je swagger-kopie staat (2026-08-27, Tegelaccessoires `t_tegelacc`)
+
+Vervolg op de Type-kandidaten van 26-08: het facet is inmiddels aangemaakt (7911, 29 waarden) en
+moest een hogere `seoDisplayLimit` krijgen. Geen code gewijzigd. Drie dingen die tijd kostten en één
+SEO-vraag die er los naast liep.
+
+### De cijfers in een categorie-slug zijn geen taxonomie-ID's
+
+De opdracht kwam binnen als "de facet/cat combo `t_tegelacc/klussen_486172_638250`". Die twee
+getallen zien eruit als ID's en zijn het niet: `Categories/486172`, `Facets/486172` en
+`Facets/values/486172` geven alle drie 404, en hetzelfde geldt voor 638250. `klussen_486172_638250`
+is de **nl-NL `urlSlug`** van categorie **9003066 (Tegelaccessoires)**. De ID's in zo'n slug komen
+uit de URL-structuur van de site, niet uit de taxonomie.
+
+Twee doodlopende wegen daarbij, allebei het onthouden waard:
+
+* **`GET /api/Categories?locale=nl-NL` geeft alleen de 32 hoofdcategorieën terug**, niet de hele
+  boom. Grepen op een slug levert dus niets op voor een subcategorie.
+* **`GET /api/Categories/tree?locale=nl-NL` bestaat niet** — de route matcht op
+  `/api/Categories/{id}` en het antwoord is `{"messages":{"id":["The value 'tree' is not valid."]}}`,
+  met HTTP 200. Dat leest als een lege boom als je niet kijkt. De skilldoc
+  `~/.claude/skills/beslist-apis/TAXONOMY_API.md` noemt die route wél.
+
+De route die wél werkt is de omgekeerde: `GET /api/Facets?searchTerm=<stuk van de slug>` geeft het
+facet-ID, en **`GET /api/CategoryFacets?facetId=<id>` geeft de `categoryId` er direct bij**. Van
+slug naar combo in twee calls, zonder de boom te hoeven kennen.
+
+Bijvangst die een bestaande memory nuanceert: die `?facetId=`-variant gaf `seoPriority: true` mee op
+de CategoryFacet-rij, terwijl `taxonomy_seopriority_category_level` noteert dat CategoryFacets dat
+veld altijd `null` teruggeeft. Dat gold kennelijk voor de `?categoryId=`-vorm; met `?facetId=` komt
+het gevuld terug. Beide gecontroleerd tegen `CategoryFacetSettings/{cat}/{facet}` en die drie waren
+het eens.
+
+### `seoDisplayLimit` staat op het master-facet, en niet in de swagger-kopie in deze repo
+
+`seoDisplayLimit` (hoeveel facetwaarden een noscript-SEO-link krijgen) zit **niet** op
+`CategoryFacets` en **niet** op `CategoryFacetSettings`, maar op het facet zelf — dus
+`PUT /api/Facets/{id}`. Voor een facet dat aan één categorie hangt (`categoryCount: 1`) is dat
+hetzelfde bereik; bij een gedeeld facet raak je met deze PUT elke categorie tegelijk.
+
+**`scripts/swagger_taxv2.json` in deze repo kent het veld niet** — nul hits — terwijl de live spec
+op `$TAX/swagger/v1/swagger.json` het in vier schema's heeft staan (`FacetDto`,
+`CategoryFacetDetailDto`, `CreateFacetRequest`, `UpdateFacetRequest`). Als een veld dat je in een
+API-response ziet niet in de lokale spec staat, is de lokale spec verouderd en niet de API vreemd.
+
+`UpdateFacetRequest` heeft **`name` en `nameLanguage` als required**, dus een puur mechanische
+"zet één integer om"-PUT bestaat hier niet: je stuurt de bestaande labelwaarden van één locale mee.
+Met `nameLanguage: "nl-NL"` + de bestaande `name`/`urlSlug` bleven alle vier de locale-labels
+intact (nl-NL, nl-BE, en-US, de-DE, voor en na identiek) — ook al staat het facet op
+`isTranslatable: true`, er is geen autovertaling overheen gegaan.
+
+Dat is opvallend genoeg om apart te zetten, want **dezelfde dag deed de facet-*value*-PUT precies
+het tegenovergestelde**: daar herordende een echte locale het hele facet (zie de Parfumerie-entry
+hierboven). Twee endpoints, twee gedragingen. De gotcha van het ene endpoint is geen voorspelling
+voor het andere — en de manier om dat te weten is niet redeneren maar het hele record voor en na
+diffen, ook de velden die niets met je wijziging te maken hebben.
+
+Ter kalibratie van het getal zelf: verse facetten worden op `seoDisplayLimit: 3` aangemaakt, Merk
+(3238) staat op 80.
+
+### "Staat al aan" is ook een antwoord, en dan is de vraag welke laag het tegenhoudt
+
+De oorspronkelijke opdracht — de combo op True zetten — was een no-op: `seoPriority` stond al op
+`true`, op de CategoryFacet-rij (5093), in de settings-rij (71228) én op 29/29 facetwaarden, alles
+gezet op 26-08 tussen 12:07 en 12:14. De drie lagen uit de skilldoc slagen allemaal.
+
+Wat er wél mis is, zit in een vierde laag die die checklist niet noemt: **de Search API kent facet
+7911 niet voor categorie 9003066**. 1.510 producten, vijf facetten terug (Merk 3238 met
+`isSeoFacet: true`, Materiaal, Kleur, Kleurtint, Winkel) en `t_tegelacc` zit er niet bij. Ofwel de
+catalogus-sync heeft het facet van één dag oud nog niet opgepikt, ofwel er is nog geen product aan
+die 29 type-waarden gemapt. Zolang dat zo is, doet die 24 niets — de site leest `isSeoFacet` uit de
+zoekindex en niet uit de taxonomie (`seoprio_noscript_facetlinks`). De taxonomie goed hebben staan
+is een voorwaarde, geen bewijs.
+
+### Paginering: Google's docs zwijgen over `noindex`, en dat zwijgen is het antwoord
+
+Losse vraag van Joep, geen code. De ecommerce-paginatiedocs geven één harde regel — *"Don't use the
+first page of a paginated sequence as the canonical page"* — en zeggen niets over indexeerbaarheid.
+Dat is geen gat: de `noindex`-passage in `#avoid-indexing-variations` gaat expliciet over
+**filter- en sorteervarianten** (`?order=price`, dezelfde resultatenset in een andere volgorde).
+`?page=2` is een ándere resultatenset en dus geen variant — dezelfde redenering die de canonical-regel
+oplevert, sluit `noindex` uit.
+
+Het advies is dus `index,follow` (of gewoon geen robots-meta) plus een self-referencing canonical.
+Niet de twee varianten uit de vraag:
+
+* **`noindex,follow` bestaat op termijn niet.** Google crawlt een langdurig genoindexeerde pagina
+  minder, gooit hem uit de index en volgt de links dan feitelijk ook niet meer — het verwordt tot
+  `noindex,nofollow`. Bij paginering is dat direct schadelijk: pagina 2+ is vaak het enige crawlpad
+  naar de diepere producten.
+* **`index,nofollow` is de verkeerde kant op**: je houdt een dunne pagina in de index en haalt de
+  enige functie weg die hij heeft.
+
+Indexeerbaar is niet hetzelfde als geïndexeerd — Google kiest bij paginering vrijwel altijd zelf
+pagina 1 en laat 2+ liggen, en dat zelfregulerende gedrag is beter dan het met `noindex` forceren.
+Zit index-bloat écht in de weg, dan los je het aan de bron op: pagineringsdiepte begrenzen, pagina
+2+ uit de sitemap en uit de interne SEO-linksurfaces houden, en de introtekst niet herhalen op 2+.
+Nooit een `robots.txt`-disallow op `?page=`: dat blokkeert de ontdekking van de diepe producten en
+haalt bestaande URL's niet eens uit de index. `rel=next/prev` gebruikt Google sinds 2019 niet meer,
+Bing wel.
+
+
 ## Een PUT met een echte locale herordent het hele facet, en een collateral-check die `sequence` niet meet ziet dat niet (2026-08-27, Parfumerie seoPriority)
 
 990 facet values in maincat Parfumerie op `seoPriority=false` gezet — 960× `merk` (3027), 28×
