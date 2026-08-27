@@ -27,7 +27,10 @@
         /* Compact conflict chip. The full target URL lives in its title
            attribute, NOT in the cell — spelling the URL out inline blew the
            From column past its max-width (2026-08-27). */
-        .badge-conflict { background-color: #fd7e14; color: #fff; cursor: help; }
+        /* Donkere tekst op de oranje vulling, net als .badge-flatten hiernaast:
+           wit op #fd7e14 haalt maar 2,57:1, zwart 8,17:1. Zelfde silhouet als de
+           buur, alleen de tint verschilt. */
+        .badge-conflict { background-color: #fd7e14; color: #000; cursor: help; }
 
         .preview-table { min-width: 1500px; }
         .preview-table thead th {
