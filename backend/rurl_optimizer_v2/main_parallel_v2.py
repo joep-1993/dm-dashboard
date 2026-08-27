@@ -1033,6 +1033,30 @@ V64_LOW_COVERAGE_SHARE = 0.25
 V64_LOW_COVERAGE_MIN_WORDS = 3
 
 
+# V65: units that appear as their own token in retail queries. Single letters
+# ('l', 'v', 'w') are absent on purpose - _tokens_not_represented already skips
+# tokens shorter than 2, and a bare 'm' is as often a size label as a metre.
+_MEASURE_UNITS = frozenset({
+    'mm', 'cm', 'dm', 'ml', 'cl', 'dl', 'kg', 'gr', 'gram', 'mg', 'liter',
+    'meter', 'watt', 'volt', 'inch', 'stuks', 'stuk', 'pcs', 'mah', 'ah',
+})
+# a pure number, a number+unit glued ('100ml', '13w'), or a dimension ('190x100',
+# '40x60x80'). Comma/point decimals included ('1,5v').
+_MEASURE_RE = re.compile(
+    r'^\d+(?:[.,]\d+)?'
+    r'(?:\s?x\s?\d+(?:[.,]\d+)?)*'
+    r'(?:mm|cm|dm|ml|cl|dl|kg|gr|gram|mg|l|g|w|v|ah|mah|pk|db|lm|inch|"|liter|meter)?$'
+)
+
+
+def _is_measure_token(t: str) -> bool:
+    """V65: True when the token is a measurement rather than a content word."""
+    t = (t or '').lower().strip()
+    if not t:
+        return False
+    return t in _MEASURE_UNITS or bool(_MEASURE_RE.match(t))
+
+
 def _tokens_not_represented(keyword_words, target_text) -> list:
     """V62: the query's content tokens that leave no lexical trace in
     `target_text` (destination category name + facet value names + url).
@@ -1042,8 +1066,22 @@ def _tokens_not_represented(keyword_words, target_text) -> list:
     and so the restore can be re-checked after the append passes.
     """
     from src.validation_rules import STOPWORDS, SHOP_NAMES
+    from src.reliability_scorer import _bridge_stem
     out = []
     tt = (target_text or '').lower()
+    # V65: the target's own tokens, stemmed. `_present` used to strip only a
+    # trailing e/s from the QUERY token and then look for that string inside the
+    # raw target text, which cannot see the Dutch -en plural on the TARGET side:
+    # 'aggregaat' left no trace in "Aggregaten", 'speelkleed' none in
+    # "Speelkleden", 'houten' none in "Hout", 'treinbaan' none in "Treinbanen".
+    # All four are the same word. _bridge_stem (shared with the bridge test)
+    # strips -eren/-en/-s and undoes the voicing and double-vowel spelling, so
+    # both sides collapse to one stem; compared by EQUALITY, not containment —
+    # stem containment is what put kleurtint 'Bordeauxrood' on a "zonder boren"
+    # query ('bor' in 'bordeauxrod') and it is not needed here, since the raw
+    # substring test above already covers the compound cases.
+    _tt_stems = {st for st in (_bridge_stem(w) for w in re.findall(r'[a-z0-9]+', tt))
+                 if len(st) >= 4}
 
     def _present(t):
         if not t:
@@ -1051,11 +1089,21 @@ def _tokens_not_represented(keyword_words, target_text) -> list:
         if t in tt:
             return True
         st = t.rstrip('e').rstrip('s')
-        return bool(st) and st in tt
+        if st and st in tt:
+            return True
+        ts = _bridge_stem(t)
+        return len(ts) >= 4 and ts in _tt_stems
 
     for w in keyword_words or []:
         w = (w or '').lower()
         if len(w) < 2 or w in STOPWORDS or w in SHOP_NAMES:
+            continue
+        # V65: a measure is not a content token. No facet value can represent
+        # '100', 'ml' or '190x100', so counting them in the denominator makes
+        # every long product name look half-covered: "aquafresh triple
+        # protection tandpasta pomp 100 ml" landed three correct facets
+        # (Aquafresh, Pasta, Pomp) and still failed the V62 test at 43%.
+        if _is_measure_token(w):
             continue
         if _present(w):
             continue
@@ -1072,6 +1120,34 @@ def _tokens_not_represented(keyword_words, target_text) -> list:
             continue
         out.append(w)
     return out
+
+
+def _facet_pieces_under(facet_filter, slug: str, fragment: str) -> str:
+    """V65: the `name~valueid` pieces of `fragment` that exist under `slug`.
+
+    Facet VALUE ids are category-scoped, so a fragment assembled for one
+    subcategory cannot be pasted onto another without checking. Same in-memory
+    facets.csv lookup V53 does for its subcat realignment - no live call, so a
+    kept facet can never produce a dead page.
+    """
+    if not (slug and fragment):
+        return ''
+    try:
+        fdf = facet_filter.facets_df
+        vcol = facet_filter.col_mapping.get('facet_value_id', 'facet_value_id')
+        if 'category_url_slug' not in fdf.columns:
+            return ''
+        present = set(fdf.loc[fdf['category_url_slug'] == slug, vcol].astype('int64'))
+    except Exception:
+        return ''
+    keep = []
+    for piece in fragment.split('~~'):
+        if '~' not in piece:
+            continue
+        vid = piece.split('~', 1)[1]
+        if vid.lstrip('-').isdigit() and int(vid) in present:
+            keep.append(piece)
+    return '~~'.join(keep)
 
 
 def _names_category(token: str, cat_name: str, allow_morpheme: bool = False) -> bool:
@@ -4088,8 +4164,16 @@ def process_url_v2(args):
     # facet value exists there (checked in the in-memory facets.csv, so no live call and
     # never a dead page). lego kraan is unaffected — its search-derived dom_cat IS the
     # matcher pick (Bouwstenen), no disagreement.
+    # V65: `startswith('multi')`, was `== 'multi'`. The realignment applies to the
+    # whole matcher-assembled family, but the two variants that carry an APPENDED
+    # facet - `multi_with_qualifier` (RC4) and `multi_with_probe_facet` - were
+    # excluded by the exact comparison, i.e. exactly the rows that had just been
+    # enriched. "philips tl-d buis rond 16w 827 warm wit 72 cm" was pinned to the
+    # PARENT category (Elektra) with the Search API putting it on Lampen at share
+    # 1.0 over 50 products, purely because RC4 had appended a 'Rond' qualifier and
+    # renamed the type.
     if (final_redirect_url and '/c/' in final_redirect_url
-            and final_match_type == 'multi'
+            and (final_match_type or '').startswith('multi')
             and '[maincat]' in (final_reason or '')
             and not parsed.existing_facet
             and derived.get('dom_cat_url_slug')):
@@ -4111,8 +4195,25 @@ def process_url_v2(args):
                     _present = set(
                         _fdf.loc[_fdf['category_url_slug'] == _v53_der, _vcol]
                         .astype('int64'))
-                    _want = {int(p.split('~', 1)[1]) for p in _v53_frag.split('~~')
-                             if '~' in p and p.split('~', 1)[1].lstrip('-').isdigit()}
+                    # V65: don't let a DOOMED piece veto the move. The test is
+                    # all-or-nothing on purpose - a facet the query named must
+                    # not be silently dropped to reach a nicer category - but a
+                    # piece that isn't valid at the CURRENT destination either is
+                    # one the V61 prune ~450 lines below removes anyway, so it is
+                    # not a facet we would be giving up. That is what pinned
+                    # "philips tl-d buis rond 16w 827 warm wit 72 cm" to the
+                    # PARENT (Elektra) while the Search API put it on Lampen at
+                    # share 1.0 over 50 products: RC4 had appended
+                    # vorm_afdr~'Rond', which exists in neither category, and the
+                    # subset test read that as "Lampen cannot hold our facets".
+                    # Same presence test V61 uses, so the two passes agree.
+                    _us53 = facet_filter.facet_url_set()
+                    _pbase53 = (final_redirect_url.split('beslist.nl', 1)[-1]
+                                .split('/c/', 1)[0].rstrip('/'))
+                    _want = {int(p.split('~', 1)[1])
+                             for p in _v53_frag.split('~~')
+                             if '~' in p and p.split('~', 1)[1].lstrip('-').isdigit()
+                             and (not _us53 or f"{_pbase53}/c/{p}" in _us53)}
                     _v53_ok = bool(_want) and _want.issubset(_present)
             except Exception:
                 _v53_ok = False
@@ -4328,26 +4429,87 @@ def process_url_v2(args):
                      and not _xin_subtree
                      and bool(_xleft)
                      and not _bridge51(parsed.keyword, final_redirect_cat_name or ''))
-            if _xh1 < 45 or (_xh1 < 65 and _xall_generic) or _xoff:
+            # V65: the one shape the token-loss condition above deliberately lets
+            # through, and it turned out to be the most expensive one: a jump
+            # carried entirely by a MERK/WINKEL match. `/r/sonos/` in
+            # Platenspelers landed on Piano's /c/merk~'Sono Luminus' (a record
+            # label) at 96 = tier A - one token, fully covered by the facet
+            # value, so nothing was "lost" and the category-name test alone
+            # could not act. The evidence for that row was sitting right there
+            # unused: the Search API's leader for 'sonos' is Platenspelers,
+            # share 1.0, i.e. the SOURCE. A brand is a claim about the product,
+            # so when the products say a different category, the brand facet is
+            # a homonym and not a destination. Lexical brand lists cannot make
+            # this call ('parkside' really is Hogedrukreinigers); the leader can.
+            _xbrand = any(f.strip().lower() in ('merk', 'winkel')
+                          for f in (out_facet_names or '').split(','))
+            _xdom_slug = derived.get('dom_cat_url_slug') or ''
+            _xdom_agrees = bool(_xdom_slug and _xdest_slug) and (
+                _xdom_slug == _xdest_slug
+                or _xdom_slug.startswith(_xdest_slug + '_')
+                or _xdest_slug.startswith(_xdom_slug + '_'))
+            _xbrand_unsupported = (
+                _xbrand and bool(_xdest_slug) and bool(_xdom_slug)
+                and not _xdom_agrees
+                and (search_derived_dom_share or 0) >= 0.5
+                and not _xin_subtree
+                and not _bridge51(parsed.keyword, final_redirect_cat_name or ''))
+            if (_xh1 < 45 or (_xh1 < 65 and _xall_generic)
+                    or _xoff or _xbrand_unsupported):
+                # V65: the fallback used to be the bare source subcategory
+                # page, full stop - which throws away two things the row had
+                # already earned. `/meubilair_389374/r/opklapbed_in_kast/`
+                # (Bedden) is the example: the jump to Hoogslapers rests on
+                # generic 'kast' and is rightly suppressed, but the row also
+                # carried `met_matras_bed~'Opklapbed'` (RC4, from the query's
+                # own token) and the Search API's leader was Logeerbedden -
+                # a CHILD of the source - with 0.51 over 92 products. In
+                # augustus this url stood on Logeerbedden + Opklapbed at 66;
+                # the bare parent page at 45 is a worse answer than either
+                # half. So: descend to the leader when it lies inside the
+                # source subtree and carries real evidence, and keep whichever
+                # facet pieces exist there. Never leaves the source subtree,
+                # so this cannot re-introduce the jump it just suppressed.
+                _v65_slug = parsed.subcategory_name
+                _v65_dom = derived.get('dom_cat_url_slug') or ''
+                if (_v65_dom.startswith(parsed.subcategory_name + '_')
+                        and (search_derived_dom_share or 0) >= 0.45
+                        and (search_derived_dom_count or 0) >= V62_DOM_COUNT_FLOOR):
+                    _v65_slug = _v65_dom
+                _v65_frag = _facet_pieces_under(facet_filter, _v65_slug,
+                                                out_facet_fragment or '')
                 final_redirect_url = (f"https://www.beslist.nl/products/"
-                                      f"{parsed.main_category}/{parsed.subcategory_name}/")
+                                      f"{parsed.main_category}/{_v65_slug}/"
+                                      + (f"c/{_v65_frag}" if _v65_frag else ""))
+                _v65_sub_id = extract_subcategory_id_from_url(final_redirect_url)
                 final_reason = (
                     f"[V51] cross-category jump to '{final_redirect_cat_name}' "
                     f"suppressed (H1 {_xh1}"
                     + ("; jump rested only on generic descriptor(s)" if _xall_generic else "")
                     + ("; no query token names the destination category" if _xoff else "")
-                    + f"); kept source subcategory. Was: " + (final_reason or ''))
-                final_redirect_cat_name = (category_lookup.get(str(parsed.subcategory_id), '')
-                                           or final_redirect_cat_name)
+                    + (f"; brand jump unsupported by search (leader: "
+                       f"{derived.get('dom_cat_name', '') or _xdom_slug})"
+                       if _xbrand_unsupported else "")
+                    + "); kept source subcategory"
+                    + (f", descended to search leader '{_v65_slug}'"
+                       if _v65_slug != parsed.subcategory_name else "")
+                    + (f", kept facet(s) {_v65_frag}" if _v65_frag else "")
+                    + ". Was: " + (final_reason or ''))
+                final_redirect_cat_name = (
+                    category_lookup.get(str(_v65_sub_id or parsed.subcategory_id), '')
+                    or final_redirect_cat_name)
                 final_match_type = 'xcat_h1_suppressed'
-                final_score = 45
+                # A specific category plus a facet the query itself named is not
+                # the same answer as a bare category page; 60 = tier C (review)
+                # rather than 45 = tier D.
+                final_score = 60 if _v65_frag else 45
                 final_tier = get_reliability_tier(final_score)
                 is_cross_category = False
                 h1_similarity = _xh1
-                out_facet_fragment = ''
+                out_facet_fragment = _v65_frag
                 out_facet_names = ''
                 out_facet_value_names = ''
-                out_facet_count = 0
+                out_facet_count = len([p for p in _v65_frag.split('~~') if '~' in p]) if _v65_frag else 0
 
     # V55 (2026-08-18): describe the FINAL url, then score its H1 against the
     # R-URL's. Two things were stale here.
