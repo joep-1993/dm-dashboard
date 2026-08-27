@@ -1025,6 +1025,13 @@ V62_DOM_COUNT_FLOOR = 25
 # coverage by picking up a second facet keeps the restore.
 V62_MIN_RESTORE_COVERAGE = 0.5
 
+# V64: the tier-C floor for a redirect that represents a quarter of the query or
+# less. 45 is tier D ("review, niet toepassen") rather than 0, because the
+# destination itself is usually not wrong - it is the confidence that was.
+V64_LOW_COVERAGE_CAP = 45
+V64_LOW_COVERAGE_SHARE = 0.25
+V64_LOW_COVERAGE_MIN_WORDS = 3
+
 
 def _tokens_not_represented(keyword_words, target_text) -> list:
     """V62: the query's content tokens that leave no lexical trace in
@@ -1593,12 +1600,18 @@ def _cross_maincat_fallback_fields(url, parsed, categories_df, matcher,
     pv = _derive(fb_main, parsed.keyword) or {}
     slug = fb_m.get('url_name', '') or ''
     dom = pv.get('dom_cat_url_slug') or ''
-    verified = (
-        pv.get('mode') == 'and'
-        and (pv.get('dom_cat_share') or 0) >= 0.6
-        and dom and slug
-        and (dom == slug or dom.startswith(slug + '_')
-             or slug.startswith(dom + '_')))
+    # V64: split the two halves of the old `verified` test. Slug AGREEMENT - the
+    # Search API's leader for this query inside the FALLBACK maincat is the
+    # category the name match picked - is a different claim from the 0.6 SHARE,
+    # and it is the half that says "right category". Fused, they made
+    # "opbergkast voor balkon" -> meubilair Opbergkasten (the leader, 168
+    # products, share 0.38 because the query also spreads over Tuinkasten and
+    # Balkonkasten) score the same 45 as a jump with no evidence at all.
+    and_mode = pv.get('mode') == 'and'
+    slug_agrees = bool(dom and slug
+                       and (dom == slug or dom.startswith(slug + '_')
+                            or slug.startswith(dom + '_')))
+    verified = and_mode and (pv.get('dom_cat_share') or 0) >= 0.6 and slug_agrees
     # Long-unmatched-token guard (same rule as the V28 rescue): an UNVERIFIED
     # jump is only safe when every long product token is represented in the
     # target category/facets. Without it, an attribute token that happens to
@@ -1621,10 +1634,21 @@ def _cross_maincat_fallback_fields(url, parsed, categories_df, matcher,
     # confirms with a high AND-share (>= 0.9) is as reliable as a same-maincat
     # name match — earn tier B. "miele stofzuiger borstels" -> klussen 'Borstels'
     # (name 100, AND 99%) was flagged as scored too low at 72.
+    # V64: an unverified jump whose category the search LEADER agrees with, on a
+    # count that isn't a taxonomy accident (V62_DOM_COUNT_FLOOR) and a near-exact
+    # subcat-name match, is not the same thing as an unverified guess. 60 (tier
+    # C, "review nodig") instead of 45 (tier D, "onbruikbaar").
+    _agreed = (and_mode and slug_agrees
+               and (pv.get('dom_cat_count') or 0) >= V62_DOM_COUNT_FLOOR
+               and (fb_m.get('score', 0) or 0) >= 95)
     if verified and (fb_m.get('score', 0) or 0) >= 99 and (pv.get('dom_cat_share') or 0) >= 0.9:
         score = 80
+    elif verified:
+        score = 72
+    elif _agreed:
+        score = 60
     else:
-        score = 72 if verified else 45
+        score = 45
     sub_id = extract_subcategory_id_from_url(res.redirect_url)
     dropped = getattr(parsed, 'existing_facet', '') or ''
     reason = (
@@ -1633,7 +1657,11 @@ def _cross_maincat_fallback_fields(url, parsed, categories_df, matcher,
         f"'{fb_m.get('matched_category', '')}' (score {fb_m.get('score', 0)}) "
         f"in maincat '{fb_main}'"
         + (f", search-verified AND {int(100 * (pv.get('dom_cat_share') or 0))}%"
-           if verified else ", unverified (no search evidence)")
+           if verified else
+           (f", search-agreed: AND-leader IS this category "
+            f"({int(100 * (pv.get('dom_cat_share') or 0))}% share, "
+            f"{pv.get('dom_cat_count') or 0} products)" if _agreed
+            else ", unverified (no search evidence)"))
         + (f"; dropped original facet '{dropped}'" if dropped else '')
         + ((res.reason and f"; {res.reason}") or ''))
     return {
@@ -4263,13 +4291,51 @@ def process_url_v2(args):
             _xall_generic = bool(_xmk) and all(w in _xgeneric for w in _xmk)
             _xh1 = compute_h1_similarity(parsed.keyword, original_cat_name,
                                          final_redirect_cat_name, out_facet_value_names)
-            if _xh1 < 45 or (_xh1 < 65 and _xall_generic):
+            # V64: H1 similarity cannot see the failure behind
+            # "fietsen berging" -> Hogedrukreinigers /c/t_hdrukrein~'Fietsen',
+            # "tuin bad" -> Windschermen /c/r_windscherm~'Tuin' and
+            # "beter bed aanbieding" -> Tafels /c/type_tafels~'Bed': the query
+            # token matched an ATTRIBUTE VALUE of a product nobody asked for
+            # (a pressure washer FOR bikes, a windscreen FOR the garden, a
+            # bedside TABLE), and all three sit at H1 62/57/46 - above the 45
+            # floor. The discriminating question is the one RC6 already asks of
+            # the search-derived strays: does any query token bridge the
+            # destination CATEGORY name? Off-topic AND outside the source
+            # subtree = keep the source subcategory. Self-or-child destinations
+            # stay exempt so a legit drill-down (Barbecues ->
+            # Barbecue-accessoires) is untouched.
+            from src.reliability_scorer import _keyword_bridges_value as _bridge51
+            try:
+                _xseg = (final_redirect_url.split('/c/')[0]
+                         .split('/products/', 1)[1].strip('/').split('/'))
+                _xdest_slug = _xseg[1] if len(_xseg) >= 2 else ''
+            except Exception:
+                _xdest_slug = ''
+            _xin_subtree = bool(_xdest_slug) and (
+                _xdest_slug == parsed.subcategory_name
+                or _xdest_slug.startswith(parsed.subcategory_name + '_'))
+            # ... and only when the query actually LOSES a token at the
+            # destination. A single-token query that the facet value answers in
+            # full ("retinol" -> Gezichtscremes /c/Retinol, "squishy" ->
+            # Fidgets /c/Squishy) is off-topic by the category-name test too,
+            # but nothing about the query went missing, so the page still
+            # answers it - the A/B demoted 60 such rows out of A/B before this
+            # condition was added. The reported failures all drop a token:
+            # 'berging', 'bad', 'beter'.
+            _xleft = _tokens_not_represented(keyword_words, ' '.join(filter(None, [
+                final_redirect_cat_name or '', out_facet_value_names or ''])))
+            _xoff = (_xh1 < 70
+                     and not _xin_subtree
+                     and bool(_xleft)
+                     and not _bridge51(parsed.keyword, final_redirect_cat_name or ''))
+            if _xh1 < 45 or (_xh1 < 65 and _xall_generic) or _xoff:
                 final_redirect_url = (f"https://www.beslist.nl/products/"
                                       f"{parsed.main_category}/{parsed.subcategory_name}/")
                 final_reason = (
                     f"[V51] cross-category jump to '{final_redirect_cat_name}' "
                     f"suppressed (H1 {_xh1}"
                     + ("; jump rested only on generic descriptor(s)" if _xall_generic else "")
+                    + ("; no query token names the destination category" if _xoff else "")
                     + f"); kept source subcategory. Was: " + (final_reason or ''))
                 final_redirect_cat_name = (category_lookup.get(str(parsed.subcategory_id), '')
                                            or final_redirect_cat_name)
@@ -4455,6 +4521,56 @@ def process_url_v2(args):
             out_facet_value_names = ''
             final_reason = ((final_reason or _last.reason or '')
                             + (f" (cascade rejection: {_rej})" if _rej else ''))
+
+    # V64: a destination that accounts for a quarter of the query or less is not
+    # a moderate-confidence answer, whoever put the score there. V62 makes
+    # exactly this measurement, but only re-tests rows the V31 guard restored:
+    # "slush puppy siroop framboos" -> Sportvoeding /c/smaak_voeding~'Framboos'
+    # came out of that withdrawal on the scorer's own 60 = tier C, with 'slush',
+    # 'puppy' and 'siroop' unrepresented - all three under V27's 8-character
+    # long-token floor, so nothing else objected either.
+    #
+    # Two deliberate limits. It runs at the very tail, after V61, so it can only
+    # change the NUMBER: the same demotion inside calculate_reliability_score
+    # flips the `reliability_score >= 50` gates mid-cascade and cost two rows
+    # their redirect altogether in the A/B. And it counts real WORDS left
+    # unrepresented, not tokens, because a query's model code and dimensions can
+    # never be represented by a facet - "campingaz gasbus cp 250" -> Gasflessen
+    # /c/merk~Campingaz is at 25% by that arithmetic too, and it is right.
+    #
+    # THREE such words, and de-duplicated. At two the A/B demoted 11
+    # rows out of A/B and about half of them were right all along, undone by the
+    # weak morphology in _present(): 'aggregaat' leaves no trace in
+    # "Aggregaten", 'speelkleed' none in "Speelkleden", 'houten' none in "Hout",
+    # and "antislipmat antislipmat" counted its one missing word twice. Three
+    # words is the level at which the measurement survives that stemmer, and it
+    # is also what the complaint actually describes: a query whose product,
+    # brand AND qualifier are all missing from the page it lands on.
+    # ... and never when the destination CATEGORY names the product the query
+    # asks for. "treinstation bij houten treinbaan" -> Speelgoed treinbanen
+    # /c/materiaal~'Hout' is the one row the A/B demoted out of tier B, and it
+    # was right: _present() cannot see 'treinbaan' in "Treinbanen" or 'houten'
+    # in "Hout", but the bridge test (which stems the Dutch -en plural) can.
+    # Same test V51 and RC6 use, so the three guards agree on what "the page is
+    # about what you asked" means.
+    if final_redirect_url and final_score > V64_LOW_COVERAGE_CAP:
+        from src.reliability_scorer import _keyword_bridges_value as _bridge64
+        _c64_all = _tokens_not_represented(keyword_words, '')
+        _c64_left = _tokens_not_represented(keyword_words, ' '.join(filter(None, [
+            final_redirect_cat_name or '', out_facet_value_names or '',
+            final_redirect_url or ''])))
+        _c64_words = {w for w in _c64_left if len(w) >= 4 and w.isalpha()}
+        if (_c64_all and len(_c64_words) >= V64_LOW_COVERAGE_MIN_WORDS
+                and not _bridge64(parsed.keyword, final_redirect_cat_name or '')):
+            _c64 = (len(_c64_all) - len(_c64_left)) / len(_c64_all)
+            if _c64 <= V64_LOW_COVERAGE_SHARE:
+                final_score = V64_LOW_COVERAGE_CAP
+                final_tier = get_reliability_tier(final_score)
+                final_reason = ((final_reason or '')
+                                + f"; [V64] capped at {V64_LOW_COVERAGE_CAP} — "
+                                + f"destination accounts for {int(round(100 * _c64))}% "
+                                + f"of the query (unrepresented: "
+                                + f"{', '.join(_c64_left)})")
 
     return {
         'original_url': r.original_url,
