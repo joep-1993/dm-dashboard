@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Create blueprints for uncovered (cat, facet-combo) gaps that actually get traffic.
 
-Input is seo_titles_gap_traffic_365d.csv from seo_titles_gap_traffic.py. The default
-cut is >= 6 SEO visits/year, which over the 2025-07-30..2026-07-30 window is 1.789 of
-the 40.156 buildable gaps but 21% of their traffic — 4,5% of the combos for a fifth of
-the visits. Building all 40k would grow the blueprint set ~53% to chase 73k visits/yr
-and EUR 5.419 total, which is not defensible; not a single uncovered combo reaches one
-visit per WEEK.
+Input is the CSV from a gap run — by default seo_titles_gap_from_query.csv
+(seo_titles_gap_from_query.py: SEO traffic 2025-01-01.., faceted /c/ pages with a
+" - " page_heading, visits > 3, `winkel` combos excluded). It also reads the older
+seo_titles_gap_traffic.py output; both carry the same columns.
+
+--min-visits defaults to 0: the gap CSV has already applied its own traffic floor, so
+a second cut here would silently drop rows the caller thinks it is building. Pass a
+value when working from an unfiltered gap list (the 2026-07-30 365-day run had 40.156
+buildable gaps, of which >= 6 visits/yr kept 1.789 combos carrying 21% of the traffic;
+building all 40k to chase 73k visits/yr and EUR 5.419 was not defensible).
 
 Rows land as status='built', never pushed: they show up in the SEO-titles tool for
 review, and Publish stays a deliberate click.
@@ -15,9 +19,11 @@ Each row is stored WITH its sample_url as source_url, so the Facets column in Bu
 titles links to a live example — unlike the synthesised top-5 combos, which have no
 source URL by construction.
 
-Guards: combos already covered are skipped (re-checked live, not trusted from the CSV),
-and impossible_reason() is re-evaluated against pa.facet_dependencies so a dependency
-added since the CSV was written still blocks the build.
+Guards, all re-evaluated live rather than trusted from the CSV: combos already held
+locally (pa.seo_titles_blueprints) are skipped, so are combos the LIVE /page-titles
+store already has (store_has_combos — authoritative; --skip-store trades that check
+for speed), and impossible_reason() is re-run against pa.facet_dependencies so a
+dependency added since the CSV was written still blocks the build.
 
 Usage:
     venv/bin/python scripts/analysis/seo_titles_build_gap_combos.py            # dry run
@@ -33,32 +39,41 @@ from collections import Counter
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from backend.database import get_db_connection, return_db_connection  # noqa: E402
 from backend.seo_titles_service import (  # noqa: E402
-    build_blueprint, canon_key, impossible_reason, load_existing_combos,
-    load_facet_deps, load_rules, _upsert_blueprint,
+    build_blueprint, canon_key, impossible_reason, load_facet_deps,
+    load_local_combos, load_rules, store_has_combos, _upsert_blueprint,
 )
 
 SRC = ("/mnt/c/Users/JoepvanSchagen/Downloads/claude/"
-       "seo_titles_gap_traffic_365d.csv")
+       "seo_titles_gap_from_query.csv")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", default=SRC)
-    ap.add_argument("--min-visits", type=int, default=6)
+    ap.add_argument("--min-visits", type=int, default=0)
+    ap.add_argument("--skip-store", action="store_true",
+                    help="do not re-ask the live /page-titles store")
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args()
 
-    rows = [r for r in csv.DictReader(open(args.csv, encoding="utf-8"))
+    # utf-8-sig: the gap CSV is written with a BOM for Excel, which would otherwise
+    # land in the first header name and break the r["cat_id"] lookup.
+    rows = [r for r in csv.DictReader(open(args.csv, encoding="utf-8-sig"))
             if r["verdict"] == "buildable" and int(r["seo_visits"]) >= args.min_visits]
     rows.sort(key=lambda r: -int(r["seo_visits"]))
-    print(f"[1/3] candidates at >= {args.min_visits} visits/yr: {len(rows):,} "
-          f"({sum(int(r['seo_visits']) for r in rows):,} visits)")
+    print(f"[1/3] candidates at >= {args.min_visits} visits: {len(rows):,} "
+          f"({sum(int(r['seo_visits']) for r in rows):,} visits) from {args.csv}")
 
     rules = load_rules()
     deps = load_facet_deps()
-    existing = load_existing_combos(force=True)
+    existing = load_local_combos(force=True)
     print(f"      rules {len(rules):,} · dependencies {len(deps):,} · "
-          f"already covered {len(existing):,}")
+          f"held locally {len(existing):,}")
+    if not args.skip_store:
+        cand = [(int(r["cat_id"]), canon_key(r["canon_key"])) for r in rows]
+        in_store = store_has_combos(cand)
+        print(f"      live store already holds {len(in_store):,} of the {len(cand):,}")
+        existing = existing | in_store
 
     todo, skipped = [], Counter()
     for r in rows:
@@ -68,7 +83,7 @@ def main():
             skipped["empty key"] += 1
             continue
         if (cat_id, canon_key("~".join(types))) in existing:
-            skipped["covered since the csv was written"] += 1
+            skipped["already covered (local or live store)"] += 1
             continue
         bad = impossible_reason(types, deps)
         if bad:
