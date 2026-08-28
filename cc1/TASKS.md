@@ -4,6 +4,69 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-28 — SEO-titles: 207 traffic-gaten + 11 × t_tegelacc, en een facet zonder positieregel
+
+Twee opdrachten van Joep. Uitwerking in LEARNINGS (zelfde datum, "Een gap-lijst die de live store niet
+vraagt"). Code in `797d14e`.
+
+Gedaan:
+
+- [x] **207 gap-blueprints gebouwd en gestaged** (`status='built'`) uit Joeps traffic-query. 5.686
+      combos in de traffic → 5.187 lokaal gedekt → 499 open → **292 daarvan zaten al in de live
+      store** → 207 echt open (1.224 visits, 1,4% van de gemapte traffic). `winkel`-combos eruit
+      (299 URL's / 2.869 visits): elk `winkel`-facet staat globaal uit.
+- [x] **Pre-flight vóór het staggen**: 0 facet-slugs zonder rij in `pa.facet_position_rules` (dus geen
+      `UNKNOWN_ORDER`-terugval), 0 h1's afgekapt, max title 196 / h1 147 tegen de 200-cap. 5 titles
+      laten hun laagste-prioriteit-facets vallen om te passen — by design, h1 houdt de volle phrase.
+      Nodig omdat `/page-titles` een POST atomair valideert: één te lang record keldert een batch van
+      5.000 en zet alle 5.000 op `failed`.
+- [x] **Die 207 zijn door Joep vanuit de tool gepubliceerd**, `pushed_at 2026-08-27 14:26` UTC
+      (16:26 CEST). Niet vanuit een script.
+- [x] **11 blueprints voor `t_tegelacc` × de top-facetten van Tegelaccessoires** (9003066), depth ≤ 3:
+      `t_tegelacc` los, + elk van `merk`/`materiaal`/`kleur`/`kleurtint`, + alle 6 paren daarvan. Alle
+      11 nieuw (niet lokaal, niet in de store), geen enkele geblokkeerd door een dependency. Titels
+      81–109 tekens, h1's 14–42. Staan op `built`, **niet gepubliceerd**.
+- [x] **`t_tegelacc` toegevoegd aan `pa.facet_position_rules`**: `order_index=1426`,
+      `is_type_facet=TRUE`, scope NULL. Zonder die rij viel het facet terug op `UNKNOWN_ORDER` 1750 en
+      rendeerde het achter de noun ("Tegelaccessoires Afstandhouders") mét een dubbele
+      `!!sub_category!!`. Keuze door Joep bevestigd; conventie is 651 andere `t_*`-slugs op TRUE en de
+      facetnaam in de taxonomie is letterlijk "Type".
+- [x] **`scripts/analysis/seo_titles_build_gap_combos.py` gerepareerd** — importeerde
+      `load_existing_combos`, die sinds de store-omschakeling `load_local_combos` heet, dus het script
+      viel stil om op de import. Nu lokaal + een echte `store_has_combos`-ronde, `--min-visits` van 6
+      naar 0, en `utf-8-sig` voor de BOM in de eigen CSV.
+- [x] **Twee nieuwe scripts**: `seo_titles_gap_from_query.py` (Joeps query → gap-lijst, Redshift-rows
+      gecached, `--refresh`) en `seo_titles_build_new_facet_combos.py` (generiek
+      `--cat-id`/`--new-facet`/`--partners`/`--max-depth`, waarschuwt als het nieuwe facet geen
+      positieregel heeft).
+
+Open:
+
+- [ ] **De 11 `t_tegelacc`-blueprints niet publiceren zolang het facet leeg is in de zoekindex.**
+      Alle 29 facetwaarden geven `total=0`; de live pagina's herordenen alleen (hold-out: 53/74
+      overlap met de ongefilterde categoriepagina, tegen 1/76 voor een echt filter). Een push is
+      onomkeerbaar — `/page-titles` heeft geen delete-verb. Publiceren zodra er producten aan de
+      type-waarden hangen. #priority:medium
+- [ ] **7 combos zonder `t_tegelacc` missen ook nog op 9003066**, allemaal de `kleurtint`-varianten:
+      `kleurtint`, `kleurtint~merk`, `kleurtint~materiaal`, `kleur~kleurtint`,
+      `kleurtint~materiaal~merk`, `kleur~kleurtint~merk`, `kleur~kleurtint~materiaal`. Buiten de
+      opdracht gelaten. `kleurtint` is wél gevuld in de index (11 waarden), dus deze zijn direct
+      bouwbaar. Aan Joep gevraagd. #priority:low
+- [ ] **Het generieke `type`-facet staat op `is_type_facet=False`** (order 1700), waardoor 174 van de
+      207 gap-blueprints een `!!sub_category!!` erbij krijgen — ook combos die een `type`-facet
+      hebben, zoals Truien `doelgroep_mode~maat_mode_bovenkleding~populaire_themas_mode~type`. Dat is
+      consistent met de 85k al gepushte rijen, dus niet eenzijdig aangepast. Uitzoeken of dit een
+      bewuste keuze was of overgeërfd uit de `facet_order.xlsx`-import van 19-05; als `type` het
+      zelfstandig naamwoord ís, staat er nu een dubbele noun in 174 titels. #priority:medium
+- [ ] **`scripts/analysis/seo_titles_gap_traffic.py` is nog stuk** — zelfde
+      `load_existing_combos`-import. Repareren of weggooien; `seo_titles_gap_from_query.py` doet
+      hetzelfde werk met de live store-check erin. Aan Joep gevraagd, nog geen antwoord.
+      #priority:low
+- [ ] **De gap-vraag is nooit voor depth-1 gesteld**: `page_heading LIKE '% - %'` laat maar 71 van de
+      8.582 URL's op depth 1 door, want een enkel-facet-koptekst heeft geen ` - `. Wil je weten of er
+      enkel-facet-gaten zijn, dan moet die regel eruit en is het een aparte run. #priority:low
+
+
 ### 2026-08-27 — Tegelaccessoires: seoDisplayLimit 3 → 24, en de combo die al aan stond
 
 Vervolg op de entry van 26-08 ("Tegelaccessoires Type-kandidaten"): facet 7911 bestaat inmiddels met
@@ -33,6 +96,13 @@ Open:
       facet van één dag oud nog niet opgepikt, óf er is nog geen product aan de 29 type-waarden
       gemapt. Zolang dat niet rond is, doet die `seoDisplayLimit: 24` niets. Over een paar dagen
       opnieuw kijken; als het dan nog leeg is, is het een mapping-vraag voor IT. #priority:medium
+      **Update 28-08**: een dag verder en nog steeds leeg — alle **29** waarden geven `total=0`.
+      Wat er wél bij is gekomen: de API geeft HTTP 200 zónder errors-payload, dus het facet wórdt
+      herkend; en de live pagina's renderen wel 76 producten maar filteren niet, ze herordenen
+      (hold-out: `Afstandhouders` overlapt 53/74 met de ongefilterde categoriepagina, tegen 1/76 voor
+      `materiaal~Aluminium`). Dat leunt naar "geen product gemapt" en niet naar "sync-lag", maar
+      settelt het niet — daarvoor moet iemand in de feed/PIM kijken of een product de waarde draagt.
+      Blokkeert nu ook het publiceren van de 11 blueprints van 28-08.
 - [ ] **`scripts/swagger_taxv2.json` is verouderd** — `seoDisplayLimit` komt er nul keer in voor
       terwijl de live spec het in vier schema's heeft. Verse kopie trekken van
       `$TAX/swagger/v1/swagger.json`, en meteen kijken welke velden er nog meer bij zijn gekomen.

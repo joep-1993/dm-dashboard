@@ -1,6 +1,120 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een gap-lijst die de live store niet vraagt, is 2,4× te lang (2026-08-28, SEO-titles blueprints)
+
+Twee opdrachten: welke cat/facet-combos met SEO-traffic nog geen title-blueprint hebben (207 gebouwd),
+en de top-5 × `t_tegelacc`-set voor Tegelaccessoires (11 gebouwd). Code in `797d14e`:
+`scripts/analysis/seo_titles_gap_from_query.py` + `seo_titles_build_new_facet_combos.py`, plus een
+reparatie van `seo_titles_build_gap_combos.py`.
+
+### `pa.seo_titles_blueprints` is geen antwoord op "hebben we dit al?"
+
+Joeps traffic-query gaf 5.686 combos. De lokale tabel dekte er 5.187 van, dus 499 open — en van die
+499 zaten er **292 al in de live `/page-titles`-store**. De twee grootste "gaten" uit de lokale tabel
+waren juist de valse: Puzzels `aantal_puzzelstukjes~th_puzzels` (1.228 visits) en Koelkasten
+`bouw_koelkast~kleur` (644) geven allebei een 200 op `GET /page-titles/{cat_id}/record`. Zonder de
+store-ronde had de lijst er 2,4× groter uitgezien én had de hele traffic-top bestaan uit combos die er
+al waren. Echt open: **207 combos, 1.224 visits, 1,4%** van de gemapte traffic — max 74 visits per
+combo over 20 maanden, mediaan ~5.
+
+De asymmetrie in `store_has_combos` staat de goede kant op: een GET die niet te beantwoorden is
+(netwerk, 401, 5xx) rekent als *bestaand*. De uitkomst is dus een ondergrens, en dat is de veilige
+richting — een live record als nieuw behandelen betekent overschrijven bij de volgende push.
+
+### `page_heading LIKE '% - %'` filtert een dimensie weg die je niet mist tot je hem nodig hebt
+
+**71 van de 8.582 URL's is depth-1.** Een enkel-facet-koptekst heeft geen ` - ` erin ("Blauwe
+Bolero's"), dus die filter selecteert de facto op ≥2 facetten. De query leest alsof hij alle faceted
+`/c/`-pagina's pakt. Wie hem hergebruikt voor een depth-1-vraag krijgt een leeg antwoord dat op een
+volledig antwoord lijkt.
+
+### Een script kan stil kapot zijn: een rename van een import valt pas op als iemand het weer draait
+
+`scripts/analysis/seo_titles_gap_traffic.py` en `seo_titles_build_gap_combos.py` importeerden
+`load_existing_combos` uit `backend.seo_titles_service`. Die functie heet sinds de omschakeling naar
+de live store `load_local_combos` — met een andere betekenis (alleen lokaal, niet meer "alles wat
+bestaat"). Beide scripts vielen om op de import. Niet gemerkt, want ze zijn tussentijds niet gedraaid.
+Wanneer je een functie splitst waarvan de naam een *belofte* was ("existing"), grep dan op de oude
+naam buiten de module — de type-checker die dit zou vangen bestaat hier niet.
+
+### `publish_built()` zonder `combos` pusht ELKE `built`-rij
+
+Niet alleen die van je eigen run. Vóór het staggen stond de tabel op 85.282 rijen, allemaal `pushed`,
+0 `built` — dus een Publish-klik raakte exact de nieuwe set. Was er nog een oude `built`-rij van een
+afgebroken run blijven staan, dan was die meegegaan. **Tel de `built`-rijen vóór je staged**, want na
+het staggen kun je je eigen werk niet meer van het restant onderscheiden.
+
+### Een nieuw facet valt per definitie uit elke traffic-gedreven gap-lijst
+
+`t_tegelacc` heeft 0 visits omdat geen enkele URL het gebruikt. Gap-zoeken op traffic kan het dus
+nooit vinden, hoe ruim je de drempel ook zet. Vandaar de omgekeerde weg in
+`seo_titles_build_new_facet_combos.py`: het nieuwe facet × elke subset van de andere top-facetten van
+de categorie, tot `--max-depth` diep, gerangschikt op taxonomie in plaats van op visits.
+
+### De facetlijst uit de Taxonomy API is niet de facetlijst van de categorie
+
+Tegelaccessoires (9003066) geeft **294 facetten** terug. Daarvan zijn er **289** de globaal
+aangehangen `productlijnen-*` / `pl_*` / `p_*`-familie — allemaal merk-afhankelijk en nooit een
+top-facet van iets. Eruit gefilterd blijven er precies **5** over: `t_tegelacc`, `merk`, `materiaal`,
+`kleur`, `kleurtint` — exact wat de Search API ook teruggeeft, min `winkel`. "De top 5 facetten" was
+hier dus de hele voorraad en geen selectie. Op traffic gemeten sinds januari: `materiaal` 197 visits,
+`merk` 42, `kleur` 8, `t_tegelacc` en `kleurtint` 0.
+
+### Eén ontbrekende rij in `pa.facet_position_rules` zet elke blueprint in de set verkeerd, zonder klacht
+
+`t_tegelacc` had geen regel. Gevolg is dubbel, en beide kanten zijn fout:
+
+* `UNKNOWN_ORDER` = 1750 > `SUBCATEGORY_ORDER` = 1700, dus het facet rendert **achter** het
+  categorie-zelfstandig-naamwoord: "Tegelaccessoires Afstandhouders".
+* `is_type_facet` valt terug op `False`, dus `!!sub_category!!` wordt er **bij** gezet in plaats van
+  vervangen — een dubbele noun.
+
+Met `is_type_facet=TRUE` vervangt het type de noun: "Afstandhouders", "Grijze Kunststof
+Afstandhouders". Dat is de conventie voor **651** van de `t_*`-slugs, en de facetnaam in de taxonomie
+is letterlijk "Type". Gezet op `order_index=1426`, bij de andere accessoire-type-facetten
+(`t_kookplaatacc` 1422, `t_afzuigkapacc` 1426, `t_aircoacc` 1444). `order_index` heeft geen unieke
+index — 2.284 distinct op 2.546 rijen — dus een duplicaat is normaal, en de sortering breekt gelijke
+waarden op de slug.
+
+Bijvangst met dezelfde oorzaak: het **generieke** `type`-facet staat op `is_type_facet=False`
+(order 1700). Daardoor krijgen **174 van de 207** gap-blueprints een `!!sub_category!!` erbij, ook de
+Truien-combo die een `type`-facet heeft. Dat is consistent met de 85k al gepushte rijen, dus niet
+eenzijdig aangepast — maar het is een openstaande vraag en geen bewuste keuze.
+
+### `total` uit de Search API was hier in béíde richtingen misleidend
+
+Dit is het vervolg op de open vraag van 27-08 ("facet 7911 komt niet uit de Search API"). Een dag
+later, en het beeld is nu compleet — en elk los signaal zou je de verkeerde kant op hebben gestuurd:
+
+| meting | uitkomst | wat je eruit zou concluderen |
+|---|---|---|
+| `total` met `filters[t_tegelacc][0]=` | **0/29 waarden** hebben producten (HTTP 200, geen errors-payload) | "de pagina's zijn leeg" |
+| facetlijst van de categorie | `t_tegelacc` staat er niet bij, alleen merk/materiaal/kleur/kleurtint/winkel | "het facet bestaat niet" |
+| live pagina met de SEO-UA | HTTP 200, **76 producten**, h1 "Afstandhouders Tegelaccessoires" | "het werkt gewoon" |
+| **hold-out op de producttitels** | `Afstandhouders` overlapt **53/74** met de ongefilterde categoriepagina en heeft een Hoekprofiel op plek 2; `Egalisatiemortel` 55/74 met een Hoekprofiel op plek 1; tegen **1/76** voor `materiaal~Aluminium` | er wordt **geherordend, niet gefilterd** |
+
+De site valt dus terug op tekstrelevantie op de facetnaam. De pagina rendert een correcte titel boven
+een productset die het facet negeert — een bijna-duplicaat van de categoriepagina. Dat de API 200 mét
+`total=0` en zónder errors-payload geeft, betekent dat het facet wél herkend wordt: dat leunt naar
+"geen product aan de 29 waarden gemapt" en niet naar "catalogus-sync heeft het facet niet opgepikt",
+maar het settelt het niet — daarvoor moet je in de feed/PIM kijken of een product de waarde draagt.
+
+**De les is de methode**, niet dit facet: `total` was al bekend als onbetrouwbaar op `/c/`-facetwaarden
+(memory `search_api_total_unreliable_facet_count`), en een producttelling op de pagina is even
+onbetrouwbaar de andere kant op. De test die wél antwoord geeft is de hold-out: haal de producttitels
+van de gefilterde én de ongefilterde pagina op en vergelijk de sets. Een echt filter geeft ~1/76
+overlap, een neprelevantie-match 53/74.
+
+### Twee kleinere dingen
+
+* **`utf-8-sig` bij het terugleen van een eigen CSV.** De gap-CSV krijgt een BOM mee voor Excel; met
+  `encoding='utf-8'` belandt die in de eerste kolomnaam en geeft `r["cat_id"]` een KeyError.
+* **De shared Postgres staat op Etc/UTC** (bekend, maar het beet weer): de 207 blueprints stonden op
+  `pushed_at 2026-08-27 14:26` = 16:26 CEST. Ze zijn door Joep vanuit de tool gepubliceerd, niet
+  vanuit een script — te zien doordat `created_at` en `pushed_at` ruim uit elkaar liggen.
+
+
 ## Een slug die op ID's lijkt, en een veld dat niet in je swagger-kopie staat (2026-08-27, Tegelaccessoires `t_tegelacc`)
 
 Vervolg op de Type-kandidaten van 26-08: het facet is inmiddels aangemaakt (7911, 29 waarden) en
