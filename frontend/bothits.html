@@ -56,6 +56,14 @@
            620px, dus de ellipsis valt een paar tekens eerder — de title en de link
            houden de volledige URL. */
         .url-cell { max-width: 620px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        /* Met een statusfilter komt er een zevende kolom bij en past de rij niet meer in
+           de 1140px van de container: .tool-table-wrap gaat dan horizontaal scrollen en
+           "Per dag" valt buiten beeld. De URL-kolom is de enige die dat kan opvangen —
+           die heeft al een ellipsis, dus 120px minder kost een paar tekens die in de
+           title en de link gewoon blijven staan. Op de klasse en niet op een inline
+           style: renderUrls() zet hem, en zo blijft de breedte bij de rest van de
+           tabelopmaak staan. */
+        #urlTable.has-status .url-cell { max-width: 500px; }
         .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
         .col-mid { text-align: center; }
         /* Uitklapbare rij: de rij zelf klikbaar, het paneel eronder als één cel over de
@@ -556,7 +564,7 @@
                                 <option value="bot_family" selected>Bot-familie</option>
                                 <option value="url_type">URL-type</option>
                                 <option value="host">Domein</option>
-                                <option value="status_class">HTTP-status</option>
+                                <option value="status_class">Statuscode</option>
                                 <option value="is_known_url">Bekend / onbekend</option>
                                 <option value="verify_state">IP-verificatie</option>
                                 <option value="facet_depth">Facet-diepte</option>
@@ -659,6 +667,32 @@
                              hem bij. -->
                         <h5 class="mb-0" id="urlHeading">Top 250 URL's</h5>
                         <div class="d-flex gap-2 align-items-center">
+                            <!-- Statuskeuze (Joep, 2026-08-28). De brug van "Hits per dag ->
+                                 Statuscode" naar de URL's erachter: daar zie je dát er 4xx is,
+                                 hier welke pagina's het zijn.
+
+                                 Hij ligt NAAST de andere twee knijpers en niet in de filterkaart
+                                 bovenaan, omdat hij maar één tabblad raakt. De cube draagt
+                                 status_class wel op elke as, maar alleen deze lijst kan er per
+                                 URL iets mee — zet je hem boven, dan lijkt hij ook het Overzicht
+                                 en de bot-tabellen te sturen.
+
+                                 LET OP wat een keuze hier doet, en dat is geen detail: pa.
+                                 bothits_unknown_daily heeft geen statuskolommen, dus met een
+                                 status aan valt de hele onbekende kant weg en zie je alleen
+                                 URL's uit pa.urls. Hoeveel dat is, rekent #urlStatusNote uit de
+                                 `coverage` in het antwoord — hardcoden zou liegen zodra je een
+                                 ander URL-type of domein kiest. -->
+                            <label class="muted-note mb-0" for="urlStatusSel">Status</label>
+                            <select class="form-select form-select-sm" id="urlStatusSel"
+                                    style="width:auto;"
+                                    title="Rangschikt op het aantal hits met deze statuscode. Alleen URL's die in pa.urls staan; de statuscode van de rest wordt per URL niet bewaard.">
+                                <option value="">alle</option>
+                                <option value="2xx">2xx</option>
+                                <option value="3xx">3xx</option>
+                                <option value="4xx">4xx</option>
+                                <option value="5xx">5xx</option>
+                            </select>
                             <!-- Zoekbox (Joep, 2026-08-13). Hij stuurt `q` naar /top-urls en
                                  filtert dus in SQL: dit is een top-N, en filteren in de al
                                  geladen rijen zou een match op plek 800 verzwijgen. Plain
@@ -694,6 +728,17 @@
                              waarschuwing lees je één keer, deze legt uit wat je NU ziet. -->
                         <div id="urlRangeNote" class="alert alert-warning py-2 px-3 mb-3 d-none"
                              style="font-size:0.85rem;" role="alert"></div>
+                        <!-- Dekking van het statusfilter (2026-08-28). Zelfde vorm en plek als
+                             de melding hierboven: hij hoort bij de rijen eronder en zegt wat je
+                             NIET ziet. Inhoud en zichtbaarheid komen uit renderUrls(), die de
+                             getallen uit `coverage` haalt — dus hij verschijnt alleen met een
+                             status aan en telt mee met je domein-, bot- en URL-type-keuze.
+                             Waarom een vaste waarschuwing en geen stille voetnoot: op 4xx dekt
+                             deze lijst 2,1% van zijn eigen noemer. Een top-N die de andere 98%
+                             verzwijgt is precies de "ziet er compleet uit en is het niet"-fout
+                             die deze pagina elders juist vermijdt. -->
+                        <div id="urlStatusNote" class="alert alert-warning py-2 px-3 mb-3 d-none"
+                             style="font-size:0.85rem;" role="alert"></div>
                         <div class="tool-table-wrap">
                             <table class="table table-hover tool-table" id="urlTable">
                                 <thead><tr>
@@ -705,11 +750,17 @@
                                     <th class="sortable mid" data-k="source">In pa.urls</th>
                                     <th class="sortable" data-k="url_type">Type</th>
                                     <th class="sortable num mid" data-k="facet_depth">Facets</th>
+                                    <!-- Alleen zichtbaar met een status aan; renderUrls() zet
+                                         het label (4xx, 3xx, …) en de d-none. Náást Hits en niet
+                                         in plaats daarvan: het aandeel is de vraag, en
+                                         "2.107 van 5.432" leest anders dan 2.107 alleen. -->
+                                    <th class="sortable num mid d-none" data-k="status_hits"
+                                        id="urlStatusTh"></th>
                                     <th class="sortable num mid" data-k="hits">Hits</th>
                                     <!-- Dagen is eruit (Joep, 2026-08-24): per_day zegt
                                          hetzelfde in één getal en gebruikt days nog steeds
                                          in de berekening hieronder. -->
-                                    <th class="sortable num mid" data-k="per_day">Per dag</th>
+                                    <th class="sortable num mid" data-k="per_day" id="urlPerDayTh">Per dag</th>
                                 </tr></thead>
                                 <tbody><tr><td colspan="6" class="text-muted p-3">Laden…</td></tr></tbody>
                             </table>
@@ -819,82 +870,80 @@
         green:     '#26a660',   // seo_bounce    (green-500)
         turquoise: '#107063',   // total_visits
         yellow:    '#936305',   // total_omzet   (yellow-800)
+        // Alias van `plp` (Joep, 2026-08-28). Dezelfde hex, een tweede naam, omdat de
+        // tint sinds vandaag twee betekenissen draagt die niets met elkaar te maken
+        // hebben: de 4xx-band in Statuscode en het zevende slot van SERIES (Bing).
+        // `PAL.plp` op een bot-familie zetten zou lezen als een verband met
+        // productpagina's dat er niet is; DEPTH_RAMP houdt daarom `plp`.
+        oker:      '#e8a21e',   // == plp
     };
     const OTHER = () => PAL.overig;
 
+    // ---- De reeks --------------------------------------------------------
+    // ÉÉN volgorde voor élke categorische splitsing (Joep, 2026-08-28). Tot vandaag
+    // had iedere dimensie zijn eigen mix — url_type zette navy op slot 5 en turquoise
+    // op 3, bot_family andersom — waardoor een wissel van "Splitsen op" de grafiek van
+    // kleur liet veranderen zonder dat er iets anders werd gemeten. Nu pakt slot n in
+    // elke dimensie dezelfde hue.
+    //
+    // De volgorde is die van bot_family, want dat is de standaardsplitsing en de enige
+    // die alle acht slots gebruikt; de meting waarop die acht rusten staat hieronder en
+    // verandert hier niet — dit is dezelfde set, alleen nu ook op de andere dimensies.
+    //
+    // Slot n = de n-de reeks op VOLUME. Niet op de volgorde waarin drawDaily ze
+    // tegenkomt: die volgt de eerste dag van de selectie (`ORDER BY log_date, hits DESC`
+    // in get_daily) en kan dus per periode omklappen — op 29-07 t/m 27-08 komt C-url
+    // vóór PLP terwijl PLP over de hele periode groter is (46,4% tegen 43,7%). Een
+    // kleur die van je datumkeuze afhangt is precies wat "kleur volgt de entiteit"
+    // verbiedt, dus de toewijzing staat vast in de maps hieronder.
+    //
+    // Grijs zit bewust NIET in de reeks: dat blijft voorbehouden aan de restpost, zodat
+    // "kleine, niet-benoemde rest" en "benoemde categorie" onderscheidbaar blijven.
+    const SERIES = [PAL.lichtblauw, PAL.roze, PAL.lichtgroen, PAL.turquoise,
+                    PAL.bordeaux, PAL.navy, PAL.oker, PAL.violet];
+    // Sleutels op volume-volgorde -> {sleutel: kleur}. Als helper en niet als acht
+    // losse regels, zodat een dimensie de reeks niet stilletjes kan verlaten: wie hier
+    // een kleur wil verzetten, verzet de volgorde van de sleutels.
+    const bySeries = (...keys) =>
+        Object.fromEntries(keys.map((k, i) => [k, SERIES[i] || OTHER()]));
+
     // Kleur hangt aan de ENTITEIT, nooit aan de rangorde: een bot wegfilteren mag
     // de overblijvers niet herverven. Wat niet in de map staat wordt grijs.
+    //
+    // DRIE dimensies volgen SERIES bewust NIET, en dat is de uitkomst van de vraag
+    // "alle Splitsen op-opties dezelfde verdeling?" (Joep, 2026-08-28):
+    //   * status_class en verify_state zijn SEMANTISCH — groen is goed, bordeaux is
+    //     kritiek. Die op categorische slots zetten maakt 4xx lichtgroen en de
+    //     spoof-tripwire turquoise, en dan draagt de kleur geen betekenis meer.
+    //     De dataviz-regel zegt hetzelfde: statuskleuren zijn gereserveerd en worden
+    //     nooit "serie 4".
+    //   * facet_depth is ORDINAAL, geen categorie — zie DEPTH_RAMP.
     const COLOR_MAPS = {
-        // Vier van de vijf donut-hues vallen hier op hun eigen begrip: /r/ is de
-        // R-url, /products/…/c/… de C-url, /p/ de PLP en /products/ zonder facet de
-        // Browse-pagina. Dat is precies dezelfde indeling als _urltype_case() in
-        // seo_stats_service.py, alleen met de interne namen van de logparser.
-        // De legacy-vormen krijgen de donkere tweeling van hun moderne broer
-        // (product_legacy = donker amber, category_legacy = donker magenta), zodat de
-        // verwantschap zichtbaar is zonder dat het dezelfde band lijkt.
-        // De zes buckets die de querylaag teruggeeft (URLTYPE_BUCKETS in
-        // bothits_service.py). Homepage bestaat niet in dashDonutUrlType en pakt
-        // violet — gemeten ΔE 10,0 (CVD) / 17,2 (normaal) tegen de rest.
+        // Volume over 30 dagen t/m 2026-08-27: PLP 46,4%, C-url 43,7%, R-url 7,4%,
+        // Cat-url 1,1%, Homepage 0,0%. Overige is de restpost van de zes buckets en
+        // blijft daarom grijs, buiten de reeks om.
         //
-        // PLP en R-url zijn OMGEDRAAID t.o.v. dashDonutUrlType (Joep, 2026-08-11):
-        // lichtblauw hoort als eerste keuzekleur zichtbaar te zijn, en in deze tool
-        // is R-url verwaarloosbaar (2 hits op een dag met 2,1M PLP-hits) terwijl PLP
-        // het grootste segment is. Met de kleuren op hun SEO Stats-plek kwam
-        // lichtblauw dus nooit in beeld. Omdraaien in plaats van vervangen houdt de
-        // set exact de zes gevalideerde hues, zonder dubbele kleur.
-        //
-        // Prijs hiervan, bewust betaald: Bot Hits en SEO Stats zijn het nu ONEENS
-        // over PLP (hier lichtblauw, daar amber) en R-url (hier amber, daar
-        // lichtblauw). De andere vier vallen nog wél samen. Wil je ze weer gelijk,
-        // dan moet dezelfde wissel in URLTYPE_STYLE van seo-stats.html.
-        // Legenda-volgorde is op volume: PLP 45%, C-url 45%, Cat-url 8%. Die drie
-        // dragen de merkkleuren; Overige blijft grijs (restpost, geen categorie), dus
-        // er zijn vijf gekleurde slots. PLP hield lichtblauw al om de reden hierboven.
-        url_type: {
-            PLP: PAL.lichtblauw, 'C-url': PAL.roze, 'Cat-url': PAL.lichtgroen,
-            Homepage: PAL.navy, 'R-url': PAL.turquoise, Overige: PAL.overig,
-        },
-        // Deze drie dimensies hebben geen tegenhanger in de donut, dus ze vullen aan
-        // uit de metric-tiles. WELKE hues, dat is een zoekopdracht en geen voorkeur
-        // (UI_BLUEPRINT): de subset bepaalt welke paren naast elkaar komen. Alle
-        // combinaties uit het palet zijn doorgerekend met de validator van de
-        // dataviz-skill; de gekozen sets staan hieronder met hun gemeten vloeren.
-        // Een "logische" toewijzing haalde 4,9 ΔE, deze 8,0 — vandaar dat merkkleuren
-        // hier ondergeschikt zijn aan scheidbaarheid.
-        //
-        //   bot_class   (6)  CVD-min 10,0 ΔE   normaal-min 17,2
-        //   bot_family  (8)  CVD-min  7,7 ΔE   normaal-min 15,8  <- opnieuw gemeten op
-        //                    2026-08-13, zie daar
-        //   host        (6)  CVD-min 10,0 ΔE   normaal-min 17,2
-        //
-        // Alle drie halen dus beide vloeren. Twee eerdere, "logischer" toewijzingen
-        // deden dat niet: merkkleuren voor de bots gaven 4,9 ΔE (accent-groen naast
-        // cta-oranje) en een set met twee groenen bleef op 13,4 normaal-zicht steken.
-        //
-        // bot_class draagt ook het label in de tabel; dat is nu outlined (.lbl), dus
-        // de hue is de TEKSTkleur en licht-op-wit zou onleesbaar zijn — vandaar geen
-        // accent-groen hier. `other` pakt geel en geen grijs: dit is
-        // een benoemde familie, en een grijs label leest als uitgeschakeld. Grijs
-        // blijft zo voorbehouden aan wat écht niet in de map staat (de fallback), wat
-        // "catch-all familie" en "onbekende entiteit" onderscheidbaar houdt.
-        // De eerste drie van de LEGENDA dragen de merkkleuren (Joep, 2026-08-12). De
-        // legenda volgt de volgorde waarin de querylaag de reeksen teruggeeft, en die
-        // is op volume: search 83%, ai 11%, other 5%. Die drie krijgen dus lichtblauw,
-        // roze, lichtgroen; de rest is opnieuw gezocht met de validator van de
-        // dataviz-skill omdat lichtgroen andere paren maakt dan de vorige set.
-        // Gemeten (light, #fff, all-pairs): CVD-min 7,7 ΔE (deutan, lichtblauw↔roze),
-        // normaal-min 17,2. Die 7,7 is de ondergrens van de merktrio ZELF — geen set
-        // die deze drie bevat komt hoger — en zit in de 6-8-band die alleen mag mét
-        // secundaire encoding. Die is er: legenda plus de tabel eronder.
-        bot_class: { search: PAL.lichtblauw, ai: PAL.roze, other: PAL.lichtgroen,
-                     'seo-tool': PAL.turquoise, social: PAL.bordeaux,
-                     monitoring: PAL.navy },
+        // PLP en R-url staan OMGEKEERD t.o.v. dashDonutUrlType in seo-stats.html
+        // (Joep, 2026-08-11): lichtblauw hoort als eerste keuzekleur zichtbaar te zijn,
+        // en hier is PLP het grootste segment terwijl R-url daar de eerste plek heeft.
+        // Sinds vandaag lopen de twee tools ook op Cat-url (hier turquoise), R-url
+        // (lichtgroen) en Homepage (bordeaux) uiteen — die volgen nu SERIES. Wil je ze
+        // weer gelijk, dan moet URLTYPE_STYLE daar dezelfde reeks aannemen.
+        url_type: { ...bySeries('PLP', 'C-url', 'R-url', 'Cat-url', 'Homepage'),
+                    Overige: PAL.overig },
+        // Volume: search 88,1%, ai 11,9%; de vier overige klassen dragen op dit moment
+        // geen verkeer maar houden hun slot voor als ze opduiken.
+        // bot_class draagt ook het label in de tabel, en dat is outlined (.lbl) — de
+        // hue is daar dus TEKSTkleur op wit. Dat is de reden dat `other` een kleur uit
+        // de reeks krijgt en geen grijs: een grijs label leest als uitgeschakeld, en
+        // grijs blijft voorbehouden aan wat écht niet in de map staat.
+        bot_class: bySeries('search', 'ai', 'other', 'seo-tool', 'social', 'monitoring'),
         // ACHT benoemde families — het gemeten maximum (Joep, 2026-08-13).
         //
         // De vraag was: geef alle twaalf gevolgde families een eigen kleur, want
         // Perplexity viel onder Overig terwijl hij 1,8% is. Uitgezocht met de validator
         // van de dataviz-skill, inclusief de Base-kolom (500-stops) van het
-        // Kleursysteem-document. Wat de meting zegt, met de merktrio vast op de eerste
+        // Kleursysteem-document. Wat de meting zei, met de merktrio vast op de eerste
         // drie plekken (UI_BLUEPRINT: lichtblauw, roze, lichtgroen):
         //
         //   6 tinten  CVD 7,7  normaal 17,2   OK
@@ -907,53 +956,59 @@
         // kolom ALLEEN haalt zelfs zes niet (CVD 7,7 / normaal 11,3), want die veertien
         // tinten staan allemaal op stop 500 en hebben daardoor nauwelijks
         // lichtheidsverschil — en lichtheid is wat een tint op normaal zicht apart
-        // houdt. Wat het wél haalt, is Base aangevuld met de DONKERE stops van dezelfde
+        // houdt. Wat het wél haalde, is Base aangevuld met de DONKERE stops van dezelfde
         // families: turquoise = teal-800, bordeaux = red-900, navy = blue-950,
-        // yellow = yellow-800. Vandaar deze acht.
+        // yellow = yellow-800.
         //
-        // De acht grootste families krijgen ze, want de legenda-orde volgt het volume:
-        // Googlebot 51%, Apple 18%, GoogleOther 15,3%, OpenAI 7,4%, ByteDance 2,0%,
-        // Perplexity 1,8%, Bing 0,5%, DuckAssist 0,12%. De vier kleinste (Amazon,
-        // Meta-AI, Anthropic, Google-AI — samen 0,19%) vallen in de grijze restband;
-        // hun banden zijn subpixel, dus een eigen kleur zou daar niets tonen wat de
-        // legenda niet al zegt. De swatch van Overig draagt hun namen als title en de
-        // tabel eronder noemt alle twaalf met hun cijfers.
+        // Slot 7 stond op dat yellow-800 (#936305) en draagt sinds 2026-08-28 het
+        // okergeel van 4xx (#e8a21e), op verzoek van Joep — het bruin las muddy.
+        // WAT DAT KOST, gemeten met dezelfde validator (light, surface #fcfcfb,
+        // --pairs all), want dit hoort niet stil te gebeuren:
         //
-        // Gemeten (light, #fcfcfb, all-pairs) over deze acht: CVD-min 7,7 ΔE (deutan,
-        // lichtblauw ↔ roze — de vloer van het merktrio zelf, dus onverbeterbaar zolang
-        // die drie vaststaan), normaal-min 15,8. De 6-8-band mag mét secundaire
-        // encoding en die is er: legenda plus de tabel eronder.
-        // De grijze Overig-band blijft het zwakste paar van het geheel (5,9 / 12,0
-        // tegen lichtblauw) — zie PAL.terracotta; dat is de bestaande vloer van beide
-        // tools en die staat los van deze acht.
-        bot_family: { Googlebot: PAL.lichtblauw, Apple: PAL.roze,
-                      GoogleOther: PAL.lichtgroen, OpenAI: PAL.turquoise,
-                      ByteDance: PAL.bordeaux, Perplexity: PAL.navy,
-                      Bing: PAL.yellow, DuckAssist: PAL.violet },
+        //                        CVD-min (deutan)        normaal-min
+        //   #936305 (bruin)      7,7  roze↔lichtblauw    15,8  violet↔roze     PASS
+        //   #e8a21e (oker)       3,8  oker↔lichtgroen    13,8  oker↔lichtgroen FAIL
+        //
+        // Het okergeel botst dus met het lichtgroen van GoogleOther, en 13,8 op normaal
+        // zicht is een HARDE fail — daar helpt de legenda-plus-tabel niet tegen, want
+        // die uitzondering geldt alleen voor de CVD-band van 6-8. In de grafiek valt het
+        // mee (Bing is 0,4%, een haarlijn naast GoogleOther's 15,3%); in de LEGENDA
+        // staan twee swatches naast elkaar die op elkaar lijken.
+        // Getoetst uitwijkpad als dat gaat opvallen: #d97706 (amber-600) is nog steeds
+        // duidelijk oker, en zet beide vloeren terug op precies het niveau van het bruin
+        // (CVD 7,7 / normaal 15,8) met een betere tritan-score (9,6 tegen 8,7).
+        //
+        // De acht grootste families krijgen de slots; de vier kleinste (Meta-AI,
+        // Anthropic, Amazon, Google-AI — samen 0,19%) vallen in de grijze restband. Hun
+        // banden zijn subpixel, dus een eigen kleur zou niets tonen wat de legenda niet
+        // al zegt. De swatch van Overig draagt hun namen als title en de tabel eronder
+        // noemt alle twaalf met hun cijfers.
+        bot_family: bySeries('Googlebot', 'Apple', 'GoogleOther', 'OpenAI',
+                             'ByteDance', 'Perplexity', 'Bing', 'DuckAssist'),
         // In de praktijk dragen maar twee hosts verkeer (beslist.nl 99%,
-        // shop.beslist.nl 1%), en die twee pakken de eerste twee merkkleuren — niet
-        // "eentje plus grijs", want grijs is voorbehouden aan de restpost en zou de
-        // tweede helft van een tweedeling als rest laten lezen (UI_BLUEPRINT).
-        // beslist.be staat derde in de rij en krijgt lichtgroen voor als hij opduikt.
-        host: { 'beslist.nl': PAL.lichtblauw, 'shop.beslist.nl': PAL.roze,
-                'beslist.be': PAL.lichtgroen, 'shop.beslist.be': PAL.turquoise,
-                'shopcaddy.de': PAL.bordeaux, 'shop.shopcaddy.de': PAL.navy },
-        // Status is een semantisch palet, geen categorische slots: 2xx goed, 3xx
+        // shop.beslist.nl 1%), en die twee pakken de eerste twee slots — niet "eentje
+        // plus grijs", want grijs is voorbehouden aan de restpost en zou de tweede helft
+        // van een tweedeling als rest laten lezen (UI_BLUEPRINT). De rest staat klaar
+        // voor als hij opduikt.
+        host: bySeries('beslist.nl', 'shop.beslist.nl', 'beslist.be',
+                       'shop.beslist.be', 'shopcaddy.de', 'shop.shopcaddy.de'),
+        // Op volume, en dat is hier omgedraaid t.o.v. wat er stond: buiten pa.urls is
+        // 92,4% van de hits, dus dát is slot 1. Gemeten met de dataviz-validator: ΔE 7,7
+        // (deutan) / 25,7 (normaal) — dat eerste zit in de 6-8-band die alleen mag mét
+        // secundaire encoding, en die is er: beide grafieken dragen een legenda én de
+        // tabel eronder.
+        is_known_url: bySeries('not in pa.urls', 'in pa.urls'),
+        // SEMANTISCH, dus buiten SERIES (zie de kop van COLOR_MAPS): 2xx goed, 3xx
         // informatief, 4xx waarschuwing, 5xx kritiek. Bordeaux is de donkerste warme
         // hue die het gedeelde palet heeft — een echt rood zou van buiten SEO Stats
         // moeten komen en dan betekent dezelfde kleur daar iets anders.
-        status_class: { '2xx': PAL.green, '3xx': PAL.rurl, '4xx': PAL.plp, '5xx': PAL.bordeaux },
-        // De eerste drie kleuren van het merkpalet, de reeks die elke tabel/grafiek
-        // als eerste pakt (Joep, 2026-08-11): lichtblauw, roze, lichtgroen. Hier
-        // zijn er twee series nodig, dus lichtblauw + roze. Gemeten met de
-        // dataviz-validator: ΔE 7,7 (deutan) / 25,7 (normaal) — dat eerste zit in de
-        // 6-8-band die alleen mag mét secundaire encoding, en die is er: beide
-        // grafieken dragen een legenda én de tabel eronder.
-        is_known_url: { 'in pa.urls': PAL.lichtblauw, 'not in pa.urls': PAL.roze },
-        // IP-verificatie: groen = IP zit in de gepubliceerde range van de operator,
-        // bordeaux = claimt een operator mét lijst maar zit erbuiten (de tripwire),
-        // grijs = geen lijst om tegen te toetsen (Meta, ByteDance, other-bot),
-        // navy = lijsten waren niet op te halen of de rij is van vóór 11-08-2026.
+        status_class: { '2xx': PAL.green, '3xx': PAL.rurl, '4xx': PAL.oker,
+                        '5xx': PAL.bordeaux },
+        // SEMANTISCH, dus buiten SERIES. IP-verificatie: groen = IP zit in de
+        // gepubliceerde range van de operator, bordeaux = claimt een operator mét lijst
+        // maar zit erbuiten (de tripwire), grijs = geen lijst om tegen te toetsen (Meta,
+        // ByteDance, other-bot), navy = lijsten waren niet op te halen of de rij is van
+        // vóór 11-08-2026.
         verify_state: { verified: PAL.curl, failed: PAL.bordeaux,
                         unverifiable: PAL.overig, unchecked: PAL.navy },
     };
@@ -1975,7 +2030,12 @@
     // urlQLast hoort hier en niet bij de event-binding onderaan: loadUrls() schrijft
     // hem, en een `let` daar zou betekenen dat deze functie een variabele aanraakt die
     // in de temporal dead zone staat tot dat blok is uitgevoerd.
-    let urlRows = [], urlQuery = '', urlQLast = '';
+    let urlRows = [], urlQuery = '', urlQLast = '', urlStatus = '', urlCoverage = null;
+    // Zes kolommen, of zeven met een statuskolom erbij. Elke colspan in deze tab leest
+    // hem op, want een vaste 6 zou de skeletonrijen, de lege staat en het uitklappaneel
+    // een cel te smal maken zodra de kolom verschijnt — en dat is precies het soort
+    // scheefstand dat je pas ziet als de tabel leeg is.
+    const urlCols = () => (urlStatus ? 7 : 6);
     // Deze lijst gaat over maximaal 90 dagen, en dat is een MEETRESULTAAT en geen
     // voorzichtigheid (2026-08-25). Het bekende been van /top-urls aggregeert
     // pa.bothits_url_daily, 22,2 mln rijen, en dat kost koud: 30 dagen 4,4s, 90 dagen
@@ -2022,12 +2082,15 @@
         // allemaal over dezelfde term praten als de rijen die je ziet.
         urlQuery = document.getElementById('urlQ').value.trim();
         urlQLast = urlQuery;
+        // Vóór de skeletonrijen gelezen: urlCols() hangt eraan, dus een wissel van
+        // status moet de breedte al kloppen hebben voor het eerste frame.
+        urlStatus = document.getElementById('urlStatusSel').value;
         document.getElementById('urlHeading').textContent = `Top ${fmt(limit)} URL's`;
         // Skeletonrijen i.p.v. de tekstrij "laden…" die hier stond (UI_BLUEPRINT: een
         // laadstaat hoort de VORM van het resultaat te hebben, anders springt de tabel
         // van één regel naar honderd). Acht rijen ongeacht de limiet: het is een hint,
         // geen voorspelling, en bij "Alles" wil je hier geen 5.000 skeletons.
-        tb.innerHTML = skeletonRows(6, 8);
+        tb.innerHTML = skeletonRows(urlCols(), 8);
         setBusyHint('urls', true);
         try {
             // De kolom toont sinds 2026-08-13 de vorm MÉT trailing slash (zie urlPath),
@@ -2039,24 +2102,36 @@
                 .filter(Boolean).join(' ');
             // urlRange() overschrijft start_date via de `extra`-lus in params() — die zet
             // met p.set(), dus de laatste wint.
-            urlRows = await getJSON(API + '/top-urls?'
-                + params({ limit, q: qSend || null, ...urlRange() }));
+            // Sinds 2026-08-28 een object en geen kale lijst meer: `coverage` moet in
+            // hetzelfde antwoord zitten als de rijen, anders kan de melding erboven over
+            // een ándere selectie gaan dan de tabel eronder.
+            const resp = await getJSON(API + '/top-urls?'
+                + params({ limit, q: qSend || null, status: urlStatus || null,
+                           ...urlRange() }));
+            if (!resp || !Array.isArray(resp.rows)) throw new Error('onverwacht antwoord van /top-urls');
+            urlRows = resp.rows;
+            urlCoverage = resp.coverage || null;
             // Binnen de try (audit 2026-08-13). De normalisatie hieronder stond erbuiten,
             // dus bij een niet-lijst antwoord gooide .forEach een TypeError als
             // unhandled rejection en bleef de tabel eeuwig op "laden…" staan. Dat was
             // ook zonder serverfout te bereiken: #urlQ had geen maxlength terwijl de
             // route q op max_length=200 zet, dus een lange URL plakken gaf een 422.
-            if (!Array.isArray(urlRows)) throw new Error('onverwacht antwoord van /top-urls');
             // per_day hier en niet in SQL: het aantal dagen is dat waarop DEZE url in de
             // dagelijkse top-500 stond, dus het is "hits per dag dat hij opviel".
+            // Met een status aan volgt per_day de STATUSTELLER, niet het totaal: `days`
+            // telt dan alleen de dagen waarop die status voorkwam (FILTER in de query),
+            // dus totaal/dagen zou een teller op een vreemde noemer delen en te hoog
+            // uitvallen. De kolomkop zegt welke van de twee je leest.
             urlRows.forEach(r => {
                 r.hits = Number(r.hits); r.days = Number(r.days);
-                r.per_day = r.days ? Math.round(r.hits / r.days) : 0;
+                if (r.status_hits != null) r.status_hits = Number(r.status_hits);
+                const n = r.status_hits ?? r.hits;
+                r.per_day = r.days ? Math.round(n / r.days) : 0;
             });
         } catch (e) {
-            urlRows = [];
+            urlRows = []; urlCoverage = null;
             setBusyHint('urls', false);
-            tb.innerHTML = `<tr><td colspan="6" class="p-3 text-danger">Laden mislukt: ${escapeHtml(e.message)}</td></tr>`;
+            tb.innerHTML = `<tr><td colspan="${urlCols()}" class="p-3 text-danger">Laden mislukt: ${escapeHtml(e.message)}</td></tr>`;
             return;
         }
         setBusyHint('urls', false);
@@ -2100,9 +2175,45 @@
         // zonder getal lijkt de tabel dan afgekapt. textContent, geen innerHTML: de
         // term komt van de gebruiker.
         const lim = document.getElementById('urlLimit').value;
-        document.getElementById('urlHeading').textContent = urlQuery
-            ? `Top ${fmt(lim)} URL's — "${urlQuery}" (${fmt(urlRows.length)} ${urlRows.length === 1 ? 'rij' : 'rijen'})`
-            : `Top ${fmt(lim)} URL's`;
+        const st = urlStatus;
+        // De kop noemt de status als er een gekozen is, want de rangschikking is dan een
+        // andere: "top 250 op 4xx", niet "top 250 die toevallig ook 4xx heeft".
+        document.getElementById('urlHeading').textContent =
+            `Top ${fmt(lim)} URL's` + (st ? ` op ${st}` : '')
+            + (urlQuery ? ` — "${urlQuery}" (${fmt(urlRows.length)} ${urlRows.length === 1 ? 'rij' : 'rijen'})` : '');
+
+        // Kolomkoppen volgen de modus. De statuskolom draagt de code zelf als label —
+        // "4xx" boven de getallen leest directer dan een generiek "Status".
+        document.getElementById('urlTable').classList.toggle('has-status', !!st);
+        const th = document.getElementById('urlStatusTh');
+        th.classList.toggle('d-none', !st);
+        th.textContent = st || '';
+        th.title = st ? `Hits met een ${st}-statuscode. De kolom Hits ernaast is het totaal `
+                        + `over alle statussen, dus het verschil is alles wat níet ${st} was.` : '';
+        const pd = document.getElementById('urlPerDayTh');
+        pd.title = st
+            ? `${st}-hits gedeeld door het aantal dagen waarop deze URL een ${st} gaf — `
+              + `niet door alle dagen in de periode.`
+            : 'Hits gedeeld door het aantal dagen waarop deze URL in beeld was.';
+
+        // Dekkingsmelding. Vult zich uit `coverage` in het antwoord, dus hij beweegt mee
+        // met domein-, bot- en URL-typekeuze: op alle URL-types dekt 4xx 2,1%, met
+        // URL-type = C-url is dat 22,6%.
+        const note = document.getElementById('urlStatusNote');
+        if (st && urlCoverage && Number(urlCoverage.totaal)) {
+            const inl = Number(urlCoverage.in_lijst), tot = Number(urlCoverage.totaal);
+            const pct = (inl / tot * 100).toFixed(1).replace('.', ',');
+            note.classList.remove('d-none');
+            note.innerHTML =
+                `<strong>Deze lijst dekt ${fmt(inl)} van de ${fmt(tot)} ${st}-hits (${pct}%).</strong> `
+                + `Alleen URL's die in <code>pa.urls</code> staan hebben een statuscode per URL; `
+                + `voor de rest — vooral productpagina's en door crawlers zelf samengestelde URL's — `
+                + `bewaart de ingest per dag alleen het aantal hits, niet de status. `
+                + `Voor die ${fmt(tot - inl)} hits is het Overzicht de plek: daar staat `
+                + `Statuscode naast URL-type, facetdiepte, bot en domein.`;
+        } else {
+            note.classList.add('d-none');
+        }
         if (!urlRows.length) {
             // Drie verschillende "leeg", en ze betekenen niet hetzelfde.
             //
@@ -2113,19 +2224,26 @@
             // deze tekst lees je dat als "er wordt niets gecrawld" (fase 3).
             const types = checked('typeFilter');
             const plpOnly = types.length > 0 && types.every(t => t === 'PLP');
+            const c = urlCols();
             tb.innerHTML = plpOnly
-                ? `<tr><td colspan="6" class="p-3 text-muted">Productpagina's staan <strong>niet</strong>
+                ? `<tr><td colspan="${c}" class="p-3 text-muted">Productpagina's staan <strong>niet</strong>
                      in deze lijst. Ze zitten niet in <code>pa.urls</code> en worden ook niet als
                      "onbekende" URL bewaard — een top-N over pagina's die vrijwel uniek zijn per hit
                      zegt niets. Hun hits tellen wél volledig mee in het Overzicht.</td></tr>`
                 : urlQuery
-                ? `<tr><td colspan="6" class="p-3 text-muted">Geen URL in deze selectie bevat
+                ? `<tr><td colspan="${c}" class="p-3 text-muted">Geen URL in deze selectie bevat
                      <strong>${escapeHtml(urlQuery)}</strong>. Let op: URL's búiten <code>pa.urls</code>
                      komen uit de dagelijkse top-500 per bot-familie, dus zo'n URL die die grens nooit
                      haalde staat er niet in — ook niet als hij wel gecrawld is. URL's ín
                      <code>pa.urls</code> zijn wél uitputtend geteld. Een ruimere periode of een kortere
                      zoekterm vergroot de kans.</td></tr>`
-                : '<tr><td colspan="6" class="p-3 text-muted">Geen resultaten in deze selectie.</td></tr>';
+                : st
+                ? `<tr><td colspan="${c}" class="p-3 text-muted">Geen URL in <code>pa.urls</code> gaf
+                     een <strong>${escapeHtml(st)}</strong> in deze selectie. Dat betekent niet dat er
+                     geen ${escapeHtml(st)} wás — de melding hierboven zegt hoeveel van die hits op
+                     URL's buiten <code>pa.urls</code> staan, en daarvan wordt de statuscode per URL
+                     niet bewaard.</td></tr>`
+                : `<tr><td colspan="${c}" class="p-3 text-muted">Geen resultaten in deze selectie.</td></tr>`;
             return;
         }
         // Zelfde vorm als Per bot-familie: caret vooraan, rij klikbaar, paneel eronder.
@@ -2140,6 +2258,7 @@
                     : '<span class="lbl lbl-red" title="Door een crawler zelf samengestelde URL. Deze kant van de lijst is de dagelijkse top-500 per bot-familie, dus niet uitputtend.">nee</span>'}</td>
               <td>${escapeHtml(r.url_type || '')}</td>
               <td class="num mid">${r.facet_depth}</td>
+              ${st ? `<td class="num mid">${fmt(r.status_hits ?? 0)}</td>` : ''}
               <td class="num mid">${fmt(r.hits)}</td>
               <td class="num mid">${fmt(r.per_day)}</td>
             </tr>`).join('');
@@ -2163,7 +2282,7 @@
         tr.classList.add('is-open');
         const det = document.createElement('tr');
         det.className = 'bot-detail url-detail';
-        det.innerHTML = `<td colspan="6">
+        det.innerHTML = `<td colspan="${urlCols()}">
             <div id="urlStatus" class="muted-note mb-2"></div>
             <div class="row g-3">
               <div class="col-md-4"><div class="chart-title mb-1">Per bot-familie</div>
@@ -2214,7 +2333,7 @@
             if (Number(s.overig)) parts.push(
                 `<strong>${fmt(s.overig)}</strong> overig (${pct(s.overig)})`
                 + `<span title="CloudFront logt sc-status 000 bij een afgebroken verbinding.">*</span>`);
-            sEl.innerHTML = `HTTP-status over ${fmt(s.hits)} hits: ` + parts.join(' · ');
+            sEl.innerHTML = `Statuscodes over ${fmt(s.hits)} hits: ` + parts.join(' · ');
         }
         CHARTS.urlBot = miniDonut('urlBotChart', 'urlBotCenter',
             (d.by_bot || []).map(r => [r.bot_family, Number(r.hits)]), 'bot_family');
@@ -2511,6 +2630,10 @@
     document.querySelector('[data-bs-target="#tab-urls"]').addEventListener('shown.bs.tab', loadUrls);
     document.getElementById('urlLoad').onclick = loadUrls;
     document.getElementById('urlLimit').onchange = loadUrls;
+    // Meteen herladen en niet achter Refresh: dit is een andere RANGSCHIKKING, niet een
+    // filter over wat er al staat. De lijst laten staan tot je op Refresh drukt zou de
+    // oude top-250 onder een nieuwe kop tonen.
+    document.getElementById('urlStatusSel').onchange = loadUrls;
 
     // Zoekbox: debounce van 350 ms, want elke toetsaanslag is een query over de
     // dagreeks en niet over een lijstje in het geheugen. De vergelijking met

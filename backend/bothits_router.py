@@ -121,8 +121,15 @@ async def top_urls(
     force: bool = Query(False),
     q: Optional[str] = Query(None, max_length=200,
                              description="zoektekst; meerdere woorden = alle woorden"),
+    status: Optional[str] = Query(None, description="2xx | 3xx | 4xx | 5xx"),
 ):
     """De meest gecrawlde URL's in de selectie — zie get_top_urls voor de bron.
+
+    Het antwoord is sinds 2026-08-28 een OBJECT en niet meer een kale lijst:
+    `{rows, status, coverage, start_date, end_date}`. Dat komt door `status` — een
+    top-N op statuscode kan alleen de URL's tonen die in pa.urls staan, en hoeveel
+    van die statusklasse daarmee buiten beeld valt (`coverage`) hoort in hetzelfde
+    antwoord te zitten als de rijen, niet in een tweede verzoek dat je kunt vergeten.
 
     `q` filtert in de query en niet in de browser, dus je krijgt de top N van wat
     matcht in plaats van een filter over de al getoonde rijen. max_length houdt de
@@ -130,9 +137,16 @@ async def top_urls(
     """
     _check_date(start_date, "start_date")
     _check_date(end_date, "end_date")
+    # Aan de rand afwijzen i.p.v. stil negeren: een typefout in de statuscode hoort
+    # niet als "alle statussen" terug te komen — dan lees je een top-N over alles
+    # terwijl je denkt naar 4xx te kijken. Vóór het try-blok, om dezelfde reden als
+    # _check_date: HTTPException is een Exception.
+    if status and status not in ("2xx", "3xx", "4xx", "5xx"):
+        raise HTTPException(status_code=400,
+                            detail=f"status must be 2xx/3xx/4xx/5xx, got {status!r}")
     try:
         return await _run(get_top_urls, start_date, end_date, host, bot_class,
-                          bot_family, url_type, limit, force, q)
+                          bot_family, url_type, limit, force, q, status)
     except Exception as e:
         logger.error("bothits top-urls failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))

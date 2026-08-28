@@ -446,6 +446,13 @@ SQL_URL_TYPE = """
          ELSE 'other' END"""
 
 
+# De vier statusklassen die pa.bothits_url_daily per URL bijhoudt, en de kolom
+# waarin ze staan. '0xx' staat er bewust NIET bij: dat is CloudFronts sc-status 000
+# (afgebroken verbinding), die valt in geen van de vier tellers en is per URL dus
+# niet te ranken. Whitelist en geen interpolatie — de waarde landt in de SQL.
+STATUS_COLS = {"2xx": "n_2xx", "3xx": "n_3xx", "4xx": "n_4xx", "5xx": "n_5xx"}
+
+
 def _known_filters(host=None, bot_class=None, bot_family=None):
     """Filters voor pa.bothits_url_daily (alias `d`). Geen url_type en geen
     is_known_url: die tabel draagt per definitie alleen URL's uit pa.urls, en het type
@@ -462,7 +469,8 @@ def _unknown_filters(host=None, bot_class=None, bot_family=None, url_type=None):
 
 
 def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
-                 bot_family=None, url_type=None, limit=250, force=False, q=None):
+                 bot_family=None, url_type=None, limit=250, force=False, q=None,
+                 status=None):
     """De meest gecrawlde URL's in de selectie.
 
     TWEE BRONNEN, samengevoegd en opnieuw gerankt (fase 3 van de audit, 2026-08-13):
@@ -494,11 +502,6 @@ def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
     in. Lees het als "de luidste veroorzakers", niet als een uitputtende ranglijst — de
     dagtotalen in het Overzicht kloppen wél volledig, want die komen uit de cube.
 
-    Gemeten over de standaardselectie van 30 dagen: 85.307 unieke URL's, 2,25 mln hits.
-    De top 50 draagt daarvan 53%, de top 250 62%, de top 1000 74% — de knik zit dus heel
-    vroeg. Vandaar 250 als standaard: ruim voorbij de knik, rij #250 heeft nog 701 hits
-    (~23 per dag) en een tabel van 250 rijen is nog te scannen en te sorteren.
-
     `q` is de zoekbox (Joep, 2026-08-13) en filtert in SQL, niet in de browser. Dat
     onderscheid is het hele punt: dit is een top-N van de selectie, dus een filter over
     de al geladen 250 rijen zou een URL die op plek 800 staat stilzwijgend verzwijgen.
@@ -516,41 +519,109 @@ def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
 
     Geen index om op te leunen (geen trigram op w.url), maar dat kost hier niets: de
     datumfilter snijdt eerst en ILIKE '%x%' had net zo goed geen index kunnen gebruiken.
+
+    ---- `status` (Joep, 2026-08-28) --------------------------------------------------
+    Van de Statuscode-uitsplitsing in Hits per dag door naar de URL's erachter. Ranken
+    op `n_2xx`..`n_5xx` uit pa.bothits_url_daily in plaats van op hits; `status_hits`
+    komt dan per rij mee naast het totaal.
+
+    DIT SCHAKELT DE ONBEKENDE KANT VOLLEDIG UIT, en dat is geen vergetelheid maar de
+    enige eerlijke uitkomst: pa.bothits_unknown_daily heeft geen statuskolommen. De
+    ingest telt daar alleen hits per (dag, host, bot, url). Een statusfilter over die
+    tabel zou dus moeten gokken, en de lijst zou zwijgend URL's tonen waarvan de status
+    niet is vastgelegd.
+
+    Wat dat kost is groot en hoort daarom in `coverage` mee te komen in plaats van in een
+    voetnoot te verdwijnen. Gemeten over de laatste 30 dagen t/m 2026-08-27, gevolgde
+    bots: van de 4.140.355 4xx-hits staan er 84.874 op een URL in pa.urls (2,1%); van de
+    17.791.280 3xx-hits zijn dat er 277.056 (1,6%). De frontend rekent daar een zin van
+    en zet die boven de tabel — een top-N die 2% van zijn eigen noemer dekt, mag daar
+    niet stil over zijn.
+
+    Waarom die 98% niet alsnog is opgehaald, en dat is een MEETRESULTAAT: de non-2xx-
+    URL-ruimte is volstrekt vlak. Op de ruwe logs van 2026-08-12 (steekproef van 300 van
+    de 2.905 bestanden, alleen gevolgde bots) staan 137.451 3xx-hits op 123.067 unieke
+    URL's — bijna één hit per URL — en dekt de top-500 er 2,0% van. Voor 4xx: 22.611 hits
+    op 21.585 URL's, top-500 dekt 6,7%, en de kop van die lijst is /favicon.ico,
+    /robots.txt, /tracking.js en /.env.backup. Een statuskolom aan unknown_daily hangen
+    levert dus een ranglijst van assets en scannerprobes op, geen SEO-signaal. Het
+    volume zit op productpagina's (3xx: 14,0 mln van 17,5 mln; 4xx: 3,0 mln van 4,1 mln),
+    en die zijn per definitie bijna uniek per hit.
+
+    Waar de bulk wél op te lezen is: het Overzicht. De cube draagt status_class naast
+    url_type, facet_depth, bot en host, dus "waar zit die 4xx" is daar op patroonniveau
+    te beantwoorden — alleen niet per URL.
+
+    De bekende kant is voor deze vraag wél uitputtend, en levert echt iets op: over
+    dezelfde 30 dagen staan de maincat-pagina's bovenaan op 4xx (/products/fietsen/,
+    /products/mode/, ~2.100 elk) en redirect /products/ op 2.208 van zijn 4.340 crawls.
     """
     start, end = _range(start_date, end_date)
     limit = max(1, min(int(limit or 250), 1000))
     terms = [t.lower() for t in (q or "").split()][:6]
+    # Onbekende waarde valt terug op "geen filter" i.p.v. een 400: de route valideert al
+    # aan de rand, en een cachesleutel die 'vier'-achtige typefouten apart bewaart is
+    # dezelfde val als de group_by-echo in get_daily.
+    status = status if status in STATUS_COLS else None
+    col = STATUS_COLS.get(status)
     # Genormaliseerd in de cachesleutel, niet de ruwe string: "  Siemens" en "siemens"
     # zijn dezelfde query en horen dezelfde cache-entry te delen.
     key = ("topurls", start, end, host, bot_class, bot_family, url_type, limit,
-           tuple(terms))
+           tuple(terms), status)
 
     def run():
+        # ---- dekking: welk deel van deze statusklasse kán deze lijst tonen ---------
+        # Uit de CUBE, met dezelfde filters, zodat teller en noemer over exact dezelfde
+        # selectie gaan. is_known_url in de cube en "staat in url_daily" zijn hetzelfde
+        # criterium — beide volgen pa.urls, en b.is_tracked zit in beide takken — dus
+        # `in_lijst` is niet geschat maar gelijk aan wat het bekende been optelt.
+        coverage = None
+        if col:
+            cfrag, cparams = _filters(host, bot_class, bot_family, url_type)
+            c = _query(f"""
+                SELECT coalesce(sum(d.hits) FILTER (WHERE d.is_known_url), 0)::bigint
+                           AS in_lijst,
+                       coalesce(sum(d.hits), 0)::bigint AS totaal
+                FROM pa.bothits_daily d
+                JOIN pa.bothits_host h ON h.host_id = d.host_id
+                JOIN pa.bothits_bot  b ON b.bot_id  = d.bot_id
+                WHERE d.log_date BETWEEN %s AND %s AND d.status_class = %s {cfrag}
+            """, [start, end, status] + cparams)[0]
+            coverage = {"status": status, "in_lijst": c["in_lijst"],
+                        "totaal": c["totaal"]}
+
+        def out(rows):
+            return {"rows": rows, "status": status, "coverage": coverage,
+                    "start_date": start, "end_date": end}
+
         # ---- been 1: de ONBEKENDE staart (pa.bothits_unknown_daily) ----------------
-        frag, params = _unknown_filters(host, bot_class, bot_family, url_type)
-        if terms:
-            frag += "".join(" AND strpos(lower(w.url), %s) > 0" for _ in terms)
-            params = params + terms
-        # Geen string_agg van de bot-families meer (Joep, 2026-08-13): die kolom is uit
-        # de tabel en het uitklappaneel toont de verdeling nu als donut. Scheelt ook een
-        # sort per groep in de query.
-        unknown = _query(f"""
-            SELECT w.url, w.url_type, w.facet_depth,
-                   sum(w.hits)::bigint AS hits,
-                   count(DISTINCT w.log_date) AS days
-            FROM pa.bothits_unknown_daily w
-            JOIN pa.bothits_host h ON h.host_id = w.host_id
-            JOIN pa.bothits_bot  b ON b.bot_id  = w.bot_id
-            WHERE w.log_date BETWEEN %s AND %s {frag}
-            GROUP BY w.url, w.url_type, w.facet_depth
-            -- w.url als tie-break (audit 2026-08-13): op de standaardselectie zit rang
-            -- 250 op 208 hits met drie rijen gelijk, dus zonder tweede sleutel kiest
-            -- Postgres willekeurig welke twee je ziet en flapt de lijst tussen twee
-            -- identieke verzoeken. De hits zelf veranderen niet.
-            ORDER BY hits DESC, w.url LIMIT %s
-        """, [start, end] + params + [limit])
-        for r in unknown:
-            r["source"] = "onbekend"
+        # Overgeslagen zodra er op status wordt gefilterd: die tabel kent geen status.
+        unknown = []
+        if not col:
+            frag, params = _unknown_filters(host, bot_class, bot_family, url_type)
+            if terms:
+                frag += "".join(" AND strpos(lower(w.url), %s) > 0" for _ in terms)
+                params = params + terms
+            # Geen string_agg van de bot-families meer (Joep, 2026-08-13): die kolom is
+            # uit de tabel en het uitklappaneel toont de verdeling nu als donut. Scheelt
+            # ook een sort per groep in de query.
+            unknown = _query(f"""
+                SELECT w.url, w.url_type, w.facet_depth,
+                       sum(w.hits)::bigint AS hits,
+                       count(DISTINCT w.log_date) AS days
+                FROM pa.bothits_unknown_daily w
+                JOIN pa.bothits_host h ON h.host_id = w.host_id
+                JOIN pa.bothits_bot  b ON b.bot_id  = w.bot_id
+                WHERE w.log_date BETWEEN %s AND %s {frag}
+                GROUP BY w.url, w.url_type, w.facet_depth
+                -- w.url als tie-break (audit 2026-08-13): op de standaardselectie zit
+                -- rang 250 op 208 hits met drie rijen gelijk, dus zonder tweede sleutel
+                -- kiest Postgres willekeurig welke twee je ziet en flapt de lijst tussen
+                -- twee identieke verzoeken. De hits zelf veranderen niet.
+                ORDER BY hits DESC, w.url LIMIT %s
+            """, [start, end] + params + [limit])
+            for r in unknown:
+                r["source"] = "onbekend"
 
         # ---- been 2: de BEKENDE URL's (pa.bothits_url_daily) -----------------------
         kfrag, kparams = _known_filters(host, bot_class, bot_family)
@@ -561,9 +632,7 @@ def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
         # gaat de join over 250 rijen.
         # Zoektermen en een url_type-filter kunnen dat niet: die moeten vóór de
         # ranking bijten, anders krijg je "de top 250, en daaruit wat matcht" i.p.v.
-        # "de top 250 van wat matcht". Dan eerst de url_id's opzoeken in pa.urls —
-        # één scan over 1M smalle rijen — en daarmee de feitentabel op url_id
-        # filteren, wat wél op de index kan.
+        # "de top 250 van wat matcht".
         # Twee manieren om te knijpen, en welke goedkoop is hangt af van hoe SELECTIEF
         # het filter is:
         #   * een ZOEKTERM raakt een handvol URL's -> eerst de url_id's opzoeken en de
@@ -583,23 +652,35 @@ def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
                 idp.append(list(wanted))
             pre_ids = [r["url_id"] for r in _query(" ".join(idsql), idp)]
             if not pre_ids:
-                return sorted(unknown, key=lambda r: (-int(r["hits"]), r["url"]))[:limit]
+                return out(sorted(unknown,
+                                  key=lambda r: (-int(r["hits"]), r["url"]))[:limit])
             extra, idparams = " AND d.url_id = ANY(%s)", [pre_ids]
         elif wanted:
             extra = (f" AND EXISTS (SELECT 1 FROM pa.urls x WHERE x.url_id = d.url_id "
                      f"AND ({SQL_URL_TYPE}) = ANY(%s))")
             idparams = [list(wanted)]
 
+        # `rank_hits` is waarop de top-N wordt gekozen: hits, of de statusteller als er
+        # op status wordt gefilterd. HAVING erbij, anders vult de lijst zich met de
+        # drukste URL's die van deze status nul hebben. `days` telt in dat geval alleen
+        # de dagen waarop de status ook echt voorkwam, zodat "per dag" in de UI over
+        # dezelfde noemer gaat als het getal ernaast.
+        rank = f"d.{col}" if col else "d.hits"
+        having = f"HAVING sum(d.{col}) > 0" if col else ""
+        days_expr = (f"count(DISTINCT d.log_date) FILTER (WHERE d.{col} > 0)"
+                     if col else "count(DISTINCT d.log_date)")
         known = _query(f"""
             WITH agg AS (
                 SELECT d.url_id, sum(d.hits)::bigint AS hits,
-                       count(DISTINCT d.log_date) AS days
+                       sum({rank})::bigint AS rank_hits,
+                       {days_expr} AS days
                 FROM pa.bothits_url_daily d
                 JOIN pa.bothits_host h ON h.host_id = d.host_id
                 JOIN pa.bothits_bot  b ON b.bot_id  = d.bot_id
                 WHERE d.log_date BETWEEN %s AND %s {kfrag}{extra}
                 GROUP BY d.url_id
-                ORDER BY hits DESC, d.url_id
+                {having}
+                ORDER BY rank_hits DESC, d.url_id
                 LIMIT %s
             )
             -- rtrim: pa.urls bewaart de trailing slash, de ingest bewaart het pad
@@ -609,17 +690,25 @@ def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
                         ELSE rtrim(x.url, '/') END AS url,
                    {SQL_URL_TYPE} AS url_type,
                    {SQL_FACET_DEPTH} AS facet_depth,
-                   a.hits, a.days
+                   a.hits, a.rank_hits, a.days
             FROM agg a JOIN pa.urls x ON x.url_id = a.url_id
-            ORDER BY a.hits DESC, x.url
+            ORDER BY a.rank_hits DESC, x.url
         """, [start, end] + kparams + idparams + [limit])
         for r in known:
             r["source"] = "pa.urls"
+            rank_hits = r.pop("rank_hits")
+            if col:
+                r["status_hits"] = rank_hits
 
         # Samenvoegen en opnieuw ranken. Een URL kan niet in beide bakken zitten: de
         # ingest schrijft een hit óf naar url_daily (in pa.urls) óf naar unknown_daily.
-        rows = sorted(known + unknown,
-                      key=lambda r: (-int(r["hits"]), r["url"]))[:limit]
+        # Met een statusfilter is `unknown` leeg en is `known` al op status gesorteerd;
+        # opnieuw op hits ranken zou de volgorde dan juist kapot maken.
+        if col:
+            rows = known[:limit]
+        else:
+            rows = sorted(known + unknown,
+                          key=lambda r: (-int(r["hits"]), r["url"]))[:limit]
         # Type in dezelfde woorden als het filter erboven (Joep, 2026-08-13). De tabel
         # toonde het RUWE type (`category_facet`, `product`) terwijl Filters > URL-type
         # buckets aanbiedt (`C-url`, `PLP`) — één begrip in twee talen, op één scherm.
@@ -630,7 +719,7 @@ def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
             raw = r["url_type"]
             r["url_type_raw"] = raw
             r["url_type"] = RAW_TO_BUCKET.get(raw, "Overige")
-        return rows
+        return out(rows)
     return _cached(key, run, force)
 
 
