@@ -71,6 +71,7 @@ from backend.seo_stats_router import router as seo_stats_router
 from backend.dma_exclusions_router import router as dma_exclusions_router
 from backend.healthscore_router import router as healthscore_router
 from backend.bothits_router import router as bothits_router
+from backend.facet_watch_router import router as facet_watch_router
 from backend.keyword_planner_service import get_search_volumes, test_api_connection as test_keyword_planner_connection
 from backend.category_keyword_service import process_category_keywords, PRELOADED_CATEGORIES
 from backend.keyword_redirect_service import resolve_shop, enrich_redirects
@@ -213,6 +214,10 @@ app.include_router(healthscore_router)
 
 # Include bothits router (CloudFront crawler-log analytics: AI bots, Googlebot, ...)
 app.include_router(bothits_router)
+
+# Include facet_watch router (daily: recently created/changed facets per main
+# category, from the Taxonomy API audit log)
+app.include_router(facet_watch_router)
 
 # Koptekst-promptversie voor NIEUW gegenereerde content. "v3" = per-maincat
 # informationele koopgids-prompts (gpt_service_v3); "v1" = originele promo-prompt

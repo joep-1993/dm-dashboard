@@ -11,9 +11,10 @@ those are the existing top-N power set (pagetitles_top5_allchannel_combos.py) an
 mixing them in here would silently widen the deliverable.
 
 Combos are ranked by taxonomy, not traffic. A category's facet list from the Taxonomy
-API is dominated by the ~280 globally-attached `productlijnen-*` / `pl_*` / `p_*`
-facets, which are all merk-dependent and are never the "top" facets of anything, so
-they are filtered out; --partners overrides the pick entirely.
+API is dominated by the ~280 globally-attached product-line facets, which are all
+merk-dependent and are never the "top" facets of anything, so they are filtered out by
+facet NAME (see _is_auto_facet -- a slug-prefix rule drops real facets); --partners
+overrides the pick entirely.
 
 Guards, all live rather than trusted from a file: combos already held locally
 (pa.seo_titles_blueprints) or by the LIVE /page-titles store are skipped, and
@@ -39,22 +40,54 @@ from backend.seo_titles_service import (  # noqa: E402
     load_local_combos, load_rules, store_has_combos, _upsert_blueprint,
 )
 
-# Facet families that are attached to nearly every category and are never a
-# category's own top facet. All of them are merk-dependent anyway.
-GLOBAL_PREFIXES = ('productlijnen-', 'pl_', 'p_')
+# The product-line family: attached to nearly every category, never a category's own
+# top facet, and merk-dependent anyway. Identified by the facet NAME, not the slug --
+# the slug prefixes that look like they mark this family do not: `p_pennenbakken` is
+# "Plaatsing" and `pl_klussen` is "Serie", both real facets that a `p_`/`pl_` prefix
+# rule silently drops. Measured on a 285-facet category: name rule 0 false positives,
+# slug rule 2.
+AUTO_FACET_NAMES = ('Productlijn',)
+AUTO_FACET_NAME_PREFIX = 'Productlijnen:'
 
 
-def pick_partners(cat_id, new_facet, top_n):
-    """The category's own facets, minus the new one and the global product-line
-    families, capped at top_n. Taxonomy order is the category's facet order."""
+def _is_auto_facet(name):
+    name = (name or '').strip()
+    return name in AUTO_FACET_NAMES or name.startswith(AUTO_FACET_NAME_PREFIX)
+
+
+def pick_partners(cat_id, new_facet, top_n, deps=None):
+    """The category's own top facets, minus the new one, capped at top_n. Taxonomy
+    order is the category's facet order.
+
+    Two filters, in order of how much they can be trusted:
+
+    1. **A facet with a dependency parent is skipped.** pa.facet_dependencies is real
+       data, not a name guess: a facet that is only selectable once a specific parent
+       value is chosen cannot be a standalone top facet, and every combo naming it
+       without its parent would be blocked downstream anyway. This is what removes
+       the ~280 product-line facets on a category like Tegelaccessoires -- all of
+       them need `merk` -- along with `pl_klussen` ("Serie"), which the earlier
+       slug-prefix rule caught by accident and `_is_auto_facet` does not catch at all.
+    2. **The product-line family by name**, as a backstop for a member that has no
+       dependency row yet.
+
+    Both beat the slug-prefix rule this used to apply: `p_pennenbakken` is
+    "Plaatsing" and has no parent, so a `p_` prefix rule threw away a real facet.
+    """
     from backend.url_validator_service import _cache as taxonomy_cache
+    if deps is None:
+        deps = load_facet_deps()
     out, seen = [], set()
     for f in taxonomy_cache.get_category_facets(cat_id) or []:
         slug = f.get('slug')
         if not slug or slug in seen:
             continue
         seen.add(slug)
-        if slug == new_facet or slug.startswith(GLOBAL_PREFIXES):
+        if slug == new_facet:
+            continue
+        if deps.get(slug):                      # dependent -> not a standalone facet
+            continue
+        if _is_auto_facet(f.get('name')):
             continue
         if not f.get('enabled') or f.get('noindex'):
             continue
@@ -81,8 +114,10 @@ def main():
     cat_name = next((l.get('name') for l in cat.get('labels') or []
                      if l.get('locale') == 'nl-NL'), '') or ''
 
+    deps = load_facet_deps()
     partners = ([p.strip() for p in args.partners.split(',') if p.strip()]
-                if args.partners else pick_partners(args.cat_id, args.new_facet, args.top_n))
+                if args.partners
+                else pick_partners(args.cat_id, args.new_facet, args.top_n, deps))
     print(f"[1/4] cat {args.cat_id} {cat_name!r} · new facet {args.new_facet!r}")
     print(f"      partners ({len(partners)}): {', '.join(partners) or '(none)'}")
     print(f"      max depth {args.max_depth}")
@@ -100,7 +135,6 @@ def main():
     combos = sorted(set(combos), key=lambda s: (s.count('~'), s))
     print(f"[2/4] {len(combos)} combos containing {args.new_facet}")
 
-    deps = load_facet_deps()
     local = load_local_combos(force=True)
     covered = {c for c in combos if (args.cat_id, c) in local}
     if not args.skip_store:

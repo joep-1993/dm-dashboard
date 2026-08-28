@@ -1,0 +1,696 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Facet Watch</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        /* ---- Standard table look (matches "Campaigns created" in GSD Campaigns) ---- */
+        /* Bordered, rounded wrapper so the table sits INSIDE the card body. */
+        .tool-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; }
+        .tool-table { font-size: 0.9rem; margin-bottom: 0; }
+        /* Grey, sticky column headers. Header font is 1rem (slightly larger than body). */
+        .tool-table th {
+            background: #f8f9fa; white-space: nowrap;
+            position: sticky; top: 0; z-index: 1;
+            padding: 6px 14px; font-size: 1rem;
+        }
+        /* Cell padding MUST match the header's 6px 14px, otherwise every
+           left-aligned column sits 10px to the left of its own header — .table-sm
+           gives td only 0.25rem and the misalignment is subtle enough to read as
+           sloppiness rather than a bug. */
+        .tool-table td { vertical-align: middle; padding: 6px 14px; }
+        /* One font for every cell AND header. The timestamp columns used to be
+           monospace, which made one column visibly different from its neighbours.
+           Size and colour still carry hierarchy; the family does not. */
+        .tool-table th, .tool-table td { font-family: inherit; }
+        /* Centred numeric columns. Applied to th AND td via the same class so the
+           header can never drift away from its own values. Named num-col, not num:
+           .stat-box .num already means "the big number on a tile" in this file. */
+        .tool-table th.num-col, .tool-table td.num-col { text-align: center; }
+        /* Clickable / sortable headers with the ⇅ / ▲ / ▼ affordance. */
+        /* Geen position:relative: de basisregel hierboven zet position:sticky en een
+           specifiekere position overschrijft dat, waardoor sorteerbare headers niet
+           meer meescrollen (gevonden in Bot Hits, 2026-08-11). Het ::after-glyph
+           heeft een positioned ancestor nodig en sticky is dat al. */
+        .tool-table th.sortable { cursor: pointer; user-select: none; padding-right: 1.2rem; }
+        .tool-table th.sortable:hover { background: #e9ecef; }
+        .tool-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
+        .tool-table th.sort-asc::after  { content: '▲'; opacity: 0.9; }
+        .tool-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
+
+        /* ---- Pagination (orange arrows via btn-outline-secondary in style.css) ---- */
+        .pagination-controls { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; margin-top: 0.5rem; border-top: 1px solid #eee; font-size: 0.85rem; }
+        .pagination-controls select { font-size: 0.85rem; width: auto; }
+        .pagination-controls .page-info { color: #636e72; }
+        .pagination-controls .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+
+        /* ---- Status / progress area (green bar + Cancel) ---- */
+        .progress-area { background: #ffffff; border-radius: 8px; padding: 1rem; min-height: 60px; }
+
+        .filter-row { background: #ffffff; border-radius: 8px; padding: 0.75rem; margin-bottom: 1rem; }
+        .filter-row select, .filter-row input { font-size: 0.9rem; }
+
+        /* ---- Stat tiles (same vocabulary as Redirect Tool / DMA+) ---- */
+        .stat-box { text-align: center; padding: 12px; border-radius: 8px; background: #f8f9fa; border: 1px solid #e9ecef; }
+        .stat-box .num { font-size: 1.6rem; font-weight: 700; line-height: 1; }
+        .stat-box .label { font-size: 0.75rem; text-transform: uppercase; color: #6c757d; margin-top: 4px; }
+        .stat-box.accent  { background: #fff3cd; border-color: #ffeeba; }
+        .stat-box.success { background: #d1e7dd; border-color: #badbcc; }
+        .stat-box.danger  { background: #f8d7da; border-color: #f5c2c7; }
+        .stat-box.info    { background: #cff4fc; border-color: #b6effb; }
+
+        /* Row badges. Dark text on every warm fill — white on #fd7e14 is 2,57:1
+           (UI_BLUEPRINT §Labels), and these sit in the same row as each other. */
+        .badge-new      { background-color: #198754; color: #fff; }
+        .badge-attached { background-color: #ffc107; color: #000; }
+        .badge-auto     { background-color: #fd7e14; color: #000; cursor: help; }
+        .badge-del      { background-color: #dc3545; color: #fff; }
+
+        /* Was monospace; now only a smaller size, so the column matches its
+           neighbours (see the font-family rule above). */
+        .ts { font-size: 0.82rem; }
+        .facet-slug { font-size: 0.78rem; color: #6c757d; }
+        .maincat-row { cursor: pointer; }
+        .maincat-row.selected { background: #ede9f6 !important; }
+        .chg-cell { font-size: 0.78rem; max-width: 420px;
+                    word-break: break-word; color: #495057; }
+        .note { font-size: 0.82rem; color: #636e72; }
+
+        /* ---- Keep every value on ONE line, and scroll horizontally instead ----
+           Only the two summary tables. The Events table's "Gewijzigd" column holds
+           arbitrary old→new field values and genuinely needs to wrap, so forcing
+           nowrap there would push the table absurdly wide for no gain. */
+        .tbl-nowrap th, .tbl-nowrap td { white-space: nowrap; }
+        /* width:auto lets the table grow past the card so .tool-table-wrap's
+           overflow can actually scroll it. Bootstrap's .table sets width:100%,
+           which would instead squeeze the columns and re-introduce wrapping. */
+        .tbl-nowrap { width: auto; min-width: 100%; }
+
+        /* ---- Light-yellow explanation banner ----
+           Same fill as .stat-box.accent, with Bootstrap's alert-warning text colour
+           (#664d03 on #fff3cd ≈ 7:1). Never white or grey text on this fill —
+           UI_BLUEPRINT §Labels, and the 2,57:1 mistake of 2026-08-27. */
+        .info-banner {
+            background: #fff3cd; border: 1px solid #ffeeba; border-radius: 8px;
+            padding: 14px 18px; color: #664d03; font-size: 0.85rem;
+            line-height: 1.55; margin-bottom: 1rem;
+        }
+        .info-banner:last-child { margin-bottom: 0; }
+        .info-banner code { color: #664d03; background: rgba(0, 0, 0, 0.05);
+                            padding: 0 3px; border-radius: 3px; }
+        .info-banner strong { color: #533c02; }
+    </style>
+</head>
+<body>    <!-- ============================ SHARED NAVBAR ============================ -->
+    <!-- Keep identical across every tool page. Set the brand text; mark this
+         tool's link `active` and its group toggle `nav-dropdown-active`. -->
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Facet Watch</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
+                        <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/seo-titles.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 6h11"/><path d="M3 12h8"/><path d="M3 18h8"/><circle cx="18" cy="16" r="3"/><path d="m22 20-1.8-1.8"/></svg> SEO titles</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Redirects</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rurl-optimizer.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg> Auto-Redirects</a>
+                        <a href="/static/rfinder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg> R-Finder</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8L22 12L18 16"/><path d="M2 12h20"/><path d="M6 16L2 12L6 8"/></svg> Redirect Checker</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Redirect Generator</a>
+                        <a href="/static/redirect-tool.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 17V7a2 2 0 0 1 2-2h9"/><path d="M15 2l4 3-4 3"/><path d="M20 7v10a2 2 0 0 1-2 2H9"/><path d="M9 22l-4-3 4-3"/></svg> Redirect Tool</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
+                        <a href="/static/dma-exclusions.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg> DMA Exclusions</a>
+                        <a href="/static/dma-plus.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="10"/></svg> DMA+</a>
+                        <a href="/static/gsd-budgets.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 10h12"/><path d="M4 14h9"/><path d="M19 6a7.7 7.7 0 0 0-5.2-2C9.5 4 6 7.5 6 12s3.5 8 7.8 8c2 0 3.8-.8 5.2-2"/></svg> GSD Budgets</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
+                        <a href="/static/gsd-check.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> GSD Check</a>
+                        <a href="/static/gsd-tag-toppers.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l2.4 6.9H22l-6 4.4 2.3 7-6.3-4.6L5.7 20 8 13.3 2 8.9h7.6z"/></svg> GSD Tag Toppers</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
+                        <a href="/static/shop-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg> Shop-campaigns</a>
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/bothits.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg> Bothits</a>
+                        <a href="/static/dm-review.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3"/><path d="m7 21 5-6 5 6"/><path d="M12 15v6"/></svg> DM Review</a>
+                        <a href="/static/facet-watch.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> Facet Watch</a>
+                        <a href="/static/healthscore.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Healthscore</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
+                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/performance-standup.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg> Performance Standup</a>
+                        <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
+                        <a href="/static/seo-prio.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> SEO Priority</a>
+                        <a href="/static/seo-rulings.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10"/><path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/><path d="m21 11-8-8"/><path d="M4 22h12"/></svg> SEO Rulings</a>
+                        <a href="/static/seo-stats.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> SEO stats</a>
+                        <a href="/static/url-validator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg> URL Validator</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn" title="Apps" aria-label="Apps"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg></a>
+            </div>
+        </div>
+    </nav>
+    <!-- ===================== PAGE BODY ===================== -->
+    <div class="container mt-5 pb-5">
+        <div class="row">
+            <div class="col-md-10 mx-auto">
+
+                <!-- ---------------- Window + refresh ---------------- -->
+                <div class="card mb-4">
+                    <!-- Header carries the Refresh (UI_BLUEPRINT: "card-header of filterrij,
+                         rechts") and the rationale behind an info glyph. No inline
+                         background on .card-header — style.css forces grey with
+                         !important, so an inline colour there is dead CSS. -->
+                    <div class="card-header d-flex align-items-center gap-2">
+                        <h5 class="mb-0">Facetwijzigingen per main categorie
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px; margin-left: 4px;">
+                                <title>Uit de audit log van de Taxonomy API — één regel per mutatie, met tijdstip en wie het deed. Niet uit createdAt / updatedAt: dat zijn migratiebatch-stempels (1.478 van de 1.775 Parfumerie-facetwaarden staan op 2026-01-27), dus daarop sorteren geeft de batch en niet de wijziging.</title>
+                                <circle cx="8" cy="8" r="8" fill="#5e4a90"/>
+                                <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
+                                <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
+                            </svg>
+                        </h5>
+                        <button class="btn btn-sm btn-outline-purple ms-auto" onclick="loadAll()">↻ Refresh</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3 align-items-end">
+                            <div class="col-md-4">
+                                <label for="daysSel" class="form-label">Periode</label>
+                                <select class="form-select form-select-sm" id="daysSel" onchange="loadAll()">
+                                    <option value="1">Laatste 24 uur</option>
+                                    <option value="3" selected>Laatste 3 dagen</option>
+                                    <option value="7">Laatste 7 dagen</option>
+                                    <option value="30">Laatste 30 dagen</option>
+                                    <option value="90">Laatste 90 dagen</option>
+                                </select>
+                            </div>
+                            <div class="col-md-8 d-flex justify-content-end gap-2 align-items-end">
+                                <button class="btn btn-sm btn-outline-orange" onclick="exportCsv()">Export Excel</button>
+                                <button class="btn btn-sm btn-run" onclick="runIngest()" id="ingestBtn">Ophalen</button>
+                            </div>
+                        </div>
+
+                        <div class="progress-area mt-3" id="progressArea" style="display: none;">
+                            <div class="d-flex justify-content-between mb-1" style="font-size: 0.85rem;">
+                                <span id="progressText">Bezig…</span>
+                                <span id="progressPercent"></span>
+                            </div>
+                            <div class="progress" style="height: 22px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                     role="progressbar" id="progressBar"
+                                     style="width: 100%; background-color: #00b894;"></div>
+                            </div>
+                            <div class="mt-2">
+                                <button class="btn btn-sm btn-outline-red" id="cancelBtn" onclick="stopIngest()">Cancel</button>
+                            </div>
+                        </div>
+
+                        <div class="row g-2 mt-3" id="statRow"></div>
+                        <div id="storeNote" class="info-banner mt-3"></div>
+                    </div>
+                </div>
+
+                <!-- ---------------- Per main categorie ---------------- -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Per main categorie</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="info-banner">
+                            Klik een rij om de facetten eronder te filteren. Een facet hoort bij
+                            precies één main categorie — gemeten: 194 van de 194 gewone facetten
+                            hebben één <code>CategoryFacet</code>-rij en dus één maincat. De
+                            productlijn-familie is de uitzondering en heeft er <em>geen enkele</em>:
+                            die hangt via <code>value-dependencies</code> aan merk-waarden, en zijn
+                            maincats zijn die van zijn parent-Merk-facetten (elk daarvan hoort weer
+                            bij één maincat). Die familie wordt daarom altijd uitgefilterd
+                            <span id="autoHint"></span>, zodat de kolommen optellen tot het aantal
+                            events.
+                        </div>
+                        <div class="tool-table-wrap">
+                            <table class="table table-sm table-hover tool-table tbl-nowrap">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th class="sortable" onclick="sortOv('main_cat_name')">Main categorie</th>
+                                        <th class="sortable num-col" onclick="sortOv('events')">Events</th>
+                                        <th class="sortable num-col" onclick="sortOv('facets_touched')">Facetten</th>
+                                        <th class="sortable num-col" onclick="sortOv('facets_new')">Nieuw</th>
+                                        <th class="sortable num-col" onclick="sortOv('facets_attached')">Aangehangen</th>
+                                        <th class="sortable num-col" onclick="sortOv('values_added')">Waarden +</th>
+                                        <th class="sortable num-col" onclick="sortOv('values_deleted')">Waarden −</th>
+                                        <th class="sortable num-col" onclick="sortOv('updates')">Updates</th>
+                                        <th class="sortable" onclick="sortOv('last_change')">Laatste wijziging</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ovBody">
+                                    <tr><td colspan="9" class="text-center text-muted py-3">Nog geen data.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="unattributed" class="info-banner mt-3" style="display: none;"></div>
+                    </div>
+                </div>
+
+                <!-- ---------------- Facetten ---------------- -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Laatst aangemaakte / gewijzigde facetten</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="filter-row d-flex gap-2 align-items-center mb-3">
+                            <input type="text" class="form-control form-control-sm" id="facetFilter"
+                                   placeholder="Zoek facet…" oninput="renderFacets()" style="max-width: 250px;">
+                            <span class="note" id="facetScope"></span>
+                            <button class="btn btn-sm btn-outline-purple ms-auto" onclick="clearScope()">Alle categorieën</button>
+                        </div>
+                        <div class="tool-table-wrap">
+                            <table class="table table-sm table-hover tool-table tbl-nowrap">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th class="sortable" onclick="sortFc('last_change')">Laatste wijziging</th>
+                                        <th>Facet</th>
+                                        <th class="sortable" onclick="sortFc('main_cat_name')">Main categorie</th>
+                                        <th class="sortable num-col" onclick="sortFc('events')">Events</th>
+                                        <th class="sortable num-col" onclick="sortFc('values_added')">W +</th>
+                                        <th class="sortable num-col" onclick="sortFc('values_deleted')">W −</th>
+                                        <th class="sortable num-col" onclick="sortFc('updates')">Upd</th>
+                                        <th>Door</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="fcBody">
+                                    <tr><td colspan="9" class="text-center text-muted py-3">Nog geen data.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="pagination-controls" id="paginationControls">
+                            <span>Per pagina:</span>
+                            <select class="form-select form-select-sm" id="perPage" onchange="fcPage=1; renderFacets();">
+                                <option value="25" selected>25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                                <option value="all">Alles</option>
+                            </select>
+                            <button class="btn btn-outline-secondary btn-page" onclick="changeFcPage(-1)" id="prevBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+                            <span class="page-info" id="pageInfo">-</span>
+                            <button class="btn btn-outline-secondary btn-page" onclick="changeFcPage(1)" id="nextBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ---------------- Events ---------------- -->
+                <div class="card mb-4">
+                    <div class="card-header d-flex align-items-center gap-2">
+                        <h5 class="mb-0">Events</h5>
+                        <button class="btn btn-sm btn-outline-purple ms-auto" onclick="loadEvents()">↻ Refresh</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="filter-row d-flex gap-2 align-items-center mb-3 flex-wrap">
+                            <select class="form-select form-select-sm" id="evEntity" onchange="loadEvents()" style="max-width: 200px;">
+                                <option value="">Alle soorten</option>
+                                <option value="Facet">Facet</option>
+                                <option value="Facet Label">Facet Label</option>
+                                <option value="Facet Value">Facet Value</option>
+                                <option value="Facet Value Label">Facet Value Label</option>
+                                <option value="Category Facet">Category Facet</option>
+                                <option value="Category Facet Setting">Category Facet Setting</option>
+                            </select>
+                            <select class="form-select form-select-sm" id="evAction" onchange="loadEvents()" style="max-width: 150px;">
+                                <option value="">Alle acties</option>
+                                <option value="INSERT">INSERT</option>
+                                <option value="UPDATE">UPDATE</option>
+                                <option value="DELETE">DELETE</option>
+                            </select>
+                            <input type="text" class="form-control form-control-sm" id="evActor"
+                                   placeholder="Door (bv. SEO_JOEP)" onchange="loadEvents()" style="max-width: 200px;">
+                        </div>
+                        <div class="tool-table-wrap" style="max-height: 520px;">
+                            <table class="table table-sm table-hover tool-table">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Tijd (UTC)</th>
+                                        <th>Actie</th>
+                                        <th>Soort</th>
+                                        <th>Facet</th>
+                                        <th>Waarde</th>
+                                        <th>Main cat</th>
+                                        <th>Gewijzigd</th>
+                                        <th>Door</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="evBody">
+                                    <tr><td colspan="8" class="text-center text-muted py-3">Nog geen data.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <footer class="text-center py-4">
+                    <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
+                </footer>
+
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+    // ===================================================================
+    // Facet Watch — recently created/changed facets per main category.
+    // Data comes from /api/facet-watch/*, which reads the Taxonomy API audit log.
+    // ===================================================================
+    const API = '/api/facet-watch';
+
+    let ovRows = [], fcRows = [], scopeCat = null, scopeName = null;
+    let ovSort = { key: 'events', dir: -1 };
+    let fcSort = { key: 'last_change', dir: -1 };
+    let fcPage = 1;
+    let pollTimer = null;
+
+    function esc(s) {
+        if (s === null || s === undefined) return '';
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    const days = () => document.getElementById('daysSel').value;
+    // Always on. The checkbox is gone: a product-line facet has no CategoryFacet row,
+    // so it belongs to no main category of its own and only ever inflated the counts.
+    // #autoHint still reports how much is excluded — filtered, not hidden.
+    const EXCLUDE_AUTO = true;
+
+    // Postgres hands back naive timestamps that are Etc/UTC (see memory
+    // postgres_utc_timestamps_display) — without the 'Z' the browser reads them as
+    // local time and every stamp shifts by the CEST offset.
+    function fmtTs(s) {
+        if (!s) return '';
+        const d = new Date(String(s).replace(' ', 'T').replace(/(\.\d{3})\d*$/, '$1') + 'Z');
+        if (isNaN(d)) return esc(s);
+        return d.toLocaleString('nl-NL', { day: '2-digit', month: '2-digit',
+            hour: '2-digit', minute: '2-digit' });
+    }
+
+    // A 404 on /api/facet-watch/* means the router is not loaded: the backend runs
+    // without --reload, so a fresh deploy needs a kill + relaunch of uvicorn. Saying
+    // that beats "Kon niet starten", which is what a bare {"detail":"Not Found"}
+    // used to degrade into (it carries neither .success nor .message).
+    function apiError(status, body) {
+        if (status === 404) return 'De facet-watch API is niet geladen op deze server '
+            + '(HTTP 404). De backend draait zonder --reload, dus na een deploy moet '
+            + 'uvicorn herstart worden.';
+        return `HTTP ${status}${body ? ' — ' + String(body).slice(0, 200) : ''}`;
+    }
+
+    async function jget(path) {
+        const r = await fetch(path);
+        if (!r.ok) throw new Error(apiError(r.status, await r.text()));
+        return r.json();
+    }
+
+    // ---------------- load ----------------
+    async function loadAll() {
+        await Promise.all([loadOverview(), loadFacets(), loadEvents(), loadStatus()]);
+    }
+
+    async function loadStatus() {
+        try {
+            const s = await jget(`${API}/status`);
+            const st = s.store || {};
+            const last = (st.runs || [])[0];
+            document.getElementById('storeNote').innerHTML =
+                `<strong>Store:</strong> ${(st.events || 0).toLocaleString('nl-NL')} events `
+                + `(${(st.resolved || 0).toLocaleString('nl-NL')} toegewezen, `
+                + `${(st.unattributed || 0).toLocaleString('nl-NL')} niet) · `
+                + `${fmtTs(st.oldest)} – ${fmtTs(st.newest)} · caches: `
+                + `${(st.value_facet_cache || 0).toLocaleString('nl-NL')} waarden / `
+                + `${(st.facet_maincat_cache || 0).toLocaleString('nl-NL')} facetten`
+                + (last ? ` · laatste run ${fmtTs(last.finished_at || last.started_at)}: `
+                    + `${esc(last.status)} — ${esc(last.message || '')}` : '');
+        } catch (e) { /* status is decoration, never block the page on it */ }
+    }
+
+    async function loadOverview() {
+        const d = await jget(`${API}/overview?days=${days()}&exclude_auto=${EXCLUDE_AUTO}`);
+        ovRows = d.main_categories || [];
+        renderStats(d);
+        renderOverview();
+        const un = d.unattributed || [];
+        const unEl = document.getElementById('unattributed');
+        unEl.style.display = un.length ? '' : 'none';
+        unEl.innerHTML = un.length
+            ? '<strong>Niet aan een main categorie toe te wijzen:</strong> '
+              + un.map(u => `${u.events}× ${esc(u.entity_name)} ${esc(u.action)}`).join(', ')
+              + '. <em>Category Facet Setting UPDATE</em> draagt alleen een settings-rij-id en '
+              + 'het gewijzigde veld; de API kent geen lookup op dat id, dus deze events '
+              + 'worden apart gehouden in plaats van aan een categorie toegeschreven.'
+            : '';
+        const a = d.auto_excluded || {};
+        document.getElementById('autoHint').textContent = a.events
+            ? `(${a.events.toLocaleString('nl-NL')} events op ${a.facets} facetten in deze periode)` : '';
+    }
+
+    async function loadFacets() {
+        const q = scopeCat ? `&main_cat_id=${scopeCat}` : '';
+        fcRows = await jget(`${API}/facets?days=${days()}&limit=2000&exclude_auto=${EXCLUDE_AUTO}${q}`);
+        fcPage = 1;
+        renderFacets();
+        document.getElementById('facetScope').textContent = scopeCat
+            ? `gefilterd op ${scopeName}` : 'alle main categorieën';
+    }
+
+    async function loadEvents() {
+        const p = new URLSearchParams({ days: days(), limit: 400 });
+        if (scopeCat) p.set('main_cat_id', scopeCat);
+        const ent = document.getElementById('evEntity').value;
+        const act = document.getElementById('evAction').value;
+        const who = document.getElementById('evActor').value.trim();
+        if (ent) p.set('entity_name', ent);
+        if (act) p.set('action', act);
+        if (who) p.set('actor', who);
+        const rows = await jget(`${API}/events?${p}`);
+        const b = document.getElementById('evBody');
+        if (!rows.length) {
+            b.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Geen events.</td></tr>';
+            return;
+        }
+        b.innerHTML = rows.map(r => {
+            const badge = r.action === 'INSERT' ? 'badge-new'
+                : r.action === 'DELETE' ? 'badge-del' : 'badge-attached';
+            const chg = r.changed_fields && r.changed_fields.length
+                ? r.changed_fields.map(f => {
+                    const v = (r.changes || {})[f];
+                    if (v && typeof v === 'object' && ('Old' in v || 'New' in v))
+                        return `${f}: ${esc(String(v.Old).slice(0, 40))} → ${esc(String(v.New).slice(0, 40))}`;
+                    return `${f}: ${esc(String(v).slice(0, 40))}`;
+                }).join('<br>') : '';
+            return `<tr>
+                <td class="ts">${fmtTs(r.ts_utc)}</td>
+                <td><span class="badge ${badge}">${esc(r.action)}</span></td>
+                <td>${esc(r.entity_name)}</td>
+                <td>${esc(r.facet_name || '')} ${r.facet_id ? `<span class="facet-slug">${r.facet_id}</span>` : ''}</td>
+                <td>${esc(r.value_name || '')}</td>
+                <td class="note">${esc((r.main_cat_names || []).join(', '))}</td>
+                <td class="chg-cell">${chg}</td>
+                <td class="note">${esc(r.actor || '')}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    // ---------------- render ----------------
+    function renderStats(d) {
+        const t = (k) => ovRows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+        const tiles = [
+            ['events', 'Events', ''],
+            ['facets_touched', 'Facetten geraakt', 'info'],
+            ['facets_new', 'Nieuwe facetten', 'success'],
+            ['facets_attached', 'Aangehangen', 'accent'],
+            ['values_added', 'Waarden toegevoegd', 'success'],
+            ['values_deleted', 'Waarden verwijderd', 'danger'],
+        ];
+        document.getElementById('statRow').innerHTML = tiles.map(([k, label, cls]) =>
+            `<div class="col"><div class="stat-box ${cls}">
+                <div class="num">${t(k).toLocaleString('nl-NL')}</div>
+                <div class="label">${label}</div>
+             </div></div>`).join('');
+    }
+
+    function sortRows(rows, s) {
+        return rows.slice().sort((a, b) => {
+            let x = a[s.key], y = b[s.key];
+            if (x === null || x === undefined) x = '';
+            if (y === null || y === undefined) y = '';
+            if (typeof x === 'number' && typeof y === 'number') return (x - y) * s.dir;
+            return String(x).localeCompare(String(y)) * s.dir;
+        });
+    }
+    function sortOv(k) { ovSort = { key: k, dir: ovSort.key === k ? -ovSort.dir : -1 }; renderOverview(); }
+    function sortFc(k) { fcSort = { key: k, dir: fcSort.key === k ? -fcSort.dir : -1 }; renderFacets(); }
+
+    function renderOverview() {
+        const b = document.getElementById('ovBody');
+        if (!ovRows.length) {
+            b.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-3">Geen wijzigingen in deze periode.</td></tr>';
+            return;
+        }
+        b.innerHTML = sortRows(ovRows, ovSort).map(r => `
+            <tr class="maincat-row ${scopeCat === r.main_cat_id ? 'selected' : ''}"
+                onclick="setScope(${r.main_cat_id}, '${esc(r.main_cat_name).replace(/'/g, "\\'")}')">
+                <td>${esc(r.main_cat_name)} <span class="facet-slug">${r.main_cat_id}</span></td>
+                <td class="num-col">${r.events}</td>
+                <td class="num-col">${r.facets_touched}</td>
+                <td class="num-col">${r.facets_new ? `<span class="badge badge-new">${r.facets_new}</span>` : '0'}</td>
+                <td class="num-col">${r.facets_attached ? `<span class="badge badge-attached">${r.facets_attached}</span>` : '0'}</td>
+                <td class="num-col">${r.values_added}</td>
+                <td class="num-col">${r.values_deleted}</td>
+                <td class="num-col">${r.updates}</td>
+                <td class="ts">${fmtTs(r.last_change)}</td>
+            </tr>`).join('');
+    }
+
+    function renderFacets() {
+        const q = document.getElementById('facetFilter').value.toLowerCase();
+        let rows = fcRows.filter(r => !q
+            || (r.facet_name || '').toLowerCase().includes(q)
+            || (r.facet_slug || '').toLowerCase().includes(q)
+            || String(r.facet_id).includes(q)
+            || (r.main_cat_name || '').toLowerCase().includes(q));
+        rows = sortRows(rows, fcSort);
+
+        const per = document.getElementById('perPage').value;
+        const size = per === 'all' ? rows.length || 1 : parseInt(per, 10);
+        const pages = Math.max(1, Math.ceil(rows.length / size));
+        if (fcPage > pages) fcPage = pages;
+        const page = rows.slice((fcPage - 1) * size, fcPage * size);
+
+        const b = document.getElementById('fcBody');
+        b.innerHTML = page.length ? page.map(r => {
+            const badges = [];
+            if (r.is_new_facet) badges.push('<span class="badge badge-new">nieuw facet</span>');
+            if (r.newly_attached) badges.push('<span class="badge badge-attached">aangehangen</span>');
+            if (r.is_auto) badges.push('<span class="badge badge-auto" title="Automatisch aangemaakt productlijn-facet">auto</span>');
+            return `<tr>
+                <td class="ts">${fmtTs(r.last_change)}</td>
+                <td><strong>${esc(r.facet_name || '?')}</strong>
+                    <span class="facet-slug">${esc(r.facet_slug || '')} · ${r.facet_id}</span></td>
+                <td>${esc(r.main_cat_name)}</td>
+                <td class="num-col">${r.events}</td>
+                <td class="num-col">${r.values_added}</td>
+                <td class="num-col">${r.values_deleted}</td>
+                <td class="num-col">${r.updates}</td>
+                <td class="note">${esc((r.actors || []).filter(Boolean).join(', '))}</td>
+                <td>${badges.join(' ')}</td>
+            </tr>`;
+        }).join('') : '<tr><td colspan="9" class="text-center text-muted py-3">Geen facetten.</td></tr>';
+
+        document.getElementById('pageInfo').textContent =
+            `${rows.length ? (fcPage - 1) * size + 1 : 0}–${Math.min(fcPage * size, rows.length)} van ${rows.length}`;
+        document.getElementById('prevBtn').disabled = fcPage <= 1;
+        document.getElementById('nextBtn').disabled = fcPage >= pages;
+    }
+    function changeFcPage(d) { fcPage += d; renderFacets(); }
+
+    function setScope(id, name) {
+        scopeCat = (scopeCat === id) ? null : id;
+        scopeName = scopeCat ? name : null;
+        renderOverview();
+        loadFacets();
+        loadEvents();
+    }
+    function clearScope() { scopeCat = null; scopeName = null; renderOverview(); loadFacets(); loadEvents(); }
+
+    // ---------------- ingest ----------------
+    async function runIngest() {
+        const btn = document.getElementById('ingestBtn');
+        btn.disabled = true;
+        document.getElementById('progressArea').style.display = 'block';
+        document.getElementById('progressText').textContent = 'Ingest gestart…';
+        try {
+            const r = await fetch(`${API}/ingest`, { method: 'POST' });
+            if (!r.ok) {
+                document.getElementById('progressText').textContent =
+                    apiError(r.status, await r.text());
+                btn.disabled = false;
+                return;
+            }
+            const d = await r.json();
+            if (!d.success) {
+                // A real refusal from the service (e.g. an ingest already running)
+                // always carries .message; fall back only if it somehow does not.
+                document.getElementById('progressText').textContent =
+                    d.message || 'De ingest is niet gestart en de server zei niet waarom.';
+                btn.disabled = false;
+                return;
+            }
+            pollIngest();
+        } catch (e) {
+            document.getElementById('progressText').textContent = 'Fout: ' + e.message;
+            btn.disabled = false;
+        }
+    }
+
+    async function stopIngest() {
+        try { await fetch(`${API}/stop`, { method: 'POST' }); } catch (e) {}
+    }
+
+    function pollIngest() {
+        clearInterval(pollTimer);
+        pollTimer = setInterval(async () => {
+            try {
+                const s = await jget(`${API}/status`);
+                const run = s.run || {};
+                document.getElementById('progressText').textContent =
+                    `${run.phase || run.status || ''} — ${(run.events_seen || 0).toLocaleString('nl-NL')} events gezien, `
+                    + `${(run.lookups || 0).toLocaleString('nl-NL')} api-lookups`;
+                if (run.status !== 'running') {
+                    clearInterval(pollTimer);
+                    document.getElementById('progressArea').style.display = 'none';
+                    document.getElementById('ingestBtn').disabled = false;
+                    loadAll();
+                }
+            } catch (e) { /* keep polling; a transient error is not a finished run */ }
+        }, 1500);
+    }
+
+    // ---------------- export ----------------
+    function exportCsv() {
+        const cols = ['last_change', 'facet_id', 'facet_name', 'facet_slug', 'main_cat_name',
+                      'events', 'values_added', 'values_deleted', 'updates',
+                      'is_new_facet', 'newly_attached', 'is_auto', 'actors'];
+        const head = cols.join(';');
+        const body = sortRows(fcRows, fcSort).map(r => cols.map(c => {
+            let v = r[c];
+            if (Array.isArray(v)) v = v.filter(Boolean).join(', ');
+            if (v === null || v === undefined) v = '';
+            return `"${String(v).replace(/"/g, '""')}"`;
+        }).join(';')).join('\n');
+        // ﻿ so Excel reads it as UTF-8 — without the BOM the accented main
+        // category names come out mojibake.
+        const blob = new Blob(['﻿' + head + '\n' + body], { type: 'text/csv;charset=utf-8;' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `facet-watch-${days()}d.csv`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+
+    document.addEventListener('DOMContentLoaded', loadAll);
+    </script>
+</body>
+</html>
