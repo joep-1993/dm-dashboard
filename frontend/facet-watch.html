@@ -6,39 +6,24 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
-        /* ---- Standard table look (matches "Campaigns created" in GSD Campaigns) ---- */
-        /* Bordered, rounded wrapper so the table sits INSIDE the card body. */
-        .tool-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; }
-        .tool-table { font-size: 0.9rem; margin-bottom: 0; }
-        /* Grey, sticky column headers. Header font is 1rem (slightly larger than body). */
-        .tool-table th {
-            background: #f8f9fa; white-space: nowrap;
-            position: sticky; top: 0; z-index: 1;
-            padding: 6px 14px; font-size: 1rem;
-        }
-        /* Cell padding MUST match the header's 6px 14px, otherwise every
-           left-aligned column sits 10px to the left of its own header — .table-sm
-           gives td only 0.25rem and the misalignment is subtle enough to read as
-           sloppiness rather than a bug. */
-        .tool-table td { vertical-align: middle; padding: 6px 14px; }
-        /* One font for every cell AND header. The timestamp columns used to be
-           monospace, which made one column visibly different from its neighbours.
-           Size and colour still carry hierarchy; the family does not. */
+        /* ---- Table ----
+           .tool-table-wrap / .tool-table / de sticky grijze kop / th.sortable-glyphs /
+           .col-center komen ALLE uit css/style.css (daar sinds 2026-08-14). Een nieuwe
+           tabel krijgt die opmaak gratis; het template-blok hier kopiëren zou deze
+           pagina de twaalfde maken met een eigen variant, en dat samenvoegen staat al
+           als open taak in cc1/TASKS.md. Alleen wat pagina-eigen is staat hieronder.
+
+           De cel-padding hoort er wél bij te staan: style.css geeft `td` alleen
+           vertical-align, en Bootstraps .table-sm zet de horizontale padding op 4px
+           tegen 14px in de kop — waardoor elke links uitgelijnde kolom 10px naast zijn
+           eigen kop staat (de Healthscore-val van 2026-08-19). UI_BLUEPRINT houdt die
+           fix bewust per pagina, omdat bredere cellen elke tabel in de app tegelijk
+           verschuiven. */
+        .tool-table td { padding: 6px 14px; }
+        /* Eén font voor kop en cel. De tijdstempelkolommen waren monospace, waardoor
+           één kolom zichtbaar afweek van zijn buren; grootte en kleur dragen de
+           hiërarchie, de familie niet. */
         .tool-table th, .tool-table td { font-family: inherit; }
-        /* Centred numeric columns. Applied to th AND td via the same class so the
-           header can never drift away from its own values. Named num-col, not num:
-           .stat-box .num already means "the big number on a tile" in this file. */
-        .tool-table th.num-col, .tool-table td.num-col { text-align: center; }
-        /* Clickable / sortable headers with the ⇅ / ▲ / ▼ affordance. */
-        /* Geen position:relative: de basisregel hierboven zet position:sticky en een
-           specifiekere position overschrijft dat, waardoor sorteerbare headers niet
-           meer meescrollen (gevonden in Bot Hits, 2026-08-11). Het ::after-glyph
-           heeft een positioned ancestor nodig en sticky is dat al. */
-        .tool-table th.sortable { cursor: pointer; user-select: none; padding-right: 1.2rem; }
-        .tool-table th.sortable:hover { background: #e9ecef; }
-        .tool-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
-        .tool-table th.sort-asc::after  { content: '▲'; opacity: 0.9; }
-        .tool-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
 
         /* ---- Pagination (orange arrows via btn-outline-secondary in style.css) ---- */
         .pagination-controls { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; margin-top: 0.5rem; border-top: 1px solid #eee; font-size: 0.85rem; }
@@ -88,19 +73,16 @@
            which would instead squeeze the columns and re-introduce wrapping. */
         .tbl-nowrap { width: auto; min-width: 100%; }
 
-        /* ---- Light-yellow explanation banner ----
-           Same fill as .stat-box.accent, with Bootstrap's alert-warning text colour
-           (#664d03 on #fff3cd ≈ 7:1). Never white or grey text on this fill —
-           UI_BLUEPRINT §Labels, and the 2,57:1 mistake of 2026-08-27. */
-        .info-banner {
-            background: #fff3cd; border: 1px solid #ffeeba; border-radius: 8px;
-            padding: 14px 18px; color: #664d03; font-size: 0.85rem;
-            line-height: 1.55; margin-bottom: 1rem;
-        }
-        .info-banner:last-child { margin-bottom: 0; }
-        .info-banner code { color: #664d03; background: rgba(0, 0, 0, 0.05);
-                            padding: 0 3px; border-radius: 3px; }
-        .info-banner strong { color: #533c02; }
+        /* ---- Explanation banners ----
+           The FILL, BORDER and TEXT colour all come from the shared `.info-note` in
+           css/style.css (#fff8ed / #f0d9b5 / #8a5a00). UI_BLUEPRINT §"Info banners"
+           is explicit that this class is declared once and never re-declared per
+           page — it had been duplicated verbatim into seo-stats / healthscore /
+           shop-campaigns before someone consolidated it. This page only adds
+           breathing room on top, which is a per-page choice and not a re-theme. */
+        .info-note.roomy { padding: 14px 18px; line-height: 1.55; }
+        .info-note code { color: inherit; background: rgba(0, 0, 0, 0.05);
+                          padding: 0 3px; border-radius: 3px; }
     </style>
 </head>
 <body>    <!-- ============================ SHARED NAVBAR ============================ -->
@@ -223,7 +205,7 @@
                         </div>
 
                         <div class="row g-2 mt-3" id="statRow"></div>
-                        <div id="storeNote" class="info-banner mt-3"></div>
+                        <div id="storeNote" class="info-note roomy mt-3"></div>
                     </div>
                 </div>
 
@@ -233,7 +215,7 @@
                         <h5 class="mb-0">Per main categorie</h5>
                     </div>
                     <div class="card-body">
-                        <div class="info-banner">
+                        <div class="info-note roomy">
                             Klik een rij om de facetten eronder te filteren. Een facet hoort bij
                             precies één main categorie — gemeten: 194 van de 194 gewone facetten
                             hebben één <code>CategoryFacet</code>-rij en dus één maincat. De
@@ -249,13 +231,13 @@
                                 <thead class="table-light">
                                     <tr>
                                         <th class="sortable" onclick="sortOv('main_cat_name')">Main categorie</th>
-                                        <th class="sortable num-col" onclick="sortOv('events')">Events</th>
-                                        <th class="sortable num-col" onclick="sortOv('facets_touched')">Facetten</th>
-                                        <th class="sortable num-col" onclick="sortOv('facets_new')">Nieuw</th>
-                                        <th class="sortable num-col" onclick="sortOv('facets_attached')">Aangehangen</th>
-                                        <th class="sortable num-col" onclick="sortOv('values_added')">Waarden +</th>
-                                        <th class="sortable num-col" onclick="sortOv('values_deleted')">Waarden −</th>
-                                        <th class="sortable num-col" onclick="sortOv('updates')">Updates</th>
+                                        <th class="sortable col-center" onclick="sortOv('events')">Events</th>
+                                        <th class="sortable col-center" onclick="sortOv('facets_touched')">Facetten</th>
+                                        <th class="sortable col-center" onclick="sortOv('facets_new')">Nieuw</th>
+                                        <th class="sortable col-center" onclick="sortOv('facets_attached')">Aangehangen</th>
+                                        <th class="sortable col-center" onclick="sortOv('values_added')">Waarden +</th>
+                                        <th class="sortable col-center" onclick="sortOv('values_deleted')">Waarden −</th>
+                                        <th class="sortable col-center" onclick="sortOv('updates')">Updates</th>
                                         <th class="sortable" onclick="sortOv('last_change')">Laatste wijziging</th>
                                     </tr>
                                 </thead>
@@ -264,7 +246,7 @@
                                 </tbody>
                             </table>
                         </div>
-                        <div id="unattributed" class="info-banner mt-3" style="display: none;"></div>
+                        <div id="unattributed" class="info-note roomy mt-3" style="display: none;"></div>
                     </div>
                 </div>
 
@@ -287,10 +269,10 @@
                                         <th class="sortable" onclick="sortFc('last_change')">Laatste wijziging</th>
                                         <th>Facet</th>
                                         <th class="sortable" onclick="sortFc('main_cat_name')">Main categorie</th>
-                                        <th class="sortable num-col" onclick="sortFc('events')">Events</th>
-                                        <th class="sortable num-col" onclick="sortFc('values_added')">W +</th>
-                                        <th class="sortable num-col" onclick="sortFc('values_deleted')">W −</th>
-                                        <th class="sortable num-col" onclick="sortFc('updates')">Upd</th>
+                                        <th class="sortable col-center" onclick="sortFc('events')">Events</th>
+                                        <th class="sortable col-center" onclick="sortFc('values_added')">W +</th>
+                                        <th class="sortable col-center" onclick="sortFc('values_deleted')">W −</th>
+                                        <th class="sortable col-center" onclick="sortFc('updates')">Upd</th>
                                         <th>Door</th>
                                         <th></th>
                                     </tr>
@@ -553,13 +535,13 @@
             <tr class="maincat-row ${scopeCat === r.main_cat_id ? 'selected' : ''}"
                 onclick="setScope(${r.main_cat_id}, '${esc(r.main_cat_name).replace(/'/g, "\\'")}')">
                 <td>${esc(r.main_cat_name)} <span class="facet-slug">${r.main_cat_id}</span></td>
-                <td class="num-col">${r.events}</td>
-                <td class="num-col">${r.facets_touched}</td>
-                <td class="num-col">${r.facets_new ? `<span class="badge badge-new">${r.facets_new}</span>` : '0'}</td>
-                <td class="num-col">${r.facets_attached ? `<span class="badge badge-attached">${r.facets_attached}</span>` : '0'}</td>
-                <td class="num-col">${r.values_added}</td>
-                <td class="num-col">${r.values_deleted}</td>
-                <td class="num-col">${r.updates}</td>
+                <td class="col-center">${r.events}</td>
+                <td class="col-center">${r.facets_touched}</td>
+                <td class="col-center">${r.facets_new ? `<span class="badge badge-new">${r.facets_new}</span>` : '0'}</td>
+                <td class="col-center">${r.facets_attached ? `<span class="badge badge-attached">${r.facets_attached}</span>` : '0'}</td>
+                <td class="col-center">${r.values_added}</td>
+                <td class="col-center">${r.values_deleted}</td>
+                <td class="col-center">${r.updates}</td>
                 <td class="ts">${fmtTs(r.last_change)}</td>
             </tr>`).join('');
     }
@@ -590,10 +572,10 @@
                 <td><strong>${esc(r.facet_name || '?')}</strong>
                     <span class="facet-slug">${esc(r.facet_slug || '')} · ${r.facet_id}</span></td>
                 <td>${esc(r.main_cat_name)}</td>
-                <td class="num-col">${r.events}</td>
-                <td class="num-col">${r.values_added}</td>
-                <td class="num-col">${r.values_deleted}</td>
-                <td class="num-col">${r.updates}</td>
+                <td class="col-center">${r.events}</td>
+                <td class="col-center">${r.values_added}</td>
+                <td class="col-center">${r.values_deleted}</td>
+                <td class="col-center">${r.updates}</td>
                 <td class="note">${esc((r.actors || []).filter(Boolean).join(', '))}</td>
                 <td>${badges.join(' ')}</td>
             </tr>`;
