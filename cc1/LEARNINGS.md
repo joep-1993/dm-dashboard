@@ -1,6 +1,93 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Het kanaalrapport meet stickers, niet verkeer — twee aff-903-breuken in één week (2026-08-28, Redshift/SEO-analyse)
+
+Joep vroeg wat er met DMA organic (`aff_id=903`) gebeurde en of er een Google-update achter zat.
+Nee: **twee losse interne attributiebreuken**, en er is geen verkeer verdwenen. Uitwerking als
+artifact gepubliceerd: `Twee breuken in aff 903`,
+https://claude.ai/code/artifact/55f9f202-d68c-4329-b70b-a62d67d3ec25 — met de vier grafieken,
+de bewijsstukken per incident en de cijferbijlage.
+
+### `aff_id = 0` is de lege waarde, en juist die heet in het rapport SEO
+
+Dat `marketing_channel` een pure functie is van (`aff_id`, `channel_id`) via
+`chan_deriv.ref_channel_derivation_stats` stond al vast (memory `redshift_channel_derivation`):
+de URL en zijn utm-parameters spelen er geen rol in. Wat deze sessie daaraan toevoegt is het
+gevolg dat de hele diagnose draagt:
+
+**`aff_id = 0` betekent niet "SEO", het betekent "er hangt geen affiliate aan deze visit" — en
+juist die lege default krijgt in de opzoektabel het label SEO.** SEO is dus de emmer waar alles
+in valt wat geen sticker kreeg. Elke storing in de toekenningslogica loopt daarom automatisch
+leeg in SEO, en nooit de andere kant op. Dat verklaart in één keer waarom SEO er bij een
+taggingprobleem altijd te goed uitziet, en waarom je bij een kanaalsprong eerst naar de tag
+moet kijken en niet naar de performance.
+
+Praktisch: het kanaalrapport is een rapport over labels. Het verkeer kan volledig intact zijn
+terwijl het rapport 90% wegvalt. Wil je in zo'n periode echte cijfers, tel dan op de slice
+`type_url` + `referer_source` en negeer `marketing_channel`.
+
+### 25 aug: de piek naar 6.319 is PLA-verkeer met de verkeerde sticker
+
+Basislijn 14–24 aug is 1.790/dag (1.541–2.033). Vier onafhankelijke signalen:
+
+- **Uurpatroon**: normaal tot 08:00, dan 09:00–15:00 op 629–754/uur (normaal 100–150), 16:00 al
+  gehalveerd (329), 17:00 weer gewoon (121). Een burst van zeven kantooruren.
+- **Land**: BE 4.578 tegen een basislijn van ~225; NL vlak (1.672 tegen 1.771 op 24 aug).
+- **Tag**: 4.369 van de 6.319 visits dragen `utm_campaign=PLA/…` (Amazon bestsellers BE, APlus,
+  Schoonmaak_a). Op 20–24 en 27 aug is dat 0–1.
+- **Tegenboeking**: `aff907/ch1` verloor exact 12.926 → 6.535 = −6.391.
+
+De ongetagde rest was 1.950 — volkomen normaal. Er is met DMA organic niets gebeurd.
+
+### 27 aug: de val naar 173 is een server-side hertagging naar aff 0
+
+- **Uurpatroon**: uren 0–2 nog normaal (65 visits tegen 66 op 26 aug), vanaf ~03:00 vrijwel nul.
+  Harde stop op een rond uur, geen glijdende lijn.
+- **Verhuizing**: op de slice `type_url='PLP' AND referer_source='Google'` zakt aff 903 van 1.911
+  (24 aug) via 1.476 (26 aug) naar 138 (27 aug), terwijl `aff0/ch4` van 2.447 naar 3.874 gaat.
+  De som van beide blijft 4.358 → 4.437 → 4.012.
+- **URL-niveau**: dezelfde parameterloze product-URL's staan op 24 aug onder aff 903 en op 27 aug
+  onder aff 0 (o.a. `/p/easee-charge-max-laadpaal…/7090052312087/`, 7× → 8×). Geen
+  URL-wijziging, dus de toekenning gebeurt server-side en dáár zit de breuk.
+- **Afbakening**: alleen productpagina's. C-url en R-url staan op 27 aug op 7 en 3 aff-903-visits,
+  precies als elke andere dag.
+
+### Waarom dit geen Google-update kan zijn
+
+Vier redenen, drie uit onze eigen data: (1) een update raakt rankings, niet één `aff_id` — C-url
+en R-url leverden op 27 aug samen 42.614 SEO-visits, volledig binnen bandbreedte; (2) een schone
+breuk om 03:00 is geen algoritme, dat rolt uit over dagen; (3) het verkeer is er nog, alleen
+anders getagd. En (4): er ís geen update in dit venster. Laatste bevestigde ranking-change is de
+*June 2026 spam update* (24–26 juni); onbevestigde volatiliteit rond 1–6 augustus, niets rond
+24–27 augustus.
+
+### Playbook bij een kanaalsprong — drie checks vóór je een performanceverhaal bouwt
+
+1. **Trek het uurpatroon.** Een burst in kantooruren of een stop op een rond uur is nooit
+   vraagontwikkeling.
+2. **Zet `utm_campaign` per kanaal per dag naast elkaar.** Dat legt misattributie in één tabel
+   bloot.
+3. **Tel alle aff/ch-combinaties op dezelfde `type_url` + `referer_source`-slice.** Zo zie je of
+   het verkeer verhuisd is in plaats van verdwenen.
+
+### Gevolg voor de eerdere SEO-analyse van 24 aug
+
+De SEO-PLP van 26–27 aug is opgeblazen met ~1.400–2.000 visits/dag. Daardoor is de echte
+SEO-daling **−9,8%** in plaats van −9,0% en de PLP **−5,8%** in plaats van −0,8%. R-url en C-url
+zijn niet geraakt. De echte stap-terug van 24 aug blijft een R-url-klikverlies bij intacte
+GSC-zichtbaarheid — een ander dossier.
+
+### Kolommen en verse-dag-gedrag van dim_visit
+
+- Het uur zit op **`dv.intime`** (`date_part(hour, dv.intime)`); land op `dv.country_code`
+  ('NL'/'BE', losstaand van de numerieke `domain`-codes). Er is geen `hour`-kolom.
+- **De visit-grain loopt ~een dag achter.** Op 28-08 om 17:00 was de hoogste `intime`
+  27-08 23:59:59, geladen om 03:33 die ochtend — geen enkele rij voor 28-08. Een "is het vandaag
+  al terug?"-vraag kan dus pas na de volgende load. Andere aard dan
+  `standup_fresh_day_incomplete` (dat gaat over een dag die er wél is maar half gevuld).
+- `tag` is een reserved word in Redshift.
+
 ## Een facet hoort bij één maincat, behalve de familie die aan geen enkele categorie hangt (2026-08-28, Facet Watch)
 
 Nieuwe tool `Facet Watch` (commit `022ac44`): laatst aangemaakte/gewijzigde facetten per main

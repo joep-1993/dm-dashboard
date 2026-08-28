@@ -4,6 +4,46 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-28 — DMA organic (aff 903): twee attributiebreuken, geen Google-update
+
+Vraag van Joep. Uitwerking in LEARNINGS (zelfde datum, "Het kanaalrapport meet stickers, niet
+verkeer"). Analyse als artifact:
+https://claude.ai/code/artifact/55f9f202-d68c-4329-b70b-a62d67d3ec25
+
+Gedaan:
+
+- [x] **Beide anomalieën verklaard en apart gehouden**: 25 aug (6.319, PLA-misattributie vanuit
+      `aff907`) en 27 aug (173, server-side hertagging naar `aff0/ch4`). Twee oorzaken, niet één
+      verhaal.
+- [x] **Google-kant uitgesloten**: geen bevestigde update in het venster 24–27 aug; laatste is de
+      *June 2026 spam update* (24–26 juni), onbevestigde volatiliteit rond 1–6 aug.
+- [x] **Cijfers vers gecontroleerd** (niet uit memory overgenomen): daglijnen 14–27 aug, uurlijnen
+      24/25/26/27 aug, land- en PLA-split, de PLP+Google-slice, en de tegenboeking op `aff907`
+      (12.926 → 6.535 = −6.391).
+- [x] **SEO-correctie doorgerekend**: 26–27 aug is opgeblazen, dus −9,8% i.p.v. −9,0% totaal en
+      −5,8% i.p.v. −0,8% op de PLP.
+- [x] **Artifact gepubliceerd** met vier grafieken (dagbeeld, uurpatroon 25 aug, de kruising op de
+      PLP-slice, de harde stop op 27 aug), bewijsstukken per incident, playbook en cijferbijlage.
+      Palet gevalideerd met de dataviz-validator in light én dark.
+
+Open:
+
+- [ ] **Ticket naar de eigenaar van de aff-toekenning.** De hertagging van productpagina's naar
+      `aff0/ch4` zit server-side — de URL's zijn onveranderd, dus het zit in de toekenningslogica
+      en niet in de links. Op de laatst beschikbare dag (27-08) nog niet hersteld.
+      #priority:high
+- [ ] **Controleer of aff 903 terug is.** Kon op 28-08 niet: de visit-grain in `dim_visit` liep
+      een dag achter (hoogste `intime` 27-08 23:59:59). Check na de volgende load, op de slice
+      `type_url='PLP' AND referer_source='Google'` met alle aff/ch-combinaties naast elkaar.
+      #priority:high
+- [ ] **DMA paid daalt óók, en niet door deze misattributie.** Totaal DMA paid: woensdag 19 aug
+      69.822 → woensdag 26 aug 51.525 visits (−26%). Alleen NL (`aff906`): 57.260 op 24 aug →
+      39.713 op 27 aug. Los signaal, verdient een eigen analyse. #priority:medium
+- [ ] **Rapportages die op `marketing_channel` leunen zijn vervuild** zolang de hertagging loopt:
+      SEO ~1.400–2.000 visits/dag te hoog, DMA organic even veel te laag. Raakt de standup en de
+      SEO-stats-tool. Overweeg een waarschuwing in die tools zolang dit open staat.
+      #priority:medium
+
 ### 2026-08-28 — Facet Watch: nieuwe tool voor facetwijzigingen per main categorie
 
 Opdracht van Joep op basis van `suggestions_new.txt`. Uitwerking in LEARNINGS (zelfde datum,
