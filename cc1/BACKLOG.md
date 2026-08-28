@@ -500,6 +500,14 @@ URL opvraagt, want één browsercheck zet een 200 in CloudFront voor >1u en een 
 - [ ] Create utility to split large Excel files into processable chunks (10k-50k rows)
 - [ ] Add comprehensive error handling for Google Ads API failures
 - [x] Add error handling to Thema Ads frontend ✅ #completed:2025-10-02
+- [ ] **`suggestions_new.txt` is naslag onder een backlog-naam** (gelogd 2026-08-28, commit `f0cee11`).
+      De 40 Bothits- en UI-punten die erin stonden zijn allemaal verwerkt; wat er nu in staat is een
+      document over de routes waarlangs afnemers van taxonomy-data nieuwe of gewijzigde facetten en
+      facetwaarden ophalen — zes opties van `GET /api/audit-logs` (seconden) tot Redshift
+      `hda.product_taxonomy_*` (T+1), met latency en valkuil per route, geverifieerd tegen productie op
+      2026-08-20. Dat is referentiemateriaal en hoort in `cc1/` of bij de Taxonomy-API-documentatie, niet
+      in een bestand dat "suggestions" heet — zeker niet naast `suggestions.txt`, dat wél een backlog is.
+      Verplaatsen zodra Joep zegt waar het thuishoort.
 
 ## Ideas Parking Lot
 _Capture ideas for future consideration_

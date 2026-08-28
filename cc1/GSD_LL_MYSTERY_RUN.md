@@ -54,7 +54,7 @@ An automated server-side caller (`94.142.210.226`) POSTs `/ll/run` (dry_run=fals
 
 ## Open questions / next steps
 
-1. **Identify `94.142.210.226`** (reverse DNS from a box with a resolver, or ask infra) — this is the single most actionable lead.
+1. ~~**Identify `94.142.210.226`**~~ — **BEANTWOORD in de RESOLUTION bovenaan**: het is de Beslist office/VPN NAT-egress, dus een MENS in de browser en geen server-side caller. RDAP-bevestiging (2026-08-28): `94.142.210.224 - 94.142.210.231` (/29), netname `NL-BBAH-BESLIST`, remark "Beslist", land NL, registrant `BREEDBAND-MNT`, **geen PTR** — dus reverse-DNS levert hier per definitie niets op en RDAP is de enige weg. `PROJECT_INDEX.md` noteert hetzelfde vanuit een andere hoek (de scraper-whitelist: de company-VPN routeert via dit IP). Wat nog wél open is, staat in de RESOLUTION: wie er op Apply klikte — een gedeeld egress-IP wijst een netwerk aan, geen persoon.
 2. From `service.log`: were the 31 `/ll/run` calls at ~09:50 and daily? What date is line 18574268 (when it left 3003)? dry_run true/false split?
 3. Check l.davidowski's **Windows Task Scheduler** for any `DM-Dashboard-*` or hand-made task POSTing `/ll/run` (invisible from WSL).
 4. Watch tomorrow (09:50) now the zombies are dead — does it stop, or land on another live port?

@@ -1,6 +1,72 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## IP → locatie: de eigenaar is autoritatief, de stad is een gok (2026-08-28, vraag van Joep)
+
+Vraag: kun je op basis van een IP-adres een locatie achterhalen? Ja, maar het is een **opzoeking
+in een database en geen meting**, en de precisie verschilt per niveau zo sterk dat "locatie" als
+één begrip misleidend is.
+
+| niveau | betrouwbaarheid | bruikbaar voor |
+|---|---|---|
+| land | ~99% | rapportage, NL/BE-splits |
+| eigenaar van het blok (RDAP/whois) + ASN | **autoritatief** — registratie, geen schatting | wie is dit, datacenter of consument |
+| provincie/stad | ~50-75%, systematisch fout bij mobiel, VPN en datacenters | hooguit indicatief |
+| postcode/straat | fictie | niets |
+
+De vuistregel: **de eigenaar van het blok achterhalen werkt bijna altijd, de plek op de kaart is
+een gok.** Bij een datacenter-IP wijst "locatie" naar het rekencentrum of naar het
+registratieadres van de provider, niet naar wie erachter zit.
+
+### Onze CloudFront-logs hebben geen landveld
+
+Nagekeken op de ruwe log van 2026-08-12: de distributie schrijft **33 velden** en `c-country`
+zit er niet bij. Wat er wél is, is `x-edge-location` — en dat is de CloudFront-POP die de request
+afhandelde, dus een **routeringsartefact en geen bezoekerslocatie**. Over 40 bestanden van die dag
+staat ORD56 (Chicago) bovenaan, met WAW51 en IAD55 erachter en AMS58 pas op plek vijf. Dat zegt
+alleen dat de crawlers uit Amerikaanse datacenters komen. Wie een landsplitsing wil voor échte
+bezoekers gebruikt `dim_visit.country_code` — zie ook [[dim_visit_domain_null_gap]] over die
+kolom naast `domain`.
+
+### Gereedschap: geen whois, geen dig, geen geoip in deze WSL
+
+`whois`, `dig`, `geoiplookup` en `mmdblookup` zijn er geen van alle, en `geoip2` zit niet in de
+system-python. Wat wél werkt en geen key nodig heeft:
+
+- **RDAP** via `curl https://rdap.db.ripe.net/ip/<ip>` → JSON met range, netname, land en de
+  geregistreerde entiteiten. Dit is de autoritatieve bron.
+- **Reverse-DNS** via `python3 -c "import socket; socket.gethostbyaddr('<ip>')"`.
+
+Voor bulk of stad-niveau zou MaxMind GeoLite2 lokaal moeten draaien (gratis account, `.mmdb` +
+`pip install geoip2`); dat houdt de IP's ook binnen. Voor **bots** is geo trouwens de verkeerde
+weg: `backend/bothits_verify.py` toetst al op de officieel gepubliceerde ranges van de operator,
+en dat is harder bewijs dan welke geo-database ook.
+
+### En de les die het echt kostte: een openstaand punt zonder vooruitwijzing wordt opnieuw gelopen
+
+Ik heb RDAP als voorbeeld losgelaten op `94.142.210.226` — het IP uit het punt "Next step:
+reverse-DNS / ask infra who this IP is" in de entry van 2026-07-21 hieronder. Uitkomst:
+
+```
+range      94.142.210.224 - 94.142.210.231   (/29)
+netname    NL-BBAH-BESLIST     remark: Beslist
+land       NL                  registrant: BREEDBAND-MNT
+PTR        geen
+```
+
+Een blok op naam van Beslist zelf. **Dat was al bekend**: de entry van 2026-07-22 noemt het de
+"Beslist office/VPN NAT egress" en `PROJECT_INDEX.md` schrijft letterlijk "company VPN routes
+through 94.142.210.226". De opzoeking bevestigt dus alleen wat er stond, met registratiebewijs
+erbij — nieuw is er niets.
+
+Waaróm ik hem toch deed, is het punt: de entry van 21 juli draagt zijn "next step" nog alsof die
+open is, en verwijst nergens naar de resolutie van één dag later. Wie chronologisch leest komt
+hem tegen en gaat opnieuw op pad. **Een openstaand punt dat later beantwoord is, moet een
+vooruitwijzing krijgen op de plek waar het gesteld werd** — een resolutie elders in het bestand
+is niet genoeg, want niemand leest 12.000 regels vooruit. Die pointer is nu toegevoegd.
+
+---
+
 ## Gelijktijdig is niet hetzelfde als oorzakelijk — drie keer op één dag (2026-08-28, SEO-trap 24 augustus + DMA organic)
 
 Joeps vraag was simpel: waar komt de SEO-daling van de afgelopen dagen vandaan, welke URL-typen,
@@ -12601,7 +12667,7 @@ _Last updated: 2026-02-03 (301 Generator, UI/UX improvements, navigation updates
 Follow-up on the 2026-07-20 entry above. Full write-up: **`cc1/GSD_LL_MYSTERY_RUN.md`**.
 
 - **Production box 3003 cleared.** `service.log` on `win-htz-006:3003` is a uvicorn **access log** (logs every HTTP request regardless of Python log level) → **0× `/ll/run` and 0× `/ll/apply`** in the 09:50 window. The real daily mutations do **not** go through 3003. They ran on a non-3003 (laptop/zombie) instance — ports 8003/8098/8099 were alive at 09:50 and killed ~10:36.
-- **Caller identified as an IP, not yet a host.** 31 historical `POST /ll/run` on 3003 **all from `94.142.210.226`** (a public IP, NOT the laptop egress `143.178.166.201`) → an automated **server-side** caller. Real runs left 3003 at access-log line **18574268** and migrated to a laptop instance. **Next step: reverse-DNS / ask infra who `94.142.210.226` is** — single most actionable lead. Also check l.davidowski's Windows Task Scheduler for a hand-made `/ll/run` task.
+- **Caller identified as an IP, not yet a host.** 31 historical `POST /ll/run` on 3003 **all from `94.142.210.226`** (a public IP, NOT the laptop egress `143.178.166.201`) → an automated **server-side** caller. Real runs left 3003 at access-log line **18574268** and migrated to a laptop instance. ~~**Next step: reverse-DNS / ask infra who `94.142.210.226` is** — single most actionable lead.~~ **BEANTWOORD, zie de entry van 2026-07-22 hierboven ('GSD LL mystery run resolved'): dat IP is de Beslist office/VPN NAT-egress en hoort bij een MENS in de browser, niet bij een automatische server-side caller — de 09:50-runs kwamen van de zombie-APScheduler die `run_low_linkage` rechtstreeks aanriep, zonder HTTP en zonder IP.** RDAP-bevestiging (2026-08-28): `94.142.210.224/29`, netname `NL-BBAH-BESLIST`, remark "Beslist", registrant `BREEDBAND-MNT`, geen PTR. Ook `PROJECT_INDEX.md` noteert al dat de company-VPN via dit IP loopt. Niet opnieuw natrekken. Also check l.davidowski's Windows Task Scheduler for a hand-made `/ll/run` task.
 - **Kill switch added (this session).** `GSD_LL_KILL_SWITCH` env + `POST /api/gsd-campaigns/ll/kill-switch?enabled=true|false` (`GET` reports state). When active, `run_low_linkage` is forced to dry-run and `apply_selected` returns a blocked result — **no campaigns mutated regardless of caller** — and the blocked attempt is logged with port/pid. Code in `gsd_ll_service.py` (`_KILL_SWITCH`, `kill_switch_status`, `set_kill_switch`) + `gsd_campaigns_router.py`. Deployed as a **safety net on the dev 8003 instance** (launched with `GSD_LL_KILL_SWITCH=true`); toggle off before a deliberate manual run.
 - **Pairs with l.davidowski's logging** (`3bf8995`: port/IP/params/call-stack on run/apply; `89d8f5e`: Slack only from prod 3003). Only emits on instances running that code → needs restart.
 - **Deploy note**: bare uvicorn, no `--reload` → kill + relaunch to take effect. Restart preserved the parallel session's uncommitted work via `pull --rebase --autostash` (their `main.py` edits at L68/203 don't overlap `3bf8995`'s L1–9).
