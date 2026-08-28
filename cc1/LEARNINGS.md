@@ -1,6 +1,166 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een facet hoort bij één maincat, behalve de familie die aan geen enkele categorie hangt (2026-08-28, Facet Watch)
+
+Nieuwe tool `Facet Watch` (commit `022ac44`): laatst aangemaakte/gewijzigde facetten per main
+categorie, uit de Taxonomy-audit log. Route A uit `suggestions_new.txt`, want
+`createdAt`/`updatedAt` zijn migratiebatch-stempels en geen edit-datums.
+
+### Een facet hoort bij precies één main categorie — en de uitzondering hangt aan géén enkele
+
+**194 van de 194** gewone facetten hebben exact één `CategoryFacet`-rij, en
+`GET /api/Facets/{id}/main-categories` geeft er dan één. Joep bevestigde dit als de bedoelde
+regel. De productlijn-familie (`Productlijnen: <merk>`) heeft **nul** CategoryFacet-rijen, ook
+met `includeInheritance=true`. Die hangt via `GET /api/Facets/{id}/value-dependencies` aan
+merk-*waarden*: één rij per parent-Merk-facet, en elk Merk-facet hoort zelf bij één maincat
+(46→Speelgoed, 48→Kleding, 94→Cadeaus, 111→Erotiek, 114→Drogisterij, 117→Woonaccessoires,
+119→Kantoor, 124→Sport). Het aantal dependency-rijen is **exact** gelijk aan het aantal
+gerapporteerde maincats én aan `categoryCount`.
+
+Dus voor een dependent facet is `main-categories` **geen categorie-koppeling** maar "waar mijn
+parents leven". Lees 9-27 maincats op één facet niet als een facet dat over maincats heen is
+aangehangen. Vastgelegd als memory `taxonomy_facet_maincat_scope`.
+
+Gevolg dat een bestaande entry bevestigt: geen CategoryFacets-rij betekent `isSeoFacet=false`
+en dus geen noscript-facetlinks — precies de bug uit `SEO_FACETLINKS_DEPENDENT_FACETS.md`. Die
+184 facetten zijn SEO-onzichtbaar by construction.
+
+### En ik trok mijn eigen conclusie te snel terug toen Joep een regel gaf
+
+Ik zag 184 facet-ids voor 86 merknamen en noemde dat een duplicaat-lus. Joep zei daarop dat
+een facet bij één maincat hoort; ik concludeerde toen dat 14 UGG-facetten dus 14 maincats
+zouden zijn en trok mijn vermoeden in. **Dat was fout.** De data: van de 14
+`Productlijnen: UGG`-facetten hebben er **11 een identieke set van 10** parent-Merk-facetten en
+2 een identieke set van 16. Zelfde merk, zelfde parents, 14× aangemaakt door `ListsApi`. Idem
+HOKA (14×), PME Legend (14×), Michelin (11×). Het oorspronkelijke vermoeden was goed.
+
+De les is niet "Joep had ongelijk" — zijn regel klopt voor gewone facetten. De les is dat een
+autoritatieve uitspraak over het *ontwerp* geen bewijs is over de *data*, en dat ik een eigen
+meting niet moet intrekken vóór ik hem tegen die uitspraak heb getest. Meten kostte twee calls.
+
+### De batch vóór de API vragen, niet erna
+
+Bij het oplossen van `facetValueId → facetId` deed ik eerst de API-lookups en daarna het leren
+uit de batch. Resultaat: **3.315** onbenoemde label-events op 30 dagen. Dat zijn labels van
+waarden die binnen datzelfde venster zijn aangemaakt **én verwijderd**, dus
+`GET /api/Facets/values/{id}` geeft 404 en de volledige dump — een snapshot van wat nog
+*bestaat* — helpt ook niet. De audit log is de enige plek waar die ids nog oplosbaar zijn, want
+de `Facet Value INSERT` in dezelfde batch noemt facet-id én waarde-id.
+
+Batch eerst, API voor de rest: van **97,2% naar 99,78%** toegewezen, en een herhaalde run kost
+**0** API-calls. Algemener: als een bron zowel de vraag als het antwoord bevat, vraag die bron
+uit voordat je een externe lookup doet — zeker als het object inmiddels verwijderd kan zijn.
+
+### Wat de audit log per event-type wél en niet noemt
+
+Een UPDATE draagt **alleen het gewijzigde veld**. Daarom is de attributie per type anders:
+
+| entityName | wat identificeert de rij |
+|---|---|
+| `Facet`, `Facet Label` | `entityId` IS het facet-id |
+| `Facet Value` INSERT/DELETE | `changes.FacetId` aanwezig |
+| `Facet Value` UPDATE, beide label-events | alleen een waarde-id → cache nodig |
+| `Category Facet`(`Setting`) INSERT | `changes.CategoryId` + `.FacetId` |
+| `Category Facet Setting` UPDATE | **onoplosbaar** |
+
+Die laatste draagt een settings-rij-id; `/api/CategoryFacetSettings` eist `categoryId` (400
+zonder) en de bijbehorende INSERT heeft een **negatief synthetisch** entityId, dus die valt er
+ook niet aan te koppelen. 222 events staan als `no_link` apart en worden nooit bij een
+categorie opgeteld. Een gat melden is beter dan het gokken.
+
+Praktisch: `GET /api/Facets/values` dumpt alle **555.116** waarden in één call (~146 MB, ~60 s),
+dus de value→facet-cache seeden kost één request in plaats van 555k. En `Take=10000` op
+`/api/audit-logs` werkt in ~2 s; pagineer op `SortBy=id&SortDescending=false`, want de
+default (nieuwste eerst) verschuift elke latere pagina zodra er een event bijkomt.
+
+### Een slug-prefix is geen facetfamilie
+
+Om de productlijn-familie te filteren gebruikte ik `productlijnen-` / `pl_` / `p_`. Dat gooit
+echte facetten weg: **`p_pennenbakken` is "Plaatsing"** en **`pl_klussen` is "Serie"**. Het
+kostte facet 7917 zijn plek in het overzicht voordat ik het zag. Gemeten op een categorie met
+285 facetten: naamregel (`Productlijn` / `Productlijnen:*`) 0 false positives, slugregel 2.
+
+Dezelfde fout zat in `seo_titles_build_new_facet_combos.py`. Daar is de primaire filter nu de
+**dependency-map**: een facet met een parent kan per definitie geen zelfstandig top-facet zijn.
+Dat is echte data in plaats van een heuristiek, en het dekt de hele productlijn-familie omdat
+die allemaal `merk` als parent heeft. De 11 blueprints van 27-08 zijn niet geraakt (expliciete
+`--partners`, en de nieuwe default geeft dezelfde vier terug — geverifieerd).
+
+### Tien facetwaarden bevatten een NUL-byte
+
+De eerste volledige seed viel om op `ValueError: A string literal cannot contain NUL (0x00)`.
+Tien waarden dragen er een: merknamen waarvan het accentteken bij import sneuvelde —
+`Oro Bail\x00n` (Oro Bailén), `Meli\x00a1` (Meliá). Upstream data-schade, niet onze encoding.
+Alles wat wordt weggeschreven gaat nu door een `_clean` die C0-controltekens strípt, met de
+mangled naam behouden **minus** de NUL zodat de rij vindbaar blijft. Postgres weigert zo'n
+literal hard, dus dit raakt elke tabel waar taxonomie-tekst in gaat.
+
+### UI-details die deze repo al had, en die ik moest opzoeken in plaats van verzinnen
+
+* **Het info-hover-patroon is een inline SVG met een native `<title>`**, zoals de header
+  "Create redirects" in `redirect-tool.html`. Deze repo gebruikt **nul** Bootstrap-tooltips
+  (`data-bs-toggle="tooltip"` komt in geen enkele pagina voor), dus daar een tweede mechanisme
+  naast zetten voor één tooltip is de verkeerde ruil.
+* **Celpadding moet gelijk zijn aan de header-padding.** `.tool-table th` heeft `6px 14px`,
+  maar `.table-sm` geeft `td` maar `0.25rem` — elke links uitgelijnde kolom staat dan 10px naast
+  zijn eigen header. Subtiel genoeg om als slordigheid te lezen in plaats van als bug.
+* **Numerieke kolommen centreren via één klasse op `th` én `td`**, zodat de header niet van zijn
+  waarden kan afdrijven bij een latere kolomwijziging.
+* **Alles op één regel + `overflow:auto` op de wrapper** vraagt `width:auto; min-width:100%` op
+  de tabel: Bootstrap's `.table` zet `width:100%`, wat de kolommen juist samenknijpt en het
+  wrappen terugbrengt in plaats van te scrollen.
+* **Geen inline `background` op een `.card-header`** — `style.css` forceert grijs met
+  `!important`, dus dat is dode CSS.
+* Lichtgele banner: `#664d03` op `#fff3cd` (~7:1). Nooit wit of grijs op een warme vulling.
+
+### Een schroevendraaier-icoon op 14px is een pen
+
+Joep vroeg een gereedschap/schroevendraaier-icoon. Vijf varianten getekend en op 14px én 36px
+gerenderd: een diagonale schroevendraaier leest als **pen** (= "bewerken", dus actief
+misleidend), een verticale als sleutelgat of USB-stekker, en de platte-kling-variant is op 14px
+ruis. Oorzaak is inherent: een schroevendraaier is een dun diagonaal object, net als een pen,
+en het onderscheid zit in de platte kling — die op 14px verdwijnt. De moersleutel is de enige
+die op beide formaten "gereedschap" zegt. **Renderen en kijken kostte twee screenshots; blind
+kiezen had een pen-icoon opgeleverd.**
+
+### Drie UI-conventies die ik opnieuw afleidde terwijl ze al opgeschreven stonden
+
+Nazorg-commit `5cd106f`. Bij het bouwen van de pagina liep ik tegen drie dingen aan en loste
+ze zelf op — alle drie stonden al in `UI_BLUEPRINT.md`:
+
+* **De cel-padding-val.** Ik vond dat `td` 4px krijgt tegen 14px in de kop en dat elke linkse
+  kolom daardoor 10px naast zijn eigen kop staat. Dat staat er al, gevonden op 2026-08-19 in
+  Healthscore, met exact dezelfde fix — inclusief de reden waarom hij per pagina blijft.
+* **Nowrap + horizontale scroll.** `width:auto; min-width:100%` + `white-space:nowrap` in een
+  scrollende wrapper staat er als de tweede van twee kolomstrategieën.
+* **Een klasse om een kolom te centreren.** `style.css` heeft `.tool-table .col-center`; ik zette
+  er een eigen `num-col` naast.
+
+Plus twee waar ik een gedeelde klasse dupliceerde in plaats van hergebruikte: het hele
+`.tool-table`-blok (staat sinds 2026-08-14 in `style.css` — "een nieuwe tabel heeft de opmaak
+gratis, geen blok kopiëren"; elf pagina's dragen al een eigen variant en het samenvoegen is een
+open taak, deze zou de twaalfde zijn geworden), en de gele banner (`.info-note`, met in de
+blueprint letterlijk "never re-declare it per page" omdat dat al drie keer eerder was gebeurd).
+
+De les is niet subtiel: **`_tool-template.html` kopiëren geeft je een pagina die de conventie
+schendt**, want de template loopt achter op de consolidatie in `style.css`. Bij een nieuwe pagina
+hoort UI_BLUEPRINT §Tables eerst gelezen te worden, niet achteraf ter controle. Het kostte hier
+geen fout in de oplevering — de pagina rendert identiek — maar wel een extra ronde, en zonder die
+controle had het bestand permanent een twaalfde variant toegevoegd aan een opruimtaak die er al
+stond.
+
+### Ops: de 404 die zich voordeed als een applicatiefout
+
+De backend draait zonder `--reload`, dus na een deploy bestaat een nieuwe router niet op :8003.
+`POST /api/facet-watch/ingest` gaf `404 {"detail":"Not Found"}` — die payload heeft geen
+`.success` en geen `.message`, dus mijn JS viel terug op de generieke tekst "Kon niet starten"
+en verborg daarmee de echte oorzaak. Nu benoemt een 404 op deze API letterlijk dat de router
+niet geladen is. **Een foutmelding die een HTTP-status wegvangt in een generieke tekst kost
+meer tijd dan hij bespaart.** Herstart: `fuser -k 8003/tcp` + `setsid nohup venv/bin/uvicorn …`,
+loggend naar `logs/uvicorn_8003.log`; daarna Ctrl+Shift+R voor de JS.
+
+
 ## IP → locatie: de eigenaar is autoritatief, de stad is een gok (2026-08-28, vraag van Joep)
 
 Vraag: kun je op basis van een IP-adres een locatie achterhalen? Ja, maar het is een **opzoeking

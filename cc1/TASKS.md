@@ -4,6 +4,72 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-28 — Facet Watch: nieuwe tool voor facetwijzigingen per main categorie
+
+Opdracht van Joep op basis van `suggestions_new.txt`. Uitwerking in LEARNINGS (zelfde datum,
+"Een facet hoort bij één maincat"). Code in `022ac44`.
+
+Gedaan:
+
+- [x] **Tool gebouwd**: `backend/facet_watch_service.py` + `_router.py`,
+      `frontend/facet-watch.html`, `scripts/facet_watch_ingest.py` als dagelijks startpunt.
+      Vier secties: stat-tegels, per main categorie (klikbaar als filter), laatst
+      aangemaakte/gewijzigde facetten, en de ruwe events met filters op soort/actie/wie.
+- [x] **Route A (`/api/audit-logs`)** in plaats van B: `createdAt`/`updatedAt` zijn
+      migratiebatch-stempels. Staat als uitleg achter het info-glyph op de pagina zelf.
+- [x] **30 dagen backfill**: 101.341 events, **99,78%** aan een main categorie toegewezen.
+      Idempotent op audit-id, dus een gemiste dag haalt zichzelf in en een dubbele run is
+      gratis (0 API-calls bij herhaling).
+- [x] **Value→facet-cache geseed** uit `GET /api/Facets/values` — 555.116 waarden in één
+      call (~146 MB, ~60 s).
+- [x] **Opgenomen onder SEO tools** op alle 35 navbar-pagina's (alfabetisch tussen DM Review
+      en Healthscore) + een kaart op `dashboard.html`. Moersleutel-icoon.
+- [x] **UI-ronde van Joep**: Refresh in de card-headers, uitleg achter een info-hover,
+      lichtgele banners, numerieke kolommen gecentreerd, celpadding gelijk aan de header,
+      één font per tabel, alles op één regel met horizontale scroll, checkbox voor de
+      productlijn-filter weg (staat nu altijd aan, met het aantal in de banner).
+- [x] **`seo_titles_build_new_facet_combos.py` gerepareerd**: de slug-prefixregel gooide
+      echte facetten weg (`p_pennenbakken` = "Plaatsing", `pl_klussen` = "Serie"). Primaire
+      filter is nu de dependency-map. De 11 blueprints van 27-08 zijn niet geraakt.
+- [x] **Backend herstart** op :8003 (draait zonder `--reload`), alle endpoints 200, bestaande
+      tools ongemoeid. Een 404 op deze API benoemt nu zichzelf in plaats van "Kon niet starten".
+- [x] **Memory** `taxonomy_facet_maincat_scope` — 1 facet = 1 maincat via CategoryFacets;
+      productlijn-facetten hebben géén CategoryFacet-rij.
+- [x] **Duplicaat-CSS weer opgeruimd** (`5cd106f`): het `.tool-table`-blok en een eigen
+      `.info-banner`/`num-col` zijn eruit, de pagina gebruikt nu de gedeelde `style.css`-basis
+      plus `.col-center` en `.info-note`. Alleen de cel-padding blijft pagina-eigen, met de
+      reden erbij. Rendert identiek.
+
+Open:
+
+- [ ] **`_tool-template.html` loopt achter op `style.css`.** De template draagt nog het volledige
+      `.tool-table`-blok, dus wie een nieuwe pagina van de template maakt schendt automatisch
+      UI_BLUEPRINT §Tables ("geen blok kopiëren") — dat gebeurde deze sessie ook. De template
+      zou naar de gedeelde basis moeten wijzen, en meteen de nav-iconen krijgen die de echte
+      pagina's al hebben (de DM Review-entry in de template heeft er geen). Hangt samen met de
+      bestaande taak om de elf `.tool-table`-varianten samen te voegen. #priority:medium
+- [ ] **Dagelijkse taak nog niet geregistreerd.** `venv/bin/python scripts/facet_watch_ingest.py`
+      moet als DAILY-taak in de Task Scheduler (of Windows `schtasks`) komen. Bewust niet
+      zelf aangemaakt — dat is een systeemwijziging buiten de repo. `--seed-values` hoeft
+      daar níet bij: dat is de 146 MB-call en alleen nodig als de waarde-cache ver
+      achterloopt. #priority:medium
+- [ ] **`ListsApi` maakt duplicaat-productlijnfacetten aan.** 184 facet-ids voor 86
+      merknamen; 11 van de 14 `Productlijnen: UGG`-facetten hebben een *identieke* set van
+      10 parent-Merk-facetten. Idem HOKA (14×), PME Legend (14×), Michelin (11×). Ze zijn
+      SEO-onzichtbaar (geen CategoryFacets-rij) en in de tool filterbaar, dus het blokkeert
+      niets — maar het facetbestand groeit er wel mee en wie `Productlijnen: UGG` opzoekt
+      vindt veertien treffers. Melden bij de eigenaar van `ListsApi`. #priority:low
+- [ ] **`Category Facet Setting UPDATE` blijft onattribueerbaar** (222 events over 30 dagen).
+      Settings-rij-id zonder lookup, en de INSERT heeft een negatief synthetisch id. Als dit
+      ooit belangrijk wordt, is de enige weg een eigen settings-id-map opbouwen door alle
+      categorieën langs `/api/CategoryFacetSettings?categoryId=` te lopen. Nu niet de moeite.
+      #priority:low
+- [ ] **Facet 7911 (`t_tegelacc`) komt nog steeds niet uit de Search API** — los van deze
+      tool, zie de entry van 27-08. Dat facet heeft wél een CategoryFacet-rij, dus het is
+      niet hetzelfde probleem als de productlijn-familie. Blokkeert het publiceren van de 11
+      blueprints. #priority:medium
+
+
 ### 2026-08-28 — SEO-trap 24 augustus: eliminatieronde, 4xx-burst, en DMA organic
 
 Analyse, geen code. Rapport als artifact:
