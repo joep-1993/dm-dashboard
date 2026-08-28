@@ -471,6 +471,40 @@ Terugvalpad is de ruwe log, en dat is betrouwbaar: parsen met `classify_ua`, `ur
 **Let op de klok**: S3-retentie is ~42 dagen. Referer- en statusniveau-vragen ("wie linkt
 hiernaar") kun je alleen stellen zolang de logs er nog zijn.
 
+### Statuscodes per URL: alleen de bekende kant (2026-08-28)
+
+`pa.bothits_url_daily` draagt `n_2xx`..`n_5xx`; **`pa.bothits_unknown_daily` draagt ze niet** —
+de ingest telt daar alleen hits per (dag, host, bot, url). Het statusfilter op de URL's-tab
+(`status=` op `/top-urls`) schakelt het onbekende been daarom volledig uit, en de tab zegt dat
+met een berekende dekkingsmelding. Gemeten over 30 dagen t/m 2026-08-27, gevolgde bots:
+
+| status | op een URL in `pa.urls` | totaal | dekking |
+|---|---|---|---|
+| 4xx | 84.874 | 4.140.355 | **2,1%** |
+| 3xx | 277.056 | 17.791.280 | **1,6%** |
+| 5xx | 1.773 | 18.558 | 9,6% |
+
+Met URL-type = C-url loopt 4xx naar 22,6%; de melding rekent dus mee met het filter en staat
+niet vast in de code.
+
+**Een statuskolom aan `unknown_daily` hangen lost dit niet op**, en dat is uitgerekend en geen
+aanname. Ruwe logs van 2026-08-12, steekproef 300 van 2.905 bestanden, alleen gevolgde bots:
+3xx = 137.451 hits op **123.067 unieke URL's** (top-500 dekt 2,0%), 4xx = 22.611 hits op 21.585
+URL's (top-500 dekt 6,7%), met `/favicon.ico`, `/robots.txt`, `/tracking.js` en `/.env.backup`
+aan kop. Bijna één hit per URL: de non-2xx-ruimte is vlak, want het volume zit op
+productpagina's (3xx 14,0 mln van 17,5 mln). De top-500-vorm werkt op `/c/`-URL's omdat de
+crawl-verdeling dáár scheef is; hier zou hij een ranglijst van assets opleveren.
+
+Voor de andere 98% is het **Overzicht** de plek: de cube draagt `status_class` naast url_type,
+facetdiepte, bot en host — patroonniveau, niet per URL. En zou zo'n per-URL-tabel er ooit toch
+komen, dan reikt een backfill niet verder terug dan ~2026-07-17 (S3-retentie; lokaal archief
+vanaf 2026-07-24), niet tot de 2026-02-14 waar de cube begint.
+
+Let op bij het lezen van die vier kolommen: ze zijn een **subset** van `hits`, geen partitie.
+`status_class()` geeft ook `'0xx'` terug (CloudFront logt `sc-status` 000 bij een afgebroken
+verbinding) en dat valt bewust in geen bucket — het URL-detailpaneel toont het verschil als
+"overig".
+
 ---
 
 ## IP-verificatie (2026-08-11)

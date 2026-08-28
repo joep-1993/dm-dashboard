@@ -1,6 +1,96 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een top-N is nutteloos als de verdeling vlak is, en de dekking hoort in beeld (2026-08-28, Bot Hits statuscodes)
+
+Joeps vraag: vanuit de statusuitsplitsing in "Hits per dag" door kunnen klikken naar de URL's erachter.
+Het antwoord is `status=` op `/top-urls` (commit `b2ab75a`), maar het meeste werk zat in vaststellen wat
+de lijst NIET kan — en dat was drie keer een meting die de aanname omkeerde.
+
+### Statuscodes per URL bestaan maar voor 2% van de non-2xx
+
+`pa.bothits_url_daily` draagt `n_2xx`..`n_5xx`; `pa.bothits_unknown_daily` draagt ze **niet** (de ingest
+telt daar alleen hits per dag/host/bot/url), en productpagina's landen in geen van beide. Gemeten over
+30 dagen t/m 2026-08-27 op gevolgde bots:
+
+| status | op een URL in `pa.urls` | totaal | dekking |
+|---|---|---|---|
+| 4xx | 84.874 | 4.140.355 | **2,1%** |
+| 3xx | 277.056 | 17.791.280 | **1,6%** |
+| 5xx | 1.773 | 18.558 | 9,6% |
+
+Met URL-type = C-url loopt 4xx naar 22,6%. Vandaar dat de dekking **uit `coverage` in hetzelfde antwoord**
+komt en niet als vaste zin in de UI staat: hij verschuift met elk filter. `/top-urls` geeft daardoor sinds
+vandaag een object terug (`{rows, status, coverage, start_date, end_date}`) en geen kale lijst meer.
+
+De les die breder geldt: een top-N met een lage dekking is niet "onvolledig", hij is **misleidend** — de
+lijst ziet er compleet uit. De teller-en-noemer horen in dezelfde response als de rijen, want een tweede
+verzoek kun je vergeten en dan gaat de melding over een andere selectie dan de tabel eronder.
+
+### Waarom die 98% ook niet op te halen is: de non-2xx-URL-ruimte is vlak
+
+De voor de hand liggende fix — een statuskolom aan `unknown_daily` — is uitgerekend op de ruwe logs van
+2026-08-12 (steekproef 300 van 2.905 bestanden, alleen gevolgde bots):
+
+| status | hits | unieke URL's | top-500 dekt |
+|---|---|---|---|
+| 3xx | 137.451 | 123.067 | **2,0%** |
+| 4xx | 22.611 | 21.585 | **6,7%** |
+
+Bijna één hit per URL. En de kop van de 4xx-ranglijst is `/favicon.ico`, `/robots.txt`, `/tracking.js` en
+`/.env.backup` — assets en scannerprobes. Het volume zit op productpagina's (3xx 14,0 mln van 17,5 mln;
+4xx 3,0 mln van 4,1 mln) en die zijn per definitie bijna uniek per hit.
+
+**Meet de concentratie vóór je een top-N-tabel bouwt.** De bestaande `unknown_daily` (top-500/dag/familie)
+werkt omdat de crawl-verdeling over `/c/`-URL's scheef is; op non-2xx is diezelfde vorm waardeloos. Dit is
+dezelfde soort meting als de 1,05× compressie waarmee de korrel is vastgesteld — vlakke ruimtes laten zich
+niet samenvatten.
+
+Waar de bulk wél op te lezen is: de cube draagt `status_class` naast url_type, facetdiepte, bot en host,
+dus op patroonniveau in het Overzicht.
+
+### Wat de bekende kant wél oplevert
+
+Uitputtend geteld, en meteen raak: de maincat-pagina's staan bovenaan op 4xx (`/products/fietsen/`,
+`/products/mode/`, `/products/computers/` — ~2.100 hits elk over 30 dagen) terwijl ze óók 2xx serveren,
+dus dat zijn intermitterende fouten op indexeerbare pagina's. En `/products/` redirect op **2.208 van zijn
+4.340 crawls**.
+
+### Een kleur die je op naam kiest, moet je alsnog narekenen
+
+Tweede opdracht: alle categorische "Splitsen op"-dimensies dezelfde reeks geven als Bot-familie, en het
+bruin van Bing vervangen door het okergeel van 4xx. Die tweede kost meetbaar iets — validator van de
+dataviz-skill (light, surface `#fcfcfb`, `--pairs all`):
+
+| slot 7 | CVD-min (deutan) | normaal-min | |
+|---|---|---|---|
+| `#936305` (yellow-800, bruin) | 7,7 roze↔lichtblauw | 15,8 violet↔roze | PASS |
+| `#e8a21e` (oker, 4xx) | **3,8** oker↔lichtgroen | **13,8** oker↔lichtgroen | FAIL |
+
+Het okergeel botst met het lichtgroen van GoogleOther. 13,8 op normaal zicht is een **harde** fail: de
+legenda-plus-tabel redt dat niet, want die uitzondering geldt alleen voor de CVD-band 6-8. Zo gebouwd
+omdat het een expliciete keuze was, met het getoetste uitwijkpad in de comment — `#d97706` (amber-600) is
+nog steeds duidelijk oker en zet beide vloeren terug op precies het niveau van het bruin (7,7 / 15,8), met
+een betere tritan-score (9,6 tegen 8,7). Het punt is niet welke tint wint, maar dat "maak hem zoals die
+andere" een palet-brede meting is en geen lokale swap.
+
+### Legenda-volgorde is niet dezelfde als volume-volgorde
+
+Bij het gelijktrekken van de reeks bleek `drawDaily` de series te ordenen op **eerste voorkomen** in de
+rijen, en `get_daily` sorteert `ORDER BY log_date, hits DESC` — dus de volgorde is die van de **eerste dag
+van de selectie**. Op 29-07 t/m 27-08 komt C-url vóór PLP terwijl PLP over de hele periode groter is
+(46,4% tegen 43,7%). Een kleurtoewijzing die aan die volgorde hangt, klapt dus om met je datumkeuze —
+precies wat de regel "kleur volgt de entiteit, nooit de rangorde" verbiedt. De maps staan daarom vast op
+**totaal** volume.
+
+### Bijvangst: drie semantische dimensies horen niet in een categorische reeks
+
+Statuscode (2xx groen … 5xx bordeaux) en IP-verificatie (`failed` = bordeaux, de spoof-tripwire) zijn
+statuskleuren en Facet-diepte is ordinaal. Die op categorische slots zetten maakt 4xx lichtgroen. Bij een
+"maak alles consistent"-opdracht is de vraag dus altijd welke dimensies eigenlijk géén categorie zijn.
+
+---
+
 ## Een gap-lijst die de live store niet vraagt, is 2,4× te lang (2026-08-28, SEO-titles blueprints)
 
 Twee opdrachten: welke cat/facet-combos met SEO-traffic nog geen title-blueprint hebben (207 gebouwd),

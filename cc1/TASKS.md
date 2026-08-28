@@ -4,6 +4,56 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-28 — Bot Hits: statuscode-filter op de URL's-tab + één kleurreeks over alle splitsingen
+
+Twee vragen van Joep. Uitwerking in LEARNINGS (zelfde datum, "Een top-N is nutteloos als de verdeling
+vlak is"). Code in `b2ab75a`.
+
+Gedaan:
+
+- [x] **`status=2xx|3xx|4xx|5xx` op `/api/bothits/top-urls`** — rangschikt op `n_2xx`..`n_5xx` uit
+      `pa.bothits_url_daily` in plaats van op hits, met `HAVING` en `days` gefilterd op de dagen waarop
+      die status voorkwam. Die vier tellers hadden tot fase 4 nul lezers. Ongeldige waarde geeft 400 aan
+      de rand, niet stil "alle statussen".
+- [x] **UI**: Status-keuze naast de zoekbox op de URL's-tab, een kolom met de statusteller náást Hits,
+      een kop die de rangschikking benoemt, en `#urlTable.has-status .url-cell { max-width: 500px }` —
+      de zevende kolom duwde de tabel anders uit de container en "Per dag" viel weg.
+- [x] **Dekkingsmelding die zichzelf uitrekent** uit `coverage` in hetzelfde antwoord. `/top-urls` geeft
+      daardoor nu een object terug (`{rows, status, coverage, start_date, end_date}`) en geen kale lijst;
+      één caller, `loadUrls()`, is meegegaan. Nodig omdat de dekking met elk filter verschuift: 4xx is
+      2,1% over alle URL-types en 22,6% met URL-type = C-url.
+- [x] **Uitgezocht en NIET gebouwd: een statuskolom op `pa.bothits_unknown_daily`.** Gemeten op de ruwe
+      logs van 12-08 dat de non-2xx-URL-ruimte vlak is (3xx: 123.067 unieke URL's op 137.451 hits,
+      top-500 dekt 2,0%) en dat de kop van de 4xx-lijst uit assets en scannerprobes bestaat. Een top-N
+      levert daar geen SEO-signaal op. Zie LEARNINGS voor de cijfers.
+- [x] **"HTTP-status" heet overal Statuscode** — de optie in Splitsen op, de dekkingsmelding en het
+      label in het URL-detailpaneel.
+- [x] **Eén kleurreeks (`SERIES` + `bySeries()`) over alle categorische splitsingen.** Bot-soort, Domein
+      en Bekend/onbekend zaten er al op; url_type verschuift (R-url lichtgroen, Cat-url turquoise,
+      Homepage bordeaux) en is_known_url draait om (buiten `pa.urls` is 92,4% = slot 1). Toewijzing op
+      TOTAAL volume, niet op legenda-orde — die volgt de eerste dag van de selectie en klapt dus om met
+      je datumkeuze.
+- [x] **Bing van yellow-800 naar het okergeel van 4xx** (`#e8a21e`), op verzoek. Gemeten met de
+      dataviz-validator dat dit de vloeren verlaagt van CVD 7,7 / normaal 15,8 naar 3,8 / 13,8 — dat
+      laatste is een harde fail (botst met het lichtgroen van GoogleOther). Bewust zo gebouwd omdat het
+      een expliciete keuze was; het uitwijkpad staat in de comment.
+- [x] **Statuscode, IP-verificatie en Facet-diepte bewust BUITEN de reeks gehouden** (semantisch resp.
+      ordinaal), na expliciete bevestiging van Joep. Op categorische slots zou 4xx lichtgroen worden.
+
+Open:
+
+- [ ] **Overwegen om Bing op `#d97706` (amber-600) te zetten** als het okergeel in de legenda naast
+      GoogleOther gaat opvallen. Getoetst: nog steeds duidelijk oker, en het zet CVD-min en normaal-min
+      terug op precies het niveau van het oude bruin (7,7 / 15,8) met een betere tritan-score (9,6 tegen
+      8,7). Eén constante in `COLOR_MAPS`. #priority:low
+- [ ] **De statuslijst kan niet verder terug dan de bekende kant reikt, en een per-URL-statustabel
+      voor de onbekende kant zou niet verder terug kunnen dan ~2026-07-17** (S3-retentie ~42 dagen;
+      lokaal archief `~/bothits_s3/_processed` vanaf 2026-07-24). Mocht die er ooit toch komen, dan is
+      dat de harde grens — niet de 2026-02-14 waar de cube begint. #priority:low
+- [ ] **Klikken op een band/legenda-item in "Hits per dag" springt nog niet door naar de URL's-tab met
+      dat filter voorgeselecteerd.** Joeps vraag ging over "vanaf daar filteren"; de Status-keuze lost
+      dat op, een doorklik zou het korter maken. #priority:low
+
 ### 2026-08-28 — SEO-titles: 207 traffic-gaten + 11 × t_tegelacc, en een facet zonder positieregel
 
 Twee opdrachten van Joep. Uitwerking in LEARNINGS (zelfde datum, "Een gap-lijst die de live store niet
