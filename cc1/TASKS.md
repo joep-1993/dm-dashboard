@@ -4,6 +4,69 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-28 — SEO-trap 24 augustus: eliminatieronde, 4xx-burst, en DMA organic
+
+Analyse, geen code. Rapport als artifact:
+`https://claude.ai/code/artifact/29bdb9a9-2c4a-4410-958f-894cc4fb85ae`. Methode, cijfers en het
+recept voor kanaalsprongen in LEARNINGS (zelfde datum). Vervolg op de entry van 25-08, waarvan de
+conclusie "zomer-uitdoving" geldt voor de slope van begin augustus maar niet voor deze trap.
+
+Gedaan:
+
+- [x] **Breuk gedateerd op ma 24-08** met weekdag-matching: ma-do 24-27 vs ma-do 17-20 geeft
+      −9,8% (gecorrigeerd). Vr 21, za 22 en zo 23 aug lagen nog op/boven de week ervoor.
+- [x] **URL-type is de as, device en land niet**: R-url −12,7% (63% van het verlies), C-url −7,5%,
+      Browse −11,1%, PLP −5,8%. Mobiel −8,4% / desktop −10,3% / tablet −12,5%, NL −9,3% / BE −9,8%.
+- [x] **Seizoen afgepeld** tegen dezelfde weken 2025 (totaal −2,1%, R-url −2,6%): ~2 pp van de
+      daling is normaal, ~7 pp is nieuw.
+- [x] **Uniformiteitstoets** als scheidsrechter tussen sitebreed en gedeeltelijk: 59/62
+      subcategorieën omlaag, mediaan −13,1%, alle vier padniveaus −10,5 tot −12,9%.
+- [x] **Vier interne verdachten uitgesloten tegen de bron**: `redirect_tool_runs` (niets toegepast
+      tussen 10 en 27 aug), `rurl_processed` (voorstellen, niets op 21-25), `pa.hs2_runs` (enige push
+      op 27 aug, scope Testcats), en een sweep over alle 117 tabellen in `pa` + `public`.
+- [x] **Twaalf verliezende R-urls live nagelopen**: 200, geen redirect, `index,follow`,
+      self-canonical, TTFB 0,35-1,00 s, content gevuld. `robots.txt` heeft geen /r/-disallow.
+- [x] **Meetartefacten uitgesloten**: 27 aug is een volledige dag (24-uurs curve), `is_real_visit`
+      constant op 99,6-99,7%, unieke IP's 1-op-1 op bezoeken, GSC 26-27 aug uit elke vergelijking.
+- [x] **GSC-diagnose**: impressies −3,5%, clicks −8,8%, positie 6,41 → 6,59, aantal rankende R-urls
+      vlak op 104-110k/dag. Geen indexatieverlies, geen rankingcollaps — klikverlies. CTR-daling
+      breed over alle querylengtes, dus geen AI-Overview-signatuur.
+- [x] **Googlebot-4xx-burst gevonden** (24 aug 298.162, 25 aug 215.986, normaal 40-70k) en
+      onderbouwd waarom het de daling níet verklaart: onbekende `product_legacy`/`other`-URL's,
+      49 hits op bekende URL's, en het normaliseert op 26 aug terwijl het verkeer laag blijft.
+- [x] **DMA organic piek 25-08 (6.319)** = misattributie: 4.369 PLA-getagde betaalde visits in de
+      aff903-emmer, 7 kantooruren, bijna volledig BE. Echte basislijn die dag 1.950.
+- [x] **DMA organic val 27-08 (173)** = aff_id-hertagging naar aff0/SEO, niet verlies. Bewijs op
+      URL-niveau: dezelfde parameterloze product-URL's onder aff 903 op 24 aug en aff 0 op 27 aug.
+- [x] **SEO-cijfers teruggecorrigeerd** voor die hertagging (+2.053 over 26-27 aug): totaal van
+      −9,0% naar −9,8%, PLP van −0,8% naar −5,8%. Artifact bijgewerkt met een correctie-callout.
+
+Open, in volgorde van urgentie:
+
+- [ ] **Checken of `aff_id = 903` terug is.** Op 28-08 was 27 aug de laatste dag in `fct_visits`,
+      dus onbekend. Zo niet: ticket voor wie de server-side aff-toekenning beheert. Zolang dit loopt
+      is DMA organic ~1.400-1.700 bezoeken/dag te laag en SEO even veel te hoog — dat raakt élke
+      kanaalrapportage, inclusief de standup. #priority:high
+- [ ] **Platform-deploylog 22-24 augustus opvragen.** Enige bron die ik niet kan zien, en de
+      overgebleven verklaring voor een sitebrede klikdaling bij gelijke zichtbaarheid. #priority:high
+- [ ] **Bron van de 4xx-verwijzingen opsporen.** ~250.000 hits/dag naar niet-bestaande
+      `product_legacy`- en `other`-URL's op 24-25 aug. De URL's zijn niet uit
+      `pa.bothits_unknown_daily` te halen (die houdt een handvol rijen per dag), dus dit moet uit de
+      CloudFront-logs op S3. #priority:medium
+- [ ] **Dubbele encoding in de meta-descriptions van /r/-pagina's.** Live leveren ze
+      `&amp;#10062;`, wat in een Google-snippet als letterlijke tekens verschijnt. Bestaand en dus
+      geen verklaring voor de trap, maar het kost CTR op precies de pagina's die nu onder druk
+      staan. #priority:medium
+- [ ] **Positie per query-cluster monitoren in plaats van gemiddeld.** De 6,41 → 6,59 is een
+      gemiddelde over ~180.000 keywords; één cluster dat vijf plekken zakte verdwijnt daarin.
+      #priority:medium
+- [ ] **Over een week opnieuw meten.** Herstelt de R-url-CTR zonder ingreep, dan was het een
+      SERP-experiment; blijft het liggen, dan verschuift de prioriteit naar snippet- en titelwerk
+      op /r/. #priority:low
+- [ ] **Tweede, kleinere paid-naar-SEO-leak natrekken**: er zitten al langer URL's met
+      `utm_medium=paid-search&utm_source=dma` ónder `aff_id = 0`. Losstaand van 25 aug, omvang niet
+      gemeten. #priority:low
+
 ### 2026-08-28 — Bot Hits: statuscode-filter op de URL's-tab + één kleurreeks over alle splitsingen
 
 Twee vragen van Joep. Uitwerking in LEARNINGS (zelfde datum, "Een top-N is nutteloos als de verdeling

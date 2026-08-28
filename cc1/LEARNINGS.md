@@ -1,6 +1,172 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Gelijktijdig is niet hetzelfde als oorzakelijk — drie keer op één dag (2026-08-28, SEO-trap 24 augustus + DMA organic)
+
+Joeps vraag was simpel: waar komt de SEO-daling van de afgelopen dagen vandaan, welke URL-typen,
+categorieën, devices? Het antwoord kostte drie eliminatierondes, en in twee ervan lag er een
+verdachte die perfect op de datum viel en het tóch niet was. Vervolg op de entry van 25-08
+("SEO-diagnose 24 augustus"), die de R-url-daling nog aan zomer-uitdoving toeschreef — dat geldt
+voor de *slope* van begin augustus, niet voor de *trap* die hieronder staat.
+
+Rapport als artifact: `https://claude.ai/code/artifact/29bdb9a9-2c4a-4410-958f-894cc4fb85ae`.
+
+### De trap valt op maandag 24 augustus en zit in de R-urls
+
+Bot-gefilterde bezoeken, ma-do 24-27 aug tegen ma-do 17-20 aug — gelijke weekdagen, want het
+weekpatroon (zondag/maandag hoog, vrijdag laag) smeert een ruwe 7-daagse vergelijking uit tot
+onzichtbaarheid:
+
+| URL-type | 17-20 aug | 24-27 aug | Δ | aandeel verlies |
+|---|---|---|---|---|
+| R-url | 126.507 | 110.454 | **−12,7%** | 63% |
+| C-url | 86.166 | 79.729 | −7,5% | 25% |
+| Browse | 4.095 | 3.640 | −11,1% | 2% |
+| PLP (gecorrigeerd) | 41.306 | 38.904 | −5,8% | 9% |
+
+Vrijdag 21, zaterdag 22 en zondag 23 augustus lagen nog **op of boven** de week ervoor. Vanaf
+maandag 24 augustus verliest de R-url elke dag 10-15% tegen dezelfde weekdag. Devices zijn niet de
+scheidslijn (mobiel −8,4%, desktop −10,3%, tablet −12,5%) en landen ook niet (NL −9,3%, BE −9,8%).
+
+Seizoen verklaart ~2 pp: dezelfde weken in 2025 gaven totaal SEO −2,1% en R-urls −2,6%. De
+resterende ~7 pp is nieuw. En let op de valkuil die ik zelf op 25-08 in liep: over een venster van
+**drie weken** zijn Tuinartikelen (−15,6%) en Sport & outdoor (−14,1%) de grootste dalers, en dat
+is seizoen; in het **breukvenster** staan Woonaccessoires (−12,7%) en Meubels (−18,0%) bovenaan.
+Wie alleen naar drie weken kijkt ziet seizoen en schrijft de trap daaraan toe.
+
+### De uniformiteitstoets is wat een sitebreed effect van een gedeeltelijke breuk scheidt
+
+Dit is de scherpste test die de data toestaat, en hij kostte één query. Was er een redirect-batch,
+een sitemapfout of een kapotte template, dan klappen sommige groepen in en blijven andere
+onaangeroerd. Gemeten over subcategorieën met ≥200 bezoeken vóór: **59 van 62 omlaag**, mediaan
+−13,1%, stdev 9,5 pp, p10 −26% en p90 −5%, geen enkele instorting. Alle vier de padniveaus van de
+R-url zitten tussen −10,5% en −12,9%.
+
+Wat níet werkt is dezelfde vraag per URL stellen: van de 149.671 R-urls hebben er 71.277 precies
+één bezoek in vier dagen. Een emmerindeling op het volume van de *basisperiode* geeft dan
+regressie-naar-het-gemiddelde en percentages boven de 100% van het verlies. Op een longtail met
+1 bezoek per URL moet je groeperen tot groepen met volume vóór je vergelijkt.
+
+### Vier interne verdachten, vier keer de bron gecontroleerd
+
+| verdachte | bron | uitkomst |
+|---|---|---|
+| Auto-redirects toegepast | `redirect_tool_runs` | 1 op 3 aug, 33 op 10 aug, 10 op 27 aug — **niets tussen 10 en 27 aug** |
+| rurl-optimizer-runs | `rurl_processed` | 20/26/27 aug (819/2.988/4.241), niets op 21-25 — en het zijn *voorstellen* |
+| Sitemap-push | `pa.hs2_runs` | preview 19 aug, preview+push **27 aug** scope "Testcats" — ná de breuk |
+| Bulk content-write | alle 117 tabellen | kopteksten/FAQ/unique-titles lopen dagelijks door, geen uitschieter 22-24 aug |
+
+De 117-tabellen-sweep is de moeite waard om te onthouden als vorm: query
+`information_schema.columns` op elke timestamp-kolom in `pa` én `public`, tel rijen per dag over het
+verdachte venster, en print het als één matrix. Eerste poging miste alles omdat ik alleen `public`
+sweepte — de content-tabellen leven in `pa`.
+
+Daarnaast twaalf zwaarst verliezende R-urls live opgehaald met UA `Beslist script voor SEO`: HTTP
+200, nul redirects, `index,follow`, self-referencing canonical, TTFB 0,35-1,00 s, titel/H1/description
+gevuld. `robots.txt` heeft geen disallow op `/r/`. En `is_real_visit` blijft de hele periode op
+99,6-99,7% met unieke IP's 1-op-1 op bezoeken, dus er is geen verkeer van "echt" naar "bot"
+verschoven.
+
+### De 4xx-explosie viel exact op de breukdatum en was het tóch niet
+
+`pa.bothits_daily`, bot_id 19 (Googlebot), 4xx-hits per dag: 21 aug 38.235 → 23 aug 50.883 →
+**24 aug 298.162** → **25 aug 215.986** → 26 aug 64.877 → 27 aug 32.163. 5xx piekte op 25 aug mee
+(1.187 tegen ~50). Dat ziet uit als de oorzaak en is het niet, om twee redenen:
+
+1. Het zit op `is_known_url = False` met `edge_result = 'Error'`, in `product_legacy` (146.739 hits)
+   en `other` (105.783). Op URL's die wél in `pa.urls` staan gingen die dag **49** hits naar een 4xx.
+   Onze `/r/`- en `/c/`-pagina's zijn dus niet wat faalde.
+2. De piek normaliseert op 26 aug terwijl het verkeer op 26-27 aug onverminderd 10-13% onder de
+   vorige week blijft. **De hersteltijdlijn is wat de twee dingen scheidt.**
+
+Wel een echt crawl-hygiëneprobleem: iets is op 23-24 aug gaan verwijzen naar een grote set
+niet-bestaande legacy-product-URL's. De URL's zelf zijn niet meer op te halen — `pa.bothits_unknown_daily`
+houdt maar een handvol rijen per dag over (op 24 aug: 1 `home` + 1 `robots`), dus dit moet uit de
+CloudFront-logs op S3 komen. Zie ook de entry van vandaag over statuscodedekking: dezelfde tabel,
+dezelfde beperking, andere vraag.
+
+### Wat de Google-kant zegt: zichtbaarheid staat, de klik valt weg
+
+GSC weekdag-gematcht, vr-di 21-25 aug tegen vr-di 14-18 aug (26 en 27 aug zijn half geladen en uit
+élke GSC-vergelijking gehouden):
+
+| type_url | impressies | clicks | CTR | positie |
+|---|---|---|---|---|
+| R-url | −3,5% | −8,8% | 1,021% → 0,966% | 6,41 → 6,59 |
+| C-url | +4,6% | −3,2% | 0,712% → 0,658% | 6,20 → 6,27 |
+| PLP | −1,1% | +2,1% | 1,398% → 1,443% | 25,25 → 25,72 |
+
+Het aantal R-urls dat überhaupt impressies krijgt blijft vlak op 104.000-110.000/dag en het aantal
+keywords op 172.000-185.000: **geen indexatieverlies, geen rankingcollaps**. Het CTR-verlies zit
+breed over álle querylengtes (R-url −1 tot −6% van 1 t/m 7+ woorden), dus ook geen
+AI-Overview-signatuur op de longtail — die zou zich in de lange, informatieve queries concentreren.
+
+Geen bevestigde Google-update op 23-24 aug; de gerapporteerde volatiliteit van augustus 2026 zat
+rond 1-6 aug en is onbevestigd. Wat overblijft is de platform-deploylog van 22-24 aug, de enige
+bron die van buiten niet te zien is.
+
+### DMA organic: één piek van misattributie, één val van hertagging
+
+Losse vraag van Joep in dezelfde sessie, en het bleken **twee verschillende oorzaken** — niet één
+verhaal. DMA organic zit volledig op `aff_id = 903` / `channel_id = 1`, referer Google, landend op
+productpagina's; basislijn ~1.600-2.000 bezoeken/dag.
+
+**25 aug, piek naar 6.319 = betaald verkeer in de verkeerde emmer.** Het uurpatroon geeft het weg:
+normaal tot 08:00, dan 09:00-15:00 op 629-754/uur (normaal ~100-150), om 16:00 al gehalveerd, 17:00
+weer normaal. Bijna volledig België (BE 4.578 tegen ~220 basislijn) terwijl NL vlak was. De extra
+visits dragen `utm_campaign` als `PLA%2FAmazon bestsellers BE` (703), `PLA%2FAPlus`,
+`PLA%2FSchoonmaak_a` — **4.369 PLA-getagde visits onder DMA organic**, waar dat op alle andere dagen
+0 of 1 is; tegelijk verloor `aff907/ch1` (DMA paid) 6.391 visits. De echte basislijn die dag was
+1.950, volkomen normaal.
+
+**27 aug, val naar 173 = aff_id-hertagging, verkeer is intact.** Uren 0-2 nog exact normaal (65
+tegen 66 op 26 aug), daarna vanaf ~03:00 vrijwel nul. Op de slice `type_url='PLP' AND
+referer_source='Google'`:
+
+| dag | aff903 (DMA organic) | aff0/ch4 (SEO) |
+|---|---|---|
+| 20-25 aug | 1.583-1.911 | 2.246-2.447 (basislijn 2.391) |
+| 26 aug | 1.476 | **2.961** (+570) |
+| 27 aug | **138** | **3.874** (+1.483) |
+
+De landsplit matcht (aff903 NL −1.452 / BE −175 tegen aff0 NL +1.147 / BE +152), en het bewijs zit
+op URL-niveau: **dezelfde parameterloze product-URL's** staan op 24 aug onder aff 903 en op 27 aug
+onder aff 0 — `/p/easee-charge-max-laadpaal.../7090052312087/` (7× → 8×) en
+`/p/zaptec-go-2-oplaadstation.../7090038510575/` (6× → 8×). Geen URL-wijziging, dus de aff-toekenning
+gebeurt server-side en dáár zit de breuk.
+
+**Het recept bij elke kanaalsprong**, in deze volgorde: (1) trek het **uurpatroon** — een burst in
+kantooruren of een stop op een rond uur is nooit vraagontwikkeling; (2) zet **`utm_campaign` per
+kanaal per dag** naast elkaar, dat legt misattributie in één tabel bloot; (3) test of het verkeer
+naar een andere `aff_id`/`channel_id` is verhuisd door op dezelfde `type_url` + `referer_source`-slice
+álle aff/ch-combinaties te tellen. Stap 3 is wat "verdwenen" van "verplaatst" scheidt, en dat scheelt
+een verkeerd ticket.
+
+### Wat dit terugcorrigeert in de SEO-cijfers
+
+De hertagging landde in de SEO-emmer, dus de eerste versie van de SEO-analyse was te gunstig. De
+correctie is +2.053 bezoeken over 26-27 aug die geen SEO zijn:
+
+| | gemeten | gecorrigeerd |
+|---|---|---|
+| SEO totaal ma-do | −9,0% | **−9,8%** (233.282 vs 258.735) |
+| SEO PLP | −0,8% | **−5,8%** |
+
+R-url en C-url zijn niet geraakt — de hertagging zit uitsluitend op productpagina's — dus de
+kernconclusie verandert niet. Maar de uitspraak "PLP loopt onaangedaan door, dat is het bewijs dat
+dit geen meetfout is" was voor 26-27 aug niet houdbaar, en die had ik als argument gebruikt. Les:
+als een vlakke lijn je bewijs is dat er niets stuk is, controleer die lijn dan net zo hard als de
+lijnen die wél bewegen.
+
+### Twee kleine gotchas
+
+- **`tag` is een reserved word in Redshift.** `CASE ... END AS tag` faalt met een syntaxfout op de
+  alias. Gebruik `pla_tag` of iets anders.
+- **`dim_visit.url` houdt de querystring vast**, inclusief `?utm_medium=paid-search&utm_source=dma&utm_campaign=PLA%2F...`.
+  Dat is precies wat de misattributie zichtbaar maakte. Bijvangst: er zitten al langer
+  `utm_medium=paid-search`-URL's ónder `aff_id = 0`, dus een tweede, kleinere leak van betaald naar
+  SEO die losstaat van 25 aug.
+
 ## Een top-N is nutteloos als de verdeling vlak is, en de dekking hoort in beeld (2026-08-28, Bot Hits statuscodes)
 
 Joeps vraag: vanuit de statusuitsplitsing in "Hits per dag" door kunnen klikken naar de URL's erachter.
