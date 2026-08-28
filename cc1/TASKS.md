@@ -35,6 +35,10 @@ Gedaan:
       tools ongemoeid. Een 404 op deze API benoemt nu zichzelf in plaats van "Kon niet starten".
 - [x] **Memory** `taxonomy_facet_maincat_scope` — 1 facet = 1 maincat via CategoryFacets;
       productlijn-facetten hebben géén CategoryFacet-rij.
+- [x] **Witruimte onder de infobanner** (`7b504c7`): `.info-note` heeft geen eigen marge, dus
+      de banner boven "Per main categorie" plakte tegen de tabelkop. `mb-4` in plaats van de
+      `mb-3` uit het blueprint-voorbeeld, want dat voorbeeld is één regel en dit een blok van
+      zes. Regel toegevoegd aan UI_BLUEPRINT §Info banners.
 - [x] **Duplicaat-CSS weer opgeruimd** (`5cd106f`): het `.tool-table`-blok en een eigen
       `.info-banner`/`num-col` zijn eruit, de pagina gebruikt nu de gedeelde `style.css`-basis
       plus `.col-center` en `.info-note`. Alleen de cel-padding blijft pagina-eigen, met de

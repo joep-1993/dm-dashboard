@@ -973,6 +973,14 @@ The class is declared **once** in `css/style.css`; never re-declare it per page
 (it was duplicated verbatim in seo-stats / healthscore / shop-campaigns before
 being consolidated). In use in SEO stats, Healthscore, Shop-campaigns, Thema Ads.
 
+**`.info-note` carries no margin of its own**, so the spacing utility in the
+example above is not decoration — leave it off and the banner sits flush against
+whatever follows. `mb-3` fits the one-line case the example shows; a banner of
+several lines standing directly above a table wants **`mb-4`**, otherwise the
+sticky table header reads as part of the banner (Joep, 2026-08-28, on Facet
+Watch's "Per main categorie"). A page that needs more inner room adds a
+`.roomy`-style padding modifier — a modifier, never a second colour declaration.
+
 ## Labels / badges — never lean on Bootstrap's colour names
 
 `style.css` re-themes `.bg-success`, `.bg-info` and `.bg-primary:not(.navbar)` to
