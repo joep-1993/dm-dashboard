@@ -1,6 +1,143 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een naam die al een ander begrip dekt, is een bug (2026-08-31, Healthscore / nav-iconen)
+
+Twee losse meldingen van Joep op dezelfde middag, met dezelfde vorm eronder: iets heette of
+tekende iets anders dan het was, en de kosten daarvan zijn verwarring bij de volgende lezer.
+
+### "Kopteksten" in de Healthscore-progressbar waren H1's
+
+Joep zag tijdens een Testcats-preview `Redshift: kopteksten ophalen…` en vroeg wat dat betekende.
+Het label was fout: in dit project is **kopteksten** de vaste alias voor `content_top` uit de
+Kopteksten-tool — die drie regels lager in het navigatiemenu van diezelfde pagina staat.
+
+Wat er werkelijk draait is `fetch_page_headings`: die leest **`dim_visit.page_heading`** over 365
+dagen SEO-visits en neemt per URL de meest bezochte H1. Een waarneming uit het verkeer, geen
+gegenereerde content. De backend noemde de stap al `headings` (`healthscore_runs.py:416`); alleen
+de vertaling naar het scherm was mis. Nu `Redshift: H1's per URL ophalen…`.
+
+**Waar die H1 vervolgens voor dient, staat nergens in de UI en is geen detail:** hij wordt de
+**ankertekst** in de sitemap-payload (`keywords.append({"url": …, "keywords": hit[0], …})`), en
+een URL **zonder H1 valt volledig af** (`skipped["no_heading"]`). Dat is een harde poort op wat
+er in de sitemap komt. Daarom hangt er nu een `title` aan het label. Een tooltip op een
+voortgangsregel is normaal een slechte plek — hier niet: die fase duurt bij één categorie ~3 van
+de 3,5 minuten, dus hij staat lang genoeg om gelezen te worden.
+
+### De nav-iconen: één afwijkende pagina, en één glyph met twee betekenissen
+
+Joep zag bij Thema Ads een hartje in de dropdown terwijl de startpagina een kerstboom toont.
+Twee verschillende problemen, en het tweede was er niet gevonden zonder de check.
+
+**`bothits.html` had een eigen set.** Die pagina week op **11 tools** af van de 33 andere. Geen
+van die elf stond ergens anders zo — die nav is los van de rest geschreven. Dit is de prijs van
+een nav die per pagina gedupliceerd is: er is geen enkele plek die "de" iconenset bevat, dus
+drift is niet detecteerbaar zonder er expliciet naar te zoeken.
+
+**En drie tools weken op álle pagina's af van de startpagina**, waarvan één erger dan een
+mismatch: het T-glyph (`M4 7V4h16v3` / `M12 4v16` / `M9 20h6`) stond op de startpagina bij **SEO
+titles** en in de dropdown bij **Unique Titles**. Hetzelfde teken voor twee tools, afhankelijk
+van waar je kijkt — precies de verwarring die een icoon hoort weg te nemen. Startpagina is
+leidend: T voor SEO titles, U voor Unique Titles, en GSD Check van vinkje-in-kader naar
+vinkje-in-cirkel.
+
+**Methode die dit vond, en die herhaalbaar is:** niet met de hand kijken, maar het
+meerderheidsicoon per tool over alle pagina's afleiden en dat vergelijken met de tegel op
+`dashboard.html`. De vergelijking moet op **motief** en niet op string: de nav is 14px en laat
+details weg die daar dichtslibben (Thema Ads' stam), dus de toets is "nav-shapes ⊆ tegel-shapes"
+en niet gelijkheid. Eindstand 33/33, en geen tool met verschillende iconen tussen pagina's.
+
+Let op bij een volgende ronde: **`_tool-template.html` draagt helemaal geen iconen.** Wie daar
+een nieuwe pagina van kopieert begint dus zonder, en dan is de volgende drift een kwestie van
+tijd. Zelfde achterstand die bij Facet Watch al als open taak stond.
+
+## De tegels stonden er al; wat ontbrak was context (2026-08-31, Shop campaigns)
+
+Joep vroeg of er iets uit SEO Stats naar Shop campaigns kon — donuts, en tegels voor
+Impressies/CTR/Avg CPC. Antwoord op de tweede helft: **die tegels bestonden al.** `METRICS`
+draagt alle negen metrics en ze worden als `.stat-card` gerenderd; op deze pagina zijn ze zelfs
+de legenda én de aan/uit-knop van de grafiek. De meetbare afwijking zat elders: `stat-delta` /
+`pctBadge` / `tile-spark` kwamen hier **0 keer** voor tegen **21 keer** in SEO Stats.
+
+Les voor dit soort vragen: eerst tellen wat er al staat. "Kan dit element hierheen" is soms
+"het staat er, maar zonder de helft die het bruikbaar maakt".
+
+### De periodevergelijking kostte geen backend-wijziging
+
+`/performance` neemt een willekeurig bereik en cachet per bereik, dus het even lange venster
+ervóór is gewoon een tweede call. Niet awaiten: tegels, grafiek en tabel staan er al.
+
+Twee dingen die daarbij fout kunnen gaan en hier expliciet gedekt zijn:
+
+- **Meet het venster aan de dagen die de API ÉCHT teruggaf**, niet aan de datumkiezer. Geeft de
+  API minder dagen terug dan het bereik, dan telt de basislijn er meer dan de huidige periode en
+  lees je een verschil dat niets met de trend te maken heeft.
+- **De await kan zijn load overleven.** `renderStats()` leest `lastData`, dus doorgaan zonder
+  `loadToken`-check is precies hoe de basislijn van run A bij de totalen van run B komt.
+
+### Kleur volgt de betekenis, het cijfer blijft staan
+
+`LOWER_IS_BETTER` = {cost, avg_cpc}, dus dalende kosten zijn groen. Maar het teken en het getal
+veranderen niet: stijgende kosten tonen "+8%" in rood, niet "−8%". Het cijfer liegen om de kleur
+te laten kloppen is erger dan geen kleur.
+
+### Wat een sparkline in een bestaande tegel stukmaakt
+
+`toggleMetricFromTile` riep `renderStats()` aan. Dat was gratis toen een tegel drie regels HTML
+was, maar met sparklines erbij sloopt en herbouwt elke klik **tien Chart.js-instanties** terwijl
+er alleen een rand en een stip van dekking veranderen. Hij werkt nu alleen de aangeklikte tegel
+bij. Generieke vorm: **als je een goedkope renderfunctie duur maakt, controleer wie hem
+aanroept** — niet alleen of hij zelf nog klopt.
+
+En de skeleton moet dezelfde ruimte reserveren als de geladen tegel (badge + lijn), anders is een
+ladende tegel lager dan een geladen tegel en springt de hele rij bij elke fetch.
+
+## Een dimensie toevoegen zonder de granulariteit te slopen (2026-08-31, Shop campaigns devices)
+
+De device-split was de reden dat ik stap 2 eerst wilde bespreken: `segments.device` aan
+`_fetch_account_daily` hangen verdrievoudigt elke dagrij, en de dagreeks, de totalen-tegels, de
+grafiek én de tabel lezen allemaal diezelfde structuur. Eén goedkoop lijkende wijziging landt dan
+op vier consumenten.
+
+**Oplossing: een aparte query en een apart endpoint.** `get_devices()` doet zijn eigen
+bereik-geaggregeerde query (`SELECT segments.device, …` op `FROM campaign`), en niets bestaands
+verandert van vorm. Bereik-geaggregeerd en niet per dag: de module antwoordt op "hoe ziet de mix
+eruit over deze periode", en dat is één rij per device.
+
+Werkte in één keer tegen SA360, óók met de twee Totaal-custom-columns erin.
+
+### De correctheidscheck die je hier gratis krijgt
+
+De som over de devices moet gelijk zijn aan `totals`, en `totals` moet gelijk zijn aan wat
+`/performance` voor hetzelfde bereik teruggeeft. Beide klopten (5.039 impressies, 428 clicks,
+€ 32,56, € 37,25). Alleen marge week € 0,01 af, want elke device wordt op twee decimalen
+afgerond en het totaal één keer. **Een splitsing die niet optelt naar het ongesplitste totaal is
+een bug, en dat is in twee regels te toetsen.**
+
+### Alleen deel-van-geheel mag een ring
+
+Impressies, clicks, kosten en omzet krijgen een donut. **CTR, conv. rate en avg CPC niet:** dat
+zijn ratio's, die tellen niet op naar het totaal, dus een ring zou liegen over wat het geheel is.
+Die horen in de tabel eronder — en die tabel is tegelijk de legenda van de ringen. Vandaar dat
+hij niet optioneel is.
+
+Over de vorm: ik had eerst een 100% gestapelde staaf aangeraden omdat de dataviz-skill donuts
+afraadt bij dicht bij elkaar liggende waarden. Bij deze data gaat dat argument niet op — mobiel
+57,9% tegen desktop 32,2% is 25 procentpunt. Het advies was juist, de toepassing niet: **check of
+de reden voor een regel in dit geval opgaat voordat je hem toepast.**
+
+Kleuren letterlijk uit `DEVICE_STYLE` van seo-stats.html. Zelfde entiteit, zelfde kleur, over
+beide pagina's — en `validate_palette.js` zit in de dataviz-skill en niet in deze repo, dus een
+eigen trio verzinnen zou onmeetbaar zijn geweest. Devices komen in een **vaste** volgorde terug
+(`DEVICE_ORDER`) en niet op volume: op volume sorteren herschikt de kleuren zodra de mix
+verschuift, wat "kleur volgt de entiteit" verbiedt.
+
+### En de eerste run leverde meteen een bevinding
+
+Tablet heeft de hoogste CTR (10,40% tegen 8,47% mobiel) en de laagste CPC (€ 0,04), maar is als
+enige device negatief op marge (− € 0,39). Precies het soort ding dat in een ongesplitst totaal
+verdwijnt — en het argument voor de module in één regel.
+
 ## Een foutstring van weken oud is geen set-definitie (2026-08-31, FAQ-opruiming / invalid facets)
 
 Vervolg op de FAQ-sessie van dezelfde dag. Joep vroeg de gefaalde FAQ-jobs op pending te zetten,

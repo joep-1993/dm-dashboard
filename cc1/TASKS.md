@@ -4,6 +4,49 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-31 (3) — Redirect Generator push, naamgeving, nav-iconen, Shop campaigns
+
+Vier losse vragen van Joep in één middag. Lessen in LEARNINGS (zelfde datum: "Een naam die al
+een ander begrip dekt", "De tegels stonden er al", "Een dimensie toevoegen zonder de
+granulariteit te slopen"). Commits `42eb65d`, `f35f9a8`, `776b1cc`, `c8a9bf4`, `9e12d0a`.
+
+Gedaan:
+
+- [x] **Redirect Generator: rijen selecteren en doorduwen naar de Redirect tool** (`42eb65d`),
+      in dezelfde vorm als Canonicals. Status code op 301 en Country als select `NL+BE/NL/BE`,
+      want `normalize_country` maakt daar `"nl, be"` van en dat zit in `url_UNIQUE` — een
+      typefout daar botst met een duplicate-key error (de oorzaak van run #22). Preflight
+      getest met de echte payload; bewust niet gesubmit.
+- [x] **XSS-gat in diezelfde renderfunctie gedicht**: de cellen stonden op
+      `onclick="copyToClipboard('${escapeHtml(...)}')"` met een `escapeHtml` die alleen `'` en
+      `"` verving. Nu event-delegatie + een echte escaper, zoals Canonicals.
+- [x] **Healthscore-label "kopteksten" → "H1's per URL"** (`f35f9a8`), met een `title` die zegt
+      waar die H1 voor dient (ankertekst in de sitemap; zonder H1 valt de URL af).
+- [x] **Nav-iconen gelijkgetrokken** (`776b1cc`): 112 iconen in 34 bestanden. `bothits.html`
+      week op 11 tools af, en het T-glyph betekende SEO titles op de startpagina en Unique
+      Titles in de dropdown. Nu 33/33 gelijk aan de startpagina, geen drift tussen pagina's.
+- [x] **Shop campaigns: periodevergelijking + sparkline op de tegels** (`c8a9bf4`). Geen
+      backend-wijziging nodig; deltas handmatig nagerekend tegen de API.
+- [x] **Shop campaigns: Device split als eigen module** (`9e12d0a`), met een nieuw
+      `/api/shop-campaigns/devices`. Som over devices = totals = `/performance`-totals.
+- [x] **Backend herstart** (pid 45579) — daarmee zijn ook de `gsd_ll`-fix en de patch van
+      l.davidowski live. De `gsd_ll`-fix is bevestigd in het log: geen retry-regels meer,
+      startup-vertraging van 20,00s naar 0.
+
+Open:
+
+- [ ] **`_tool-template.html` draagt geen nav-iconen.** Wie daar een nieuwe pagina van kopieert
+      begint zonder, en dan is de volgende icoon-drift een kwestie van tijd. Zelfde achterstand
+      als bij Facet Watch genoteerd. Bewust buiten `776b1cc` gehouden: dat was gelijktrekken van
+      bestaande iconen, dit is er 33 toevoegen.
+- [ ] **Copy for Excel / Download Excel in Redirect Generator exporteren alle rijen**, niet de
+      selectie. Nu de selectie bestaat is dat een inconsistentie.
+- [ ] **Device split kent nog geen periodevergelijking.** De tegels hebben er een, de ringen
+      niet — daar zou een tweede `/devices`-call voor nodig zijn. Alleen doen als je het mist.
+- [ ] **Device split is bereik-geaggregeerd, niet per dag.** Een trend per device (mobiel stijgt
+      / desktop daalt) kan dus niet. Bewuste keuze; 3-6x de rijen voor een vraag die nog niet is
+      gesteld.
+
 ### 2026-08-31 (2) — Invalid-facet URL's verwijderd, gsd_ll startup-hang, GSD-invitation patch
 
 Vervolg op de FAQ-sessie van dezelfde dag. Lessen in LEARNINGS (zelfde datum, "Een foutstring van
