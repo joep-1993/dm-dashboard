@@ -653,6 +653,8 @@
     // Categoriekiezer — cascade maincat → categorie
     // ------------------------------------------------------------------ //
     let MAINCATS = [], DEEPEST = [], PICKED = null, ddMain = null, ddCat = null;
+    // De restbak-maincat, zie het filter in rebuildPickers().
+    const HIDDEN_MAINCAT_ID = 11111;   // !Overig
     const scopeValue = () => document.querySelector('input[name="hsScope"]:checked').value;
 
     // Beide scopes in één keer ophalen: de cascade heeft de maincat-ids nodig (voor
@@ -679,17 +681,30 @@
         const scope = scopeValue();
         const perMain = {};
         DEEPEST.forEach(c => { const k = c.parent || ''; perMain[k] = (perMain[k] || 0) + 1; });
-        const main = MAINCATS.map(m => ({
-            key: 'm' + m.id, id: m.id, name: m.name,
-            meta: `${fmtN(perMain[m.name] || 0)} cats`,
-        }));
+        const main = MAINCATS
+            // !Overig (id 11111) is de restbak en geen echt doel voor een run, dus hij
+            // staat niet in de maincat-keuze. Op ID en niet op naam: een naamfilter
+            // breekt zodra iemand hem hernoemt, en op een "!"-prefix filteren zou een
+            // toekomstige maincat met datzelfde teken meenemen.
+            // NB dit verbergt hem alleen in DEZE keuzelijst. `DEEPEST` blijft ongemoeid,
+            // dus een run op "Alle maincats" dekt nog exact dezelfde categorieën als
+            // voorheen — wat een run doet is niet stil veranderd omdat een dropdown
+            // korter werd.
+            .filter(m => m.id !== HIDDEN_MAINCAT_ID)
+            .map(m => ({
+                key: 'm' + m.id, id: m.id, name: m.name,
+                meta: `${fmtN(perMain[m.name] || 0)} cats`,
+            }));
         // "Alle maincats" alleen bij niveau Deepest: als doel van een maincat-run
         // bestaat het niet, en dan zou het een keuze zijn die nooit mag draaien.
         if (scope === 'deepest') {
             main.unshift({key: '*', name: 'Alle maincats', meta: `${fmtN(DEEPEST.length)} cats`});
         }
         ddMain.setItems(main);
-        ddMain.setPlaceholder(scope === 'maincat' ? '— kies een maincat —' : '— alle of één maincat —');
+        // Het label boven de knop zegt al wat het veld is, dus de placeholder hoeft
+        // hem niet nog eens uit te leggen. Eén tekst voor beide niveaus: twee
+        // verschillende placeholders op dezelfde knop leest als een fout.
+        ddMain.setPlaceholder('Maincat');
         ddMain.setDisabled(false);
         refreshCatItems();
         syncPicked();
@@ -712,7 +727,7 @@
             // dezelfde naam hebben in twee maincats.
             meta: m.key === '*' && c.parent ? esc(c.parent) : '',
         })));
-        ddCat.setPlaceholder(rows.length ? '— kies een categorie —' : 'geen categorie in deze maincat');
+        ddCat.setPlaceholder(rows.length ? 'Diepste cat' : 'geen categorie in deze maincat');
         ddCat.setDisabled(!rows.length);
     }
 
