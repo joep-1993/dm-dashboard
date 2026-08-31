@@ -821,7 +821,7 @@
         const isPush = job.action === 'push';
         const det = p.phase === 'cat' && p.total > 0;
         const pct = det ? Math.round((p.done / p.total) * 100) : 0;
-        let label;
+        let label, hint = '';
         if (job.status === 'queued')    label = 'in de wachtrij…';
         else if (p.phase === 'cat')     label = `${isPush ? 'Push' : 'Categorie'} ${p.done + 1} van ${p.total}`
                                               + (p.what ? ` — ${esc(p.what)}` : '');
@@ -831,10 +831,20 @@
         // De prep-fase is bij één categorie bijna de hele run, dus hij zegt wélke
         // Redshift-stap loopt in plaats van drie minuten dezelfde regel.
         else if (p.step === 'visits')   label = 'Redshift: SEO-visits per URL ophalen…';
-        else                            label = 'Redshift: kopteksten ophalen…';
+        // Heette tot 2026-08-31 "kopteksten ophalen", en dat las als de content_top
+        // uit de Kopteksten-tool — die in het navigatiemenu van deze pagina staat.
+        // Het zijn H1's: fetch_page_headings leest dim_visit.page_heading over 365
+        // dagen SEO-visits en neemt per URL de meest bezochte. Eén begrip, één woord.
+        else {
+            label = "Redshift: H1's per URL ophalen…";
+            hint = "De H1 zoals bezoekers hem zagen (dim_visit.page_heading, 365 dagen "
+                 + "SEO-visits, per URL de meest voorkomende). Die wordt de ankertekst "
+                 + "in de sitemap — een URL zonder H1 valt af. Niet de kopteksten "
+                 + "(content_top) uit de Kopteksten-tool.";
+        }
         el.innerHTML = `<div>`
             + `<div class="d-flex justify-content-between align-items-center small text-muted mb-1">`
-            + `<span>${label}</span><span>${det ? pct + '%' : ''}</span></div>`
+            + `<span${hint ? ` title="${esc(hint)}"` : ''}>${label}</span><span>${det ? pct + '%' : ''}</span></div>`
             + `<div class="progress${det ? '' : ' indeterminate'}" style="height:1.1rem;" aria-busy="true">`
             + `<div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar"`
             + ` style="width:${det ? pct : 100}%; background-color:#00b894;"`
