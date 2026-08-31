@@ -4,6 +4,36 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-31 (4) — Nazorg: sparklines en de Healthscore-dropdown
+
+Twee kleine correcties op Joeps melding. Lessen in LEARNINGS (zelfde datum, "Meet de DOM in
+plaats van over layout te redeneren"). Commits `baaa8fe`, `2fe77bf`.
+
+Gedaan:
+
+- [x] **Sparklines in Shop campaigns**: `fill: 'start'` i.p.v. `fill: true` (dat is `'origin'`,
+      en Margin is 16/30 dagen negatief) en `grace: '12%'` op de y-as, zodat de toppen niet
+      meer half buiten het 30px-canvas vallen. Eerst gemeten dat het GEEN maatprobleem was:
+      canvas 87,0x30,0 in een wrapper van 87,2x30,0, alle tien gelijk.
+- [x] **Healthscore: `!Overig` uit de maincat-keuze**, gefilterd op id 11111 en niet op naam.
+      Alleen de keuzelijst; `DEEPEST` blijft ongemoeid zodat een alle-maincats-run dezelfde
+      3.569 categorieën dekt als voorheen.
+- [x] **Placeholders**: "Maincat" en "Diepste cat"; "kies eerst een maincat" en "geen categorie
+      in deze maincat" ongewijzigd. De maincat-knop had twee placeholders (één per niveau) —
+      nu allebei "Maincat".
+- [x] **Geverifieerd in de browser en niet statisch**, want `paintList()` draait pas als de
+      dropdown open is: lijst geopend en uitgelezen (32 items = 31 maincats + "Alle maincats",
+      geen !Overig), daarna programmatisch een maincat gekozen voor de tweede placeholder.
+
+Open:
+
+- [ ] **`seo-stats.html` draagt dezelfde `fill: true` + geen `grace` op zijn sparklines.** Het
+      fill-gedrag valt daar niet op omdat geen van die metrics negatief kan worden, en de
+      afkapping is milder door een hogere tegel (34px). Latent, bewust niet meegenomen — maar
+      zodra daar een metric bij komt die door nul kan gaan, is het dezelfde bug.
+- [ ] **!Overig blijft bereikbaar via "Alle maincats"** in de Categorie-lijst, en zit nog in
+      een alle-maincats-run. Bewuste keuze (zie boven); wachten op Joep of dat óók weg moet.
+
 ### 2026-08-31 (3) — Redirect Generator push, naamgeving, nav-iconen, Shop campaigns
 
 Vier losse vragen van Joep in één middag. Lessen in LEARNINGS (zelfde datum: "Een naam die al

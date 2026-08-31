@@ -1,6 +1,65 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Meet de DOM in plaats van over layout te redeneren (2026-08-31, sparklines + Healthscore-dropdown)
+
+Twee kleine fixes, met drie dingen die opnieuw gaan bijten.
+
+### `fill: true` is in Chart.js `'origin'`, niet "tot de bodem"
+
+De belangrijkste. Joep zag dat het vlak onder de Margin-sparkline niet gekleurd was.
+`fill: true` is een alias voor `fill: 'origin'` — vullen tot **y=0**, niet tot de onderkant
+van de schaal. Zolang een reeks nooit negatief wordt is dat hetzelfde, dus het gaat jaren
+goed en valt dan ineens om.
+
+Margin in Shop campaigns is **16 van de 30 dagen negatief** (−1,95 tot +4,22): daar vulde
+hij alleen de band tussen de lijn en de nullijn, en het vlak eronder bleef leeg. Bij een
+reeks met minimum 0 (Revenue) gaf datzelfde gedrag een lage band in plaats van een vlak
+onder de lijn. `fill: 'start'` vult tot de onderkant van de schaal en geeft elke reeks
+dezelfde wash, of hij door nul gaat of niet.
+
+**`seo-stats.html` draagt exact dezelfde instelling** en het valt daar niet op omdat geen
+van die metrics negatief kan worden. Latent, niet gefixt.
+
+### Een sparkline zonder `grace` kapt zijn eigen toppen af
+
+Zonder marge loopt de y-as exact van datamin tot datamax, dus het hoogste punt wordt op de
+bovenste pixel getekend en de helft van de lijndikte valt buiten het canvas. Op een grafiek
+van 300px merk je dat niet; op 30px leest het als een afgekapte piek. `grace: '12%'` op de
+y-as, als percentage en niet als vaste pixels, want elke metric heeft een ander bereik.
+
+### En de fout die ik bijna maakte: een hypothese over layout
+
+Mijn eerste vermoeden was dat het canvas smaller was dan de tegel — "valt niet goed in de
+tegel" klinkt als een maatprobleem. In plaats van dat te geloven heb ik een harnas in de
+pagina gezet dat elke tegel zijn eigen `getBoundingClientRect()` liet opschrijven en dat
+één keer gerenderd. Uitkomst: **alle tien identiek, canvas 87,0x30,0 in een wrapper van
+87,2x30,0.** Geen maatprobleem, en de echte oorzaken lagen ergens anders.
+
+Kost tien regels en één screenshot, en het scheelt een middag sleutelen aan flexbox die al
+klopte. **Bij "het valt niet goed in de X": laat de browser de maten opschrijven voordat je
+CSS aanraakt.**
+
+### Een lazy dropdown is niet statisch te verifiëren
+
+`makeDropdown()` in healthscore.html vult zijn lijst in `paintList()`, en dat draait
+**alleen als het paneel open is** (`if (root.classList.contains('is-open')) paintList()`).
+Een probe die meteen `.dd-list [role="option"]` uitleest krijgt er nul terug — wat er
+uitziet als "de filter werkt" maar in werkelijkheid niets bewijst. Eerst `#ddMainToggle`
+klikken, dán uitlezen. Dat verschil tussen "0 items gevonden" en "0 items aanwezig" is
+precies waar een verificatie stiekem waardeloos wordt.
+
+### Iets uit een keuzelijst halen is niet hetzelfde als het uit de data halen
+
+Joep vroeg `!Overig` uit de maincat-dropdown te halen. Gefilterd op **id 11111 en niet op
+naam**: een naamfilter breekt bij hernoemen, en filteren op de "!"-prefix zou een
+toekomstige maincat met datzelfde teken meepakken.
+
+Bewust alléén de keuzelijst gefilterd en niet `DEEPEST`. Een run op "Alle maincats" dekt
+dus nog exact dezelfde 3.569 categorieën, en !Overig blijft langs die route bereikbaar.
+Een dropdown korter maken is een UI-keuze; veranderen wat een run doet is dat niet, en die
+twee moeten niet in één wijziging zitten zonder dat iemand erom vroeg.
+
 ## Een naam die al een ander begrip dekt, is een bug (2026-08-31, Healthscore / nav-iconen)
 
 Twee losse meldingen van Joep op dezelfde middag, met dezelfde vorm eronder: iets heette of
