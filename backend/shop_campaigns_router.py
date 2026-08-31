@@ -4,7 +4,8 @@ import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
-from backend.shop_campaigns_service import get_performance, get_inventory, get_top_performers
+from backend.shop_campaigns_service import (get_performance, get_inventory, get_top_performers,
+                                            get_devices)
 
 logger = logging.getLogger(__name__)
 
@@ -61,4 +62,25 @@ async def inventory(
         return result
     except Exception as e:
         logger.error(f"Error fetching shop-campaigns inventory: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/devices")
+async def devices(
+    start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD (default: 30 days ago)"),
+    end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD (default: today)"),
+    force: bool = Query(False, description="Bypass the cache and re-query SA360"),
+):
+    """Device split (segments.device) of all SHOP/ campaigns over a date range.
+
+    Its own endpoint rather than an extra dimension on /performance: that payload
+    feeds the per-day chart, the totals tiles and the table, and none of those
+    want a device axis. See get_devices() for the full reasoning.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(executor, get_devices, start_date, end_date, force)
+        return result
+    except Exception as e:
+        logger.error(f"Error fetching shop-campaigns device split: {e}")
         raise HTTPException(status_code=500, detail=str(e))

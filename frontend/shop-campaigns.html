@@ -98,6 +98,37 @@
         }
         .spark-tip .st-date { color: #a9a9b5; font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em; }
         .spark-tip .st-val { font-weight: 700; }
+        /* ---- Device split, overgenomen uit het Dagoverzicht van seo-stats.html ----
+           Ringvorm: wijde cutout, 2px wit tussen de bogen, ronde uiteinden en het
+           totaal als heldengetal in het gat. */
+        .dash-sub { font-size: 0.78rem; text-transform: uppercase; letter-spacing: .04em;
+                    color: #8a8a8a; margin-bottom: 6px; }
+        .donut-wrap { position: relative; height: 190px; margin-bottom: 4px; }
+        .donut-center { position: absolute; inset: 0; display: flex; flex-direction: column;
+                        align-items: center; justify-content: center; pointer-events: none;
+                        z-index: 1; }
+        .donut-center .dc-total { font-size: 1.28rem; font-weight: 700; color: #2d2a3a; line-height: 1.1; }
+        .donut-center .dc-cap { font-size: 0.66rem; text-transform: uppercase;
+                                letter-spacing: .04em; color: #8a8a8a; margin-top: 2px; }
+        /* Chart.js tekent zijn eigen tooltip BINNEN het canvas, en .donut-center ligt
+           daar als absolute div bovenop — dan bloedt het middengetal er altijd door.
+           Vandaar een externe DOM-node in .donut-wrap, waar een z-index boven
+           .donut-center wel wint. */
+        .donut-tip { position: absolute; z-index: 3; pointer-events: none;
+                     opacity: 0; transition: opacity .12s ease;
+                     display: flex; align-items: center; gap: 6px; white-space: nowrap;
+                     background: #242628; color: #b9b9c4; font-size: 0.75rem;
+                     padding: 8px 10px; border-radius: 10px;
+                     box-shadow: 0 4px 14px rgba(0,0,0,.25);
+                     transform: translateX(-50%); }
+        .donut-tip.is-on { opacity: 1; }
+        .donut-tip .dt-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+        .donut-tip .dt-label { color: #f0f0f3; font-weight: 600; }
+        /* Kleurstip vóór de devicenaam in de tabel: die tabel is tegelijk de legenda
+           van de vier ringen, dus de kleur moet er letterlijk in staan. */
+        .dev-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+                   margin-right: 6px; vertical-align: 1px; }
+        #devTable tbody tr.dev-total td { font-weight: 700; border-top: 2px solid #dee2e6; }
         .perf-table { font-size: 0.9rem; }
         /* UI_BLUEPRINT table headers: grey #f8f9fa, sticky, 6px 14px, 1rem
            (a touch larger than the 0.9rem body), bold — not the old purple
@@ -312,6 +343,48 @@
                 </div>
                 <div id="infoNote" class="info-note mb-3" style="display:none;"></div>
                 <div class="chart-wrap"><canvas id="chart"></canvas></div>
+            </div>
+        </div>
+
+        <!-- Device split — eigen module, zelfde vorm als Dagoverzicht in SEO Stats:
+             een rij ringen voor de verdeling, met daaronder een tabel die de
+             absolute cijfers EN de ratio's draagt. Een ratio is geen deel van een
+             geheel (CTR's tellen niet op naar 100%), dus die kan per definitie niet
+             in een ring — vandaar dat de tabel er hoort en niet optioneel is. -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2" style="background:#5e4a90; color:#fff;">
+                <h5 class="mb-0">Device split</h5>
+                <span id="devMeta" class="small" style="opacity:.85;"></span>
+            </div>
+            <div class="card-body">
+                <div class="row g-4" id="devDonuts">
+                    <div class="col-lg-3 col-md-6">
+                        <div class="dash-sub">Devices &ndash; Impressies</div>
+                        <div class="donut-wrap"><canvas id="devDonutImpr"></canvas>
+                            <div class="donut-center" id="devCenterImpr"></div></div>
+                    </div>
+                    <div class="col-lg-3 col-md-6">
+                        <div class="dash-sub">Devices &ndash; Clicks</div>
+                        <div class="donut-wrap"><canvas id="devDonutClicks"></canvas>
+                            <div class="donut-center" id="devCenterClicks"></div></div>
+                    </div>
+                    <div class="col-lg-3 col-md-6">
+                        <div class="dash-sub">Devices &ndash; Kosten</div>
+                        <div class="donut-wrap"><canvas id="devDonutCost"></canvas>
+                            <div class="donut-center" id="devCenterCost"></div></div>
+                    </div>
+                    <div class="col-lg-3 col-md-6">
+                        <div class="dash-sub">Devices &ndash; Omzet</div>
+                        <div class="donut-wrap"><canvas id="devDonutRevenue"></canvas>
+                            <div class="donut-center" id="devCenterRevenue"></div></div>
+                    </div>
+                </div>
+                <div class="table-responsive mt-3">
+                    <table class="table table-sm tool-table perf-table mb-0" id="devTable">
+                        <thead><tr id="devTableHead"></tr></thead>
+                        <tbody id="devTableBody"></tbody>
+                    </table>
+                </div>
             </div>
         </div>
 
@@ -663,6 +736,179 @@
             tileDeltas = d;
             tileDeltaDays = n;
             renderStats();
+        }
+
+        // ---- Device split ------------------------------------------------------
+        // Kleuren letterlijk overgenomen uit DEVICE_STYLE in seo-stats.html. Zelfde
+        // entiteit, zelfde kleur, over beide pagina's — en het is een set die daar al
+        // gevalideerd en live is voor precies deze drie categorieën, dus er is geen
+        // nieuwe tint om te verantwoorden. De validator zelf zit in de dataviz-skill
+        // en niet in deze repo, dus een eigen trio verzinnen zou onmeetbaar zijn.
+        const DEVICE_STYLE = {
+            MOBILE:       { label: 'Mobiel',       color: '#1f99c4' },
+            DESKTOP:      { label: 'Desktop',      color: '#7BAB3A' },
+            TABLET:       { label: 'Tablet',       color: '#AA3A95' },
+            CONNECTED_TV: { label: 'Connected TV', color: '#936305' },
+            OTHER:        { label: 'Overig',       color: '#9a9aa6' },
+            UNKNOWN:      { label: 'Onbekend',     color: '#9a9aa6' },
+        };
+        // Alleen deel-van-geheel metrics krijgen een ring. CTR, conv. rate en avg CPC
+        // zijn ratio's: die tellen niet op naar het totaal, dus een ring zou liegen
+        // over wat het geheel is. Die staan in de tabel eronder.
+        const DEVICE_DONUTS = [
+            { key: 'impressions', canvas: 'devDonutImpr',    center: 'devCenterImpr',    cap: 'impressies' },
+            { key: 'clicks',      canvas: 'devDonutClicks',  center: 'devCenterClicks',  cap: 'clicks' },
+            { key: 'cost',        canvas: 'devDonutCost',    center: 'devCenterCost',    cap: 'kosten' },
+            { key: 'revenue',     canvas: 'devDonutRevenue', center: 'devCenterRevenue', cap: 'omzet' },
+        ];
+        let lastDevices = null;
+        const donuts = {};
+
+        function devStyle(dev) { return DEVICE_STYLE[dev] || { label: dev, color: '#9a9aa6' }; }
+
+        function hideDonutTips() {
+            document.querySelectorAll('.donut-tip').forEach(t => t.classList.remove('is-on'));
+        }
+
+        function donutTooltip({ chart, tooltip }) {
+            const wrap = chart.canvas.parentNode;
+            let tip = wrap.querySelector('.donut-tip');
+            if (!tip) {
+                tip = document.createElement('div');
+                tip.className = 'donut-tip';
+                wrap.appendChild(tip);
+            }
+            if (!tooltip.opacity || !(tooltip.dataPoints || []).length) {
+                tip.classList.remove('is-on');
+                return;
+            }
+            const colour = (tooltip.labelColors?.[0]?.backgroundColor) || '#9a9aa6';
+            tip.innerHTML = `<span class="dt-dot" style="background:${colour};"></span>`
+                          + `<span class="dt-label">${escapeHtml((tooltip.title || []).join(' '))}</span>`
+                          + `<span>${escapeHtml((tooltip.body || []).map(b => b.lines.join(' ')).join(' '))}</span>`;
+            tip.classList.add('is-on');
+            // caretX/Y zijn canvas-relatief; horizontaal klemmen zodat een boog aan de
+            // rand de tip niet buiten de kaart duwt.
+            const halfW = tip.offsetWidth / 2;
+            const wrapW = wrap.clientWidth;
+            let x = chart.canvas.offsetLeft + tooltip.caretX;
+            if (wrapW > tip.offsetWidth) x = Math.min(Math.max(x, halfW + 2), wrapW - halfW - 2);
+            tip.style.left = x + 'px';
+            tip.style.top = (chart.canvas.offsetTop + tooltip.caretY - 14) + 'px';
+        }
+
+        function renderDeviceDonut(spec, rows, total) {
+            const center = document.getElementById(spec.center);
+            hideDonutTips();   // een tip van de vorige render zou met oude cijfers blijven hangen
+            if (donuts[spec.key]) { donuts[spec.key].destroy(); donuts[spec.key] = null; }
+            const parts = rows.filter(r => Number(r[spec.key]) > 0);
+            if (!parts.length || !total) {
+                center.innerHTML = '<div class="dc-cap">Geen data</div>';
+                return;
+            }
+            const styles = parts.map(r => devStyle(r.device));
+            donuts[spec.key] = new Chart(document.getElementById(spec.canvas), {
+                type: 'doughnut',
+                data: {
+                    labels: styles.map(s => s.label),
+                    datasets: [{
+                        data: parts.map(r => r[spec.key]),
+                        backgroundColor: styles.map(s => s.color),
+                        borderColor: '#fff', borderWidth: 2, borderRadius: 6,
+                        spacing: 2, hoverOffset: 10, hoverBorderColor: '#fff',
+                    }],
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    cutout: '68%', layout: { padding: 6 },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            enabled: false, external: donutTooltip,
+                            callbacks: {
+                                label: ctx => ` ${fmt(spec.key, ctx.parsed)} · `
+                                    + (total ? (ctx.parsed / total * 100).toFixed(1).replace('.', ',') : '0') + '%',
+                            },
+                        },
+                    },
+                },
+            });
+            center.innerHTML = `<div class="dc-total">${fmtTile(spec.key, total)}</div>`
+                             + `<div class="dc-cap">${spec.cap}</div>`;
+        }
+
+        function renderDevices() {
+            const d = lastDevices;
+            const head = document.getElementById('devTableHead');
+            const body = document.getElementById('devTableBody');
+            const meta = document.getElementById('devMeta');
+            if (!d) return;
+            const rows = d.devices || [];
+            const tot = d.totals || {};
+            meta.textContent = rows.length
+                ? `${rows.length} device${rows.length === 1 ? '' : 's'} · ${d.start_date} t/m ${d.end_date}`
+                : '';
+
+            DEVICE_DONUTS.forEach(spec => renderDeviceDonut(spec, rows, tot[spec.key]));
+
+            head.innerHTML = '<th>Device</th><th class="text-end">Share (impr.)</th>'
+                + ORDER.map(k => `<th class="text-end">${METRICS[k].label}</th>`).join('');
+            if (!rows.length) {
+                body.innerHTML = `<tr><td colspan="${2 + ORDER.length}" class="text-center text-muted py-3">Geen device-data in dit bereik</td></tr>`;
+                return;
+            }
+            const share = r => tot.impressions ? (r.impressions / tot.impressions * 100) : 0;
+            body.innerHTML = rows.map(r => {
+                const st = devStyle(r.device);
+                return `<tr><td><span class="dev-dot" style="background:${st.color}"></span>${escapeHtml(st.label)}</td>`
+                    + `<td class="text-end">${share(r).toFixed(1).replace('.', ',')}%</td>`
+                    + ORDER.map(k => `<td class="text-end">${fmt(k, r[k])}</td>`).join('')
+                    + '</tr>';
+            }).join('')
+            // Totaalregel: de ratio's hierin zijn opnieuw uit de somcomponenten
+            // berekend door de backend (_derive), niet het gemiddelde van de rijen —
+            // een gemiddelde van CTR's is geen CTR.
+            + `<tr class="dev-total"><td>Totaal</td><td class="text-end">100,0%</td>`
+            + ORDER.map(k => `<td class="text-end">${fmt(k, tot[k])}</td>`).join('') + '</tr>';
+        }
+
+        function showDeviceSkeleton() {
+            hideDonutTips();
+            Object.keys(donuts).forEach(k => { if (donuts[k]) { donuts[k].destroy(); donuts[k] = null; } });
+            DEVICE_DONUTS.forEach(s => {
+                document.getElementById(s.center).innerHTML = '<div class="dc-cap">laden…</div>';
+            });
+            document.getElementById('devMeta').textContent = '';
+            document.getElementById('devTableHead').innerHTML = '';
+            document.getElementById('devTableBody').innerHTML = skeletonRows(2 + ORDER.length);
+        }
+
+        async function loadDevices(force) {
+            const myToken = loadToken;
+            const start = document.getElementById('startDate').value;
+            const end = document.getElementById('endDate').value;
+            const params = new URLSearchParams();
+            if (start) params.set('start_date', start);
+            if (end) params.set('end_date', end);
+            if (force) params.set('force', 'true');
+            try {
+                const r = await fetch(`${API}/devices?${params}`);
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const payload = await r.json();
+                if (myToken !== loadToken) return;   // een nieuwere load bezit het scherm
+                lastDevices = payload;
+                renderDevices();
+            } catch (e) {
+                if (myToken !== loadToken) return;
+                // Elk faalpad moet het skeleton opruimen — een dode request mag niet
+                // eeuwig blijven shimmeren (UI_BLUEPRINT).
+                lastDevices = null;
+                document.getElementById('devTableBody').innerHTML =
+                    `<tr><td colspan="${2 + ORDER.length}" class="text-center text-danger py-3">Device split laden mislukt: ${escapeHtml(e.message)}</td></tr>`;
+                DEVICE_DONUTS.forEach(s => {
+                    document.getElementById(s.center).innerHTML = '<div class="dc-cap text-danger">Mislukt</div>';
+                });
+            }
         }
 
         // Local calendar date, NOT toISOString(): that converts to UTC first, so in
@@ -1124,6 +1370,7 @@
             document.getElementById('tableBody').innerHTML = skeletonRows(perDayCols);
             showChartSkeleton();
             showStatsSkeleton();
+            showDeviceSkeleton();
             Object.values(TOP_TABLES).forEach(t => {
                 document.getElementById(t.bodyId).innerHTML = skeletonRows(t.columns.length);
             });
@@ -1155,6 +1402,10 @@
                 // vergelijking is een tweede call op hetzelfde endpoint. Hij vult de
                 // badges aan zodra hij binnen is.
                 loadTileDeltas();
+                // Eigen call, eigen skeleton, eigen faalpad: de device-split is een
+                // aparte query op SA360 en mag de rest van de pagina niet ophouden of
+                // meesleuren als hij faalt.
+                loadDevices(force);
                 if (topRes.ok) {
                     lastTop = await topRes.json();
                     renderTop();

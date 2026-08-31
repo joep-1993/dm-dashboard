@@ -497,3 +497,131 @@ def get_top_performers(start_date: Optional[str] = None,
     with _cache_lock:
         _top_cache[key] = {"ts": time.time(), "data": data}
     return data
+
+
+# ---------------------------------------------------------------------------
+# Device split — one row per device over the whole range
+# ---------------------------------------------------------------------------
+# Deliberately a SEPARATE query and a separate endpoint, not an extra dimension
+# on _fetch_account_daily. Adding segments.device there would multiply every
+# per-day row by the number of devices, and the per-day series, the totals, the
+# chart and the table all read that same structure — so the cheap-looking change
+# would land on four consumers at once. This way nothing existing changes shape.
+#
+# Range-aggregated (no segments.date): the module answers "how does the mix look
+# over the selected period", which is one row per device. A per-day device series
+# would be 3-6x the rows for a trend nobody asked for yet.
+
+DEVICE_LABELS = {
+    "MOBILE": "Mobiel",
+    "DESKTOP": "Desktop",
+    "TABLET": "Tablet",
+    "CONNECTED_TV": "Connected TV",
+    "OTHER": "Overig",
+    "UNKNOWN": "Onbekend",
+    "UNSPECIFIED": "Onbekend",
+}
+# Fixed order, so the donut arcs and the legend keep the same sequence between
+# runs no matter which device happens to lead in a given range. Volume order
+# would reshuffle the colours as soon as the mix shifts — exactly what
+# "colour follows the entity" forbids (UI_BLUEPRINT / dataviz).
+DEVICE_ORDER = ["MOBILE", "DESKTOP", "TABLET", "CONNECTED_TV", "OTHER", "UNKNOWN"]
+
+_device_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
+
+
+def _device_key(raw) -> str:
+    """Enum -> stable string key. SA360 returns an enum whose .name is the label;
+    older client versions hand back a plain int, so fall back on str()."""
+    name = getattr(raw, "name", None) or str(raw)
+    name = name.upper()
+    return name if name in DEVICE_LABELS else "UNKNOWN"
+
+
+def _fetch_account_devices(customer_id: str, start: str, end: str) -> Dict[str, Dict[str, float]]:
+    """Base-metric sums per device for one account's SHOP/ campaigns."""
+    s = start.replace("-", "")
+    e = end.replace("-", "")
+    query = (
+        "SELECT segments.device, metrics.clicks, metrics.impressions, "
+        "metrics.cost_micros, metrics.conversions, "
+        f"custom_columns.id[{CC_TOTAAL_REVENUE}], custom_columns.id[{CC_TOTAAL_PROFIT}] "
+        "FROM campaign "
+        f"WHERE campaign.name LIKE '{SHOP_PREFIX}%' "
+        f"AND segments.date BETWEEN {s} AND {e}"
+    )
+    rows, pager = _search(customer_id, query)
+    rev_idx, prof_idx = _cc_indices(pager)
+
+    out: Dict[str, Dict[str, float]] = {}
+    for r in rows:
+        key = _device_key(r.segments.device)
+        acc = out.setdefault(key, {"clicks": 0.0, "impressions": 0.0, "cost": 0.0,
+                                   "conversions": 0.0, "revenue": 0.0, "margin": 0.0})
+        base = _base_from_row(r, rev_idx, prof_idx)
+        for k, v in base.items():
+            acc[k] += v
+    return out
+
+
+def get_devices(start_date: Optional[str] = None,
+                end_date: Optional[str] = None,
+                force: bool = False) -> Dict[str, Any]:
+    """Per-device aggregated performance of all SHOP/ campaigns over a range."""
+    start, end = _norm_dates(start_date, end_date)
+    key = (start, end)
+    with _cache_lock:
+        cached = _device_cache.get(key)
+        if cached and not force and (time.time() - cached.get("ts", 0)) < _PERF_TTL:
+            return cached["data"]
+
+    inv = get_inventory(force=force)
+    accounts = inv.get("accounts_with_shop") or CANDIDATE_ACCOUNTS
+
+    merged: Dict[str, Dict[str, float]] = {}
+    errors: List[str] = []
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futures = {ex.submit(_fetch_account_devices, cid, start, end): cid for cid in accounts}
+        for fut in as_completed(futures):
+            cid = futures[fut]
+            try:
+                for dev, vals in fut.result().items():
+                    m = merged.setdefault(dev, {"clicks": 0.0, "impressions": 0.0, "cost": 0.0,
+                                                "conversions": 0.0, "revenue": 0.0, "margin": 0.0})
+                    for k, v in vals.items():
+                        m[k] += v
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Shop-campaigns device split failed for {cid}: {e}")
+                errors.append(cid)
+
+    totals_base = {"clicks": 0.0, "impressions": 0.0, "cost": 0.0,
+                   "conversions": 0.0, "revenue": 0.0, "margin": 0.0}
+    for vals in merged.values():
+        for k in totals_base:
+            totals_base[k] += vals[k]
+
+    # Only devices that actually carry data, in the fixed order. A range with no
+    # tablet traffic gets no tablet arc rather than a 0% sliver in the legend.
+    devices: List[Dict[str, Any]] = []
+    for dev in DEVICE_ORDER:
+        vals = merged.get(dev)
+        if not vals or not any(vals.values()):
+            continue
+        row = _derive(vals)
+        row["device"] = dev
+        row["label"] = DEVICE_LABELS[dev]
+        devices.append(row)
+
+    data = {
+        "start_date": start,
+        "end_date": end,
+        "devices": devices,
+        "totals": _derive(totals_base),
+        "metrics": METRICS,
+        "accounts_scanned": len(accounts),
+        "accounts_failed": errors,
+        "generated_at": datetime.now(TZ).isoformat(),
+    }
+    with _cache_lock:
+        _device_cache[key] = {"ts": time.time(), "data": data}
+    return data
