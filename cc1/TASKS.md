@@ -4,6 +4,47 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-31 (2) — Invalid-facet URL's verwijderd, gsd_ll startup-hang, GSD-invitation patch
+
+Vervolg op de FAQ-sessie van dezelfde dag. Lessen in LEARNINGS (zelfde datum, "Een foutstring van
+weken oud is geen set-definitie" en "Een retry-lus mag alleen fouten vangen die echt tijdelijk
+zijn"). Commits `330486a` (patch van l.davidowski), `4133f5d`.
+
+Gedaan:
+
+- [x] **2.012 gefaalde FAQ-jobs met een live FAQ op pending gezet.** Splitsing eerst gemeten:
+      1.887 `invalid facet` (retry helpt niet, 12/12 opnieuw HTTP 400) en 125 `JSONDecodeError`
+      (herstelbaar).
+- [x] **Doelset opnieuw bepaald via de Search API** in plaats van via de opgeslagen foutstring:
+      7.367 kandidaten geprobed, **213 bleken weer geldig** en zijn gespaard.
+- [x] **7.154 URL's verwijderd**, cascade via `pa.urls` (Joeps keuze), met backups van alle
+      twaalf geraakte tabellen naar `pa.*_bak_invalidfacet_20260831` en de doelset in
+      `pa.del_targets_invalidfacet_20260831`. `faq_v2_push_state` + `kopteksten_push_state`
+      handmatig, want die missen de FK. `pa.urls`: 1.031.881 -> 1.024.727.
+- [x] **1.888 live FAQ's verwijderd** via `DELETE /faq?url=…`, 0 fouten, nagemeten op 80 URL's:
+      0 records over.
+- [x] **`gsd_ll_service` startup-hang van 20,00s weg** — `FileNotFoundError` uit de retry-lus.
+- [x] **Patch `gsd-invitation-retry.patch` van l.davidowski toegepast** met `git am`, dus met
+      behoud van auteurschap. Aannames vooraf gecontroleerd: blob matcht, `time` geïmporteerd,
+      signature van `_accept_mc_invitation` klopt, poll draait alleen bij `newly_linked`, en de
+      ~125s slapen zit in `run_gsd_script` die via `run_in_executor` draait.
+
+Open:
+
+- [ ] **531 verweesde kopteksten live.** Van de 7.154 verwijderde URL's hadden er 531
+      gepubliceerde kopteksten. Die staan nog op de pagina terwijl er geen DB-rij meer is —
+      hetzelfde weespatroon als de FAQ-stapeling van vanochtend, maar aan de koptekstenkant.
+      Weghalen kan via `DELETE /automated-content/records`; is live content verwijderen, dus
+      Joeps beslissing. Backup staat in `pa.kopteksten_content_bak_invalidfacet_20260831`.
+- [ ] **Wees-rijen in `bothits_url_daily`** voor de 7.154 verwijderde url_ids. Bewust laten
+      staan (bewaart de bot-hit-historie); ze vallen uit de Bot Hits-weergave omdat de join naar
+      `pa.urls` niet meer lukt. Opruimen alleen als iemand die historie niet wil bewaren.
+- [ ] **Nog 19.495 gefaalde FAQ-jobs** over na deze opruiming, waarvan het gros
+      `RateLimitError` ("no credits remaining") — die zijn herstelbaar zodra er credits zijn,
+      maar staan nu stil op `failed` en worden door niets opgepikt.
+- [ ] **`attempts` wordt nergens opgehoogd** in `pa.faq_jobs`; alle rijen staan op 0. Er is dus
+      geen rem op eindeloos opnieuw proberen als iemand een grote reset doet.
+
 ### 2026-08-31 — FAQ: additieve publish opgeruimd, default op de publisher gezet
 
 Aanleiding: Joep zag 34 vragen live op een pagina waar de limiet 6 hoort te zijn. Diagnose en

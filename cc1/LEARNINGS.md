@@ -1,6 +1,94 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een foutstring van weken oud is geen set-definitie (2026-08-31, FAQ-opruiming / invalid facets)
+
+Vervolg op de FAQ-sessie van dezelfde dag. Joep vroeg de gefaalde FAQ-jobs op pending te zetten,
+en daarna de URL's met ongeldige facetten helemaal te verwijderen.
+
+### Een reset is pas zinnig als de faalreden herstelbaar is
+
+De 2.012 gefaalde jobs met een live gepubliceerde FAQ splitsten in twee groepen:
+
+| faalreden | aantal | helpt een retry? |
+|---|---|---|
+| `invalid facet` | 1.887 | nee |
+| `JSONDecodeError` | 125 | ja |
+
+Getoetst in plaats van aangenomen: 12 van 12 `invalid facet`-URL's gaven bij een verse Search
+API-call opnieuw HTTP 400 (`context=merk, value=405244` en soortgelijke). Merkwaarden die niet
+meer bestaan. Een reset laat die groep één ronde draaien en zet ze daarna terug op `failed`.
+Kost geen OpenAI-tokens (het faalt vóór de generatie), maar levert ook niets op.
+
+### En toen wiste die reset de bewijsvoering
+
+Directe fout, en een die zich makkelijk herhaalt: mijn reset zette `last_error` en `skip_reason`
+op NULL. Daarmee verdween bij 1.887 rijen precies de markering die ik een uur later nodig had om
+te bepalen *welke* URL's ongeldige facetten hadden. Ze waren nog wel te vinden (pending +
+marker leeg + wel `push_state` + geen content + `updated_at` in mijn resetvenster), maar dat is
+reconstructie in plaats van een sleutel.
+
+**Bij het opschonen van een statuskolom: bewaar de diagnostische velden, of leg de doelset eerst
+vast in een tabel.** De db heeft daar al een conventie voor (`pa.del_targets_*`), die ik daarna
+ook gebruikt heb.
+
+Het goede nieuws is dat de omweg tot een beter antwoord leidde. Door de hele kandidatenset
+(7.367) opnieuw langs de Search API te halen bleek dat **213 URL's intussen weer geldig zijn** —
+hun facetwaarde is teruggekomen. Die zouden bij een verwijdering op basis van de oude foutstring
+ten onrechte zijn gesloopt. Een foutstring zegt wat er ooit gebeurde, niet wat er nu waar is;
+voor een onomkeerbare actie is dat het verkeerde bewijs.
+
+### `pa.urls` heeft ON DELETE CASCADE naar negen tabellen — en drie tabellen missen hem
+
+Waardevol om te weten vóór een opruiming. Eén `DELETE FROM pa.urls` ruimt op:
+`faq_jobs`, `faq_content_v2`, `faq_link_validation`, `kopteksten_jobs`, `kopteksten_content`,
+`kopteksten_link_validation`, `unique_titles_jobs`, `unique_titles_content`, `url_validation`.
+
+**Maar `faq_v2_push_state`, `kopteksten_push_state` en `bothits_url_daily` hebben géén FK.** De
+eerste twee moeten handmatig mee, en vóór de cascade — daarna is de join naar `pa.urls` weg en
+zijn ze niet meer terug te vinden. `bothits_url_daily` is een bewuste keuze: die rijen laten
+staan bewaart de bot-hit-historie, ze worden alleen wees en vallen uit de Bot Hits-weergave.
+Dat laatste is meteen het argument dat Joep moest wegen: **`pa.urls` is niet van de contenttools
+alleen, het is ook de URL-ruimte van Bot Hits.**
+
+### Uitvoering
+
+7.154 URL's verwijderd (7.367 kandidaten min 213 die weer geldig zijn). Backups van alle twaalf
+geraakte tabellen naar `pa.*_bak_invalidfacet_20260831`, doelset in
+`pa.del_targets_invalidfacet_20260831`. Live FAQ's: 1.888 URL's hadden er (de rest van de 3.586
+`push_state`-rijen was staging/dev), alle 1.888 verwijderd, 0 fouten, nagemeten op 80 URL's:
+0 records over. `pa.urls` van 1.031.881 naar 1.024.727.
+
+**Blijft staan en is een aparte beslissing:** 531 van deze URL's hadden **gepubliceerde
+kopteksten**. Die staan nog live op pagina's die nu geen DB-rij meer hebben — exact hetzelfde
+wees-patroon als waar de FAQ-sessie van vanochtend over ging, alleen aan de koptekstenkant.
+Weghalen kan met `DELETE /automated-content/records`, maar dat is live content verwijderen en is
+niet gevraagd.
+
+## Een retry-lus mag alleen fouten vangen die echt tijdelijk zijn (2026-08-31, gsd_ll_service)
+
+Elke backend-start stond 20,00 seconden stil. `main.py:257` roept `start_excel_scheduler()`
+**synchroon aan in het FastAPI startup-event**, die roept `load_excel_data()`, en die retryt
+3× met `time.sleep(10)`.
+
+De lus is bedoeld voor een bestand dat er wél is maar nog wordt geschreven — dat staat zo in de
+docstring. Een `FileNotFoundError` is dat niet, maar de `except Exception` ving hem toch. En de
+aanroeper erboven vangt diezelfde `FileNotFoundError` apart af met een INFO-regel "no Excel file
+found yet, skipping startup pre-load". **De twee lagen waren het oneens: de ene vocht twintig
+seconden tegen een fout die de andere schouderophalend accepteert.** Dat is de generieke vorm:
+als laag A een fout als fataal-maar-tijdelijk behandelt en laag B als normaal, betaal je de
+retry-kosten voor niets.
+
+Waarom het bestand hier ontbreekt is géén bug: `EXCEL_DIR` staat hard op
+`C:\Users\l.davidowski\...` in Windows-vorm en klopt op de productiehost (win-htz-006). In WSL
+is dat geen pad, en `/mnt/c/Users/l.davidowski` bestaat evenmin — die map hoort bij de machine
+van een collega. Op deze bak kan het dus nooit gevonden worden.
+
+Fix: `FileNotFoundError` vóór de generieke `except` opvangen en meteen doorgeven. Gemeten 20,00s
+-> 0,00s. De dagelijkse run van 09:50 houdt bewust zijn ERROR-regel plus Slack-melding — daar
+*is* een ontbrekend bestand een storing — maar die valt nu na 0 in plaats van 20 seconden, en
+de Slack-melding hangt al aan `port == 3003`.
+
 ## Een additieve API met een zuinige default laat de content rotten (2026-08-31, FAQ / Publish 2.0)
 
 Joep zag 34 vragen live op een pagina waar de limiet 6 is. De generatie was onschuldig:
