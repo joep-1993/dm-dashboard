@@ -409,6 +409,17 @@ def load_excel_data(filepath: Optional[str] = None, *, notify: bool = True, max_
         try:
             feed, flags, path = fetch_feed_from_excel(filepath)
             break
+        except FileNotFoundError:
+            # NOT transient — sleeping does not make a file appear, and the retry
+            # above is for a file that exists but is still being written. Retrying
+            # it cost 20s of dead time on EVERY startup on any machine without the
+            # file (EXCEL_DIR is a Windows path that only resolves on the prod
+            # host), because start_excel_scheduler() calls this synchronously
+            # inside the FastAPI startup event. That caller already treats a
+            # missing file as an expected condition and logs it at INFO — so the
+            # two layers disagreed: one fought the error for 20s, the other
+            # shrugged at it. Hand it straight to the caller and let it decide.
+            raise
         except Exception as exc:
             if attempt < max_retries:
                 logger.warning(
