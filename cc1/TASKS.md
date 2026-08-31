@@ -4,6 +4,42 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-31 (5) — SA360-biedstrategieën: kan dit geautomatiseerd? (onderzoek, geen code)
+
+Joeps vraag. Uitwerking in LEARNINGS (zelfde datum, "SA360-biedstrategieën zijn niet via een
+API te schrijven"). Geen code gewijzigd; alle schrijftests met `validate_only`.
+
+Gedaan:
+
+- [x] **SA360 Reporting API bewezen read-only**: vier services, `SearchAds360ServiceClient` heeft
+      alleen `search`/`search_stream`, nergens een mutate. Lezen is wél volledig —
+      `bidding_strategy` en `accessible_bidding_strategy` queryable.
+- [x] **Legacy `doubleclicksearch v2` uitgesloten** via het discovery-document: alleen `reports`,
+      `savedColumns`, `conversion`; geen bid/strategy-schema's.
+- [x] **De juni-conclusie weerlegd.** `USER_PERMISSION_DENIED` op 1471385731 leek een
+      permissieprobleem; vanuit de SA360-root getest blijkt het
+      **`ACCESS_DENIED_FOR_ACCOUNT_TYPE`** — de Google Ads API bedient SA360-accounts niet. Geen
+      identiteit of service account lost dat op. Memory `shop_campaign_178_bidding_blocker`
+      bijgewerkt, want die stuurde naar een doodlopende toegangsaanvraag.
+- [x] **Wat de Google Ads API wél kan** vastgesteld met `validate_only`: een account-eigen
+      portfolio-strategie koppelen ✅, een nieuwe portfolio TARGET_ROAS aanmaken in een
+      client-account ✅, manager-eigen strategie koppelen ❌, manager-eigen strategie aanpassen ❌.
+- [x] **Omvang gemeten**: 2.008 van 2.008 ENABLED campagnes over 15 accounts op een portfolio
+      TARGET_ROAS, en de in gebruik zijnde strategieën zijn 100% eigendom van 1471385731.
+- [x] **Accountboom vastgelegd**: SA360-root 9816507046, manager 1471385731 op niveau 1, 237
+      accounts / 6 managers. Niet te verwarren met Google Ads-MCC 3011145605.
+
+Open:
+
+- [ ] **Monitoring-module bouwen (het enige dat vandaag waarde oplevert).** Lezen werkt volledig,
+      dus een signalering "campagne X hoort op 130% maar hangt aan een 160%-strategie" is te
+      bouwen zonder extra rechten. Wacht op Joeps go — hij is gevraagd, nog niet gegeven.
+- [ ] **Aanpassen blijft handwerk in de SA360-UI** (bulk sheets). Geen API-route, en dat gaat
+      niet veranderen zonder dat Google SA360 schrijfbaar maakt.
+- [ ] **NIET doen zonder expliciete afweging**: de strategieën verplaatsen naar de
+      Google Ads-accounts. Technisch valideert het, maar je verlaat het SA360-portfoliomodel en
+      de centrale sturing om een platformbeperking te omzeilen.
+
 ### 2026-08-31 (4) — Nazorg: sparklines en de Healthscore-dropdown
 
 Twee kleine correcties op Joeps melding. Lessen in LEARNINGS (zelfde datum, "Meet de DOM in

@@ -1,6 +1,102 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## SA360-biedstrategieën zijn niet via een API te schrijven — en de foutmelding wees de verkeerde kant op (2026-08-31)
+
+Joeps vraag: kunnen we in SA360 biedstrategieën geautomatiseerd aanpassen of koppelen, en is
+daar een API voor? Antwoord: **nee, en het ligt niet aan onze rechten.** Alles hieronder is
+getoetst met echte calls; de schrijftests met `validate_only`, dus er is niets gewijzigd.
+
+### De les die het langst meegaat: een permissiefout kan de verkeerde oorzaak noemen
+
+Dit is de tweede keer dat deze vraag onderzocht is, en de eerste conclusie was fout — mijn
+eigen, een uur eerder, én die in de memory van juni. Beide kwamen op hetzelfde neer:
+"`USER_PERMISSION_DENIED` bij manager 1471385731, dus regel API-toegang op dat account."
+
+Dat is precies wat de foutmelding suggereert. Maar je krijgt hem alleen als je **1471385731
+als `login-customer-id` gebruikt**. Test je hetzelfde account van de andere kant — inloggen
+via de SA360-root 9816507046 en 1471385731 als `customer_id` — dan komt er iets anders:
+
+    login=9816507046 -> cust=1471385731 : ACCESS_DENIED_FOR_ACCOUNT_TYPE
+    login=9816507046 -> cust=9816507046 : ACCESS_DENIED_FOR_ACCOUNT_TYPE
+    login=3011145605 -> cust=3969307564 : OK   (gewoon Google Ads-account)
+
+`ACCESS_DENIED_FOR_ACCOUNT_TYPE` betekent: de Google Ads API bedient dit **soort** account
+niet. SA360-accounts zijn geen Google Ads-accounts. Geen enkele identiteit, service account
+of extra recht verandert dat.
+
+**Generiek: probeer een permissiefout altijd vanuit minstens twee richtingen voordat je hem
+als permissieprobleem afboekt.** Eén call, één foutcode, en je stuurt iemand een
+toegangsaanvraag in die nooit iets oplost.
+
+### Wat elke API wél kan
+
+**SA360 Reporting API — read-only, by design.** De library exposeert vier services
+(`search_ads360_service`, `customer_service`, `custom_column_service`,
+`search_ads360_field_service`) en `SearchAds360ServiceClient` heeft exact twee methoden:
+`search` en `search_stream`. Nergens een mutate. Lezen is wél rijk: `bidding_strategy` en
+`accessible_bidding_strategy` zijn queryable (4.523 toegankelijke strategieën over 12
+accounts; de hele `ROAS_CPR_*`-familie van 14 komt terug).
+
+**Legacy SA360 API (`doubleclicksearch v2`)** — we dragen de scope, dus nagekeken in het
+discovery-document. Drie resources: `reports`, `savedColumns`, `conversion`. Geen enkel
+schema met "bid" of "strategy". Die API is voor conversie-upload en rapportage.
+
+**Google Ads API — schrijft prima, maar alleen op Google Ads-accounts.** Getoetst met
+`validate_only`:
+
+| actie | uitkomst |
+|---|---|
+| portfolio-strategie **van het account zelf** aan een campagne hangen | valideert OK |
+| **nieuwe** portfolio TARGET_ROAS aanmaken in een client-account | valideert OK |
+| manager-eigen `ROAS_CPR_FASH_SEA_130` aan een client-campagne hangen | `CANNOT_ATTACH_TO_BIDDING_STRATEGY` |
+| `target_roas` van een manager-eigen strategie aanpassen vanuit het client-account | `RESOURCE_NOT_FOUND` |
+
+### De valstrik in `campaign.bidding_strategy`
+
+Die `RESOURCE_NOT_FOUND` is leerzaam. De campagne rapporteert
+`campaign.bidding_strategy = customers/3969307564/biddingStrategies/10633651133` — de
+resourcenaam staat dus **onder het client-account**. Toch geeft datzelfde account 0 rijen op
+`FROM bidding_strategy`, in beide API's.
+
+Opgelost via `accessible_bidding_strategy`: id 10633651133 heet `ROAS_TEST_ELEKTRONICA_160`
+en de **eigenaar is 1471385731**. `bidding_strategy` toont alleen wat het bevraagde account
+zelf bezit; `accessible_bidding_strategy` toont ook wat het mág gebruiken, mét eigenaar.
+
+**Dus: lees nooit uit de resourcenaam van `campaign.bidding_strategy` af wie de strategie
+bezit.** Dat veld zegt waar de campagne staat, niet waar de strategie vandaan komt.
+
+### Hoe groot dit is
+
+Over 15 accounts: **2.008 van de 2.008 ENABLED campagnes** gebruiken een portfolio
+TARGET_ROAS. Van de strategieën die daadwerkelijk in gebruik zijn (steekproef 3 accounts, 13
+unieke strategieën) is **100% eigendom van 1471385731**. Er is dus geen restje dat wél via de
+API te sturen is.
+
+### De accountboom, voor de volgende keer
+
+SA360-root **9816507046 "Beslist.NL"** (niveau 0, ons `login_customer_id`), met daaronder op
+niveau 1 zes managers, waaronder **1471385731 "Beslist NL"** — de eigenaar van de
+biedstrategieën. 237 accounts in totaal. Niet te verwarren met de Google Ads-MCC
+**3011145605** waar de SHOP-campagnes onder hangen; díé is wél via de Google Ads API te
+muteren.
+
+### Authenticatie, voor de duidelijkheid
+
+Zowel de SA360- als de Google Ads-client gebruiken **dezelfde OAuth-gebruikerscredentials**
+uit `.env` (client id + secret + refresh token; de SA360-yaml wordt uit exact die variabelen
+opgebouwd). Scopes: `adwords` en `doubleclicksearch`. Er ligt wél een service account
+(`ai-read-only@beslist-ga360.iam.gserviceaccount.com`) maar dat is GA360/BigQuery en
+read-only — en de Google Ads API ondersteunt platte service accounts sowieso niet, alleen via
+domain-wide delegation met impersonatie van een Workspace-gebruiker.
+
+### Wat er dan wél kan
+
+Alleen **monitoring**: lezen werkt volledig, dus "campagne X hoort op 130% maar hangt aan een
+160%-strategie" is te bouwen. Aanpassen blijft de SA360-UI (bulk sheets). De strategieën naar
+de Google Ads-accounts verplaatsen kán technisch, maar dan verlaat je het
+SA360-portfoliomodel om een platformbeperking te omzeilen — geen goede ruil.
+
 ## Meet de DOM in plaats van over layout te redeneren (2026-08-31, sparklines + Healthscore-dropdown)
 
 Twee kleine fixes, met drie dingen die opnieuw gaan bijten.
