@@ -28,14 +28,15 @@ Gedaan:
       behoud van auteurschap. Aannames vooraf gecontroleerd: blob matcht, `time` geïmporteerd,
       signature van `_accept_mc_invitation` klopt, poll draait alleen bij `newly_linked`, en de
       ~125s slapen zit in `run_gsd_script` die via `run_in_executor` draait.
+- [x] **531 verweesde kopteksten live verwijderd** (op verzoek van Joep, zelfde dag). Via
+      `unpublish_content_url()` — die deed al precies het goede: record-DELETE, 404 telt als
+      succes, en de push-state gaat mee. 5 als pilot, daarna 526, 0 fouten. Nagemeten op 100
+      willekeurige URL's: 0 records over, en 0 resterende `kopteksten_push_state`-rijen. De
+      inhoud staat in `pa.kopteksten_content_bak_invalidfacet_20260831` als iemand hem terug
+      wil.
 
 Open:
 
-- [ ] **531 verweesde kopteksten live.** Van de 7.154 verwijderde URL's hadden er 531
-      gepubliceerde kopteksten. Die staan nog op de pagina terwijl er geen DB-rij meer is —
-      hetzelfde weespatroon als de FAQ-stapeling van vanochtend, maar aan de koptekstenkant.
-      Weghalen kan via `DELETE /automated-content/records`; is live content verwijderen, dus
-      Joeps beslissing. Backup staat in `pa.kopteksten_content_bak_invalidfacet_20260831`.
 - [ ] **Wees-rijen in `bothits_url_daily`** voor de 7.154 verwijderde url_ids. Bewust laten
       staan (bewaart de bot-hit-historie); ze vallen uit de Bot Hits-weergave omdat de join naar
       `pa.urls` niet meer lukt. Opruimen alleen als iemand die historie niet wil bewaren.
