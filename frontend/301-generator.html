@@ -17,6 +17,10 @@
         .url-cell.copyable:hover { background-color: #e9ecef; }
         .url-cell.copied { background-color: #d4edda !important; transition: background-color 0.3s; }
         .needs-redirect { background-color: #fff3cd; }
+        /* Selection counter. A page-local class rather than `.badge.bg-*`:
+           style.css re-themes Bootstrap's colour names to grey and the
+           put-it-back rules are not reliable (UI_BLUEPRINT §Labels / badges). */
+        .sel-count { background-color: #8b7bb5; }
         .rule-row { background-color: #f8f9fa; padding: 8px; margin-bottom: 8px; border-radius: 4px; }
         pre { background: #f8f9fa; padding: 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; margin: 0; }
         .tab-content { padding-top: 1rem; }
@@ -220,18 +224,50 @@
                         </div>
                     </div>
                     <div class="card-body">
+                        <!-- Selection toolbar — same shape as Canonicals, so the two
+                             tools that feed the Redirect tool behave identically. -->
+                        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="checkbox" id="redirSelectAll" title="Select all" onchange="toggleSelectAllVisible(this)">
+                            </div>
+                            <div class="input-group input-group-sm" style="max-width: 300px;">
+                                <span class="input-group-text">Filter</span>
+                                <input type="text" id="redirFilter" class="form-control" placeholder="filter by URL part…" oninput="applyRedirFilter()">
+                                <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('redirFilter').value='';applyRedirFilter()">×</button>
+                            </div>
+                            <div class="input-group input-group-sm" style="max-width: 195px;">
+                                <span class="input-group-text">Status code</span>
+                                <select id="redirStatusCode" class="form-select">
+                                    <option value="301" selected>301</option>
+                                    <option value="302">302</option>
+                                </select>
+                            </div>
+                            <div class="input-group input-group-sm" style="max-width: 185px;">
+                                <span class="input-group-text">Country</span>
+                                <select id="redirCountry" class="form-select">
+                                    <option value="NL+BE" selected>NL+BE</option>
+                                    <option value="NL">NL</option>
+                                    <option value="BE">BE</option>
+                                </select>
+                            </div>
+                            <span id="redirSelCount" class="badge sel-count ms-auto">0 selected</span>
+                        </div>
                         <!-- Results Table -->
                         <div class="results-table">
                             <table class="table table-sm table-bordered table-hover">
                                 <thead class="table-light sticky-top">
                                     <tr>
+                                        <th style="width: 34px"></th>
                                         <th class="text-center" style="width: 5%">#</th>
-                                        <th style="width: 47%">Original URL</th>
-                                        <th style="width: 47%">Redirect To</th>
+                                        <th style="width: 46%">Original URL</th>
+                                        <th style="width: 46%">Redirect To</th>
                                     </tr>
                                 </thead>
                                 <tbody id="resultsBody"></tbody>
                             </table>
+                        </div>
+                        <div class="d-flex justify-content-end mt-4">
+                            <button id="redirPushBtn" class="btn btn-run btn-sm" onclick="pushSelectedToRedirect()" disabled>Push to Redirect tool</button>
                         </div>
                     </div>
                 </div>
@@ -242,6 +278,20 @@
     <footer class="text-center py-4 text-muted">
         <small>Digital Marketing tools by Joep van Schagen - 2026</small>
     </footer>
+
+    <!-- Push-to-Redirect-tool modal -->
+    <div class="modal fade" id="pushModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header text-white" style="background-color: #5e4a90;">
+                    <h5 class="modal-title">Push redirects to production</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="pushModalBody"></div>
+                <div class="modal-footer" id="pushModalFooter"></div>
+            </div>
+        </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -518,23 +568,42 @@
 
             results.forEach((r, i) => {
                 const tr = document.createElement('tr');
-                tr.className = 'needs-redirect';
+                tr.className = 'needs-redirect redir-row';
+                tr.dataset.idx = i;
                 tr.innerHTML = `
+                    <td><input type="checkbox" class="redir-select form-check-input" data-idx="${i}" onchange="updateRedirSelectionCount()"></td>
                     <td class="text-center">${i + 1}</td>
-                    <td class="url-cell copyable" onclick="copyToClipboard('${escapeHtml(r.original)}', this)" title="${escapeHtml(r.original)}">${escapeHtml(r.original)}</td>
-                    <td class="url-cell copyable" onclick="copyToClipboard('${escapeHtml(r.redirect)}', this)" title="${escapeHtml(r.redirect)}">${escapeHtml(r.redirect)}</td>
+                    <td class="url-cell copyable redir-orig" title="${escapeHtml(r.original)}">${escapeHtml(r.original)}</td>
+                    <td class="url-cell copyable redir-target" title="${escapeHtml(r.redirect)}">${escapeHtml(r.redirect)}</td>
                 `;
                 tbody.appendChild(tr);
             });
 
             if (results.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No URLs need redirects!</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No URLs need redirects!</td></tr>';
             }
+
+            applyRedirFilter();
+            updateRedirSelectionCount();
         }
 
+        // Copy-on-click via delegation, reading the URL from `results` rather than
+        // from an HTML attribute. The old inline onclick interpolated the URL into
+        // a JS string literal through an "escapeHtml" that only escaped ' and " —
+        // so it neither escaped HTML nor safely quoted JS. Same fix as Canonicals.
+        document.getElementById('resultsBody').addEventListener('click', (e) => {
+            const cell = e.target.closest('.copyable');
+            if (!cell) return;
+            const tr = cell.closest('.redir-row');
+            const r = tr && results[+tr.dataset.idx];
+            if (!r) return;
+            copyToClipboard(cell.classList.contains('redir-orig') ? r.original : r.redirect, cell);
+        });
+
         function escapeHtml(text) {
-            if (!text) return '';
-            return text.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const div = document.createElement('div');
+            div.textContent = text == null ? '' : text;
+            return div.innerHTML;
         }
 
         function copyToClipboard(text, element) {
@@ -568,6 +637,173 @@
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'Redirects');
             XLSX.writeFile(wb, '301_redirects.xlsx');
+        }
+
+        // ---- Selection + filter (push-to-Redirect-tool) -------------------
+        // Deliberately the same shape as Canonicals: the two tools feed the same
+        // /api/redirect-tool preview+submit pair, so a difference in how you
+        // select rows here would be a difference with no reason behind it.
+        const REDIRECT_API = '/api/redirect-tool';
+        let _redirPreflight = null;
+
+        function applyRedirFilter() {
+            const term = (document.getElementById('redirFilter')?.value || '').trim().toLowerCase();
+            document.querySelectorAll('#resultsBody tr.redir-row').forEach(tr => {
+                const r = results[+tr.dataset.idx] || {};
+                const hay = ((r.original || '') + ' ' + (r.redirect || '')).toLowerCase();
+                tr.style.display = (!term || hay.includes(term)) ? '' : 'none';
+            });
+            syncSelectAllState();
+        }
+
+        // Select-all acts on the VISIBLE rows only. Filtering to a subset and
+        // ticking the header box should select what you can see, not silently
+        // arm the rows the filter hid.
+        function toggleSelectAllVisible(cb) {
+            document.querySelectorAll('#resultsBody tr.redir-row').forEach(tr => {
+                if (tr.style.display === 'none') return;
+                const box = tr.querySelector('.redir-select');
+                if (box) box.checked = cb.checked;
+            });
+            updateRedirSelectionCount();
+        }
+
+        function syncSelectAllState() {
+            const sa = document.getElementById('redirSelectAll');
+            if (!sa) return;
+            const boxes = [...document.querySelectorAll('#resultsBody tr.redir-row')]
+                .filter(tr => tr.style.display !== 'none')
+                .map(tr => tr.querySelector('.redir-select'))
+                .filter(Boolean);
+            const checked = boxes.filter(b => b.checked).length;
+            sa.checked = boxes.length > 0 && checked === boxes.length;
+            sa.indeterminate = checked > 0 && checked < boxes.length;
+        }
+
+        function getSelectedRedirPairs() {
+            return [...document.querySelectorAll('#resultsBody .redir-select:checked')]
+                .map(b => results[+b.dataset.idx])
+                .filter(Boolean);
+        }
+
+        function updateRedirSelectionCount() {
+            const n = document.querySelectorAll('#resultsBody .redir-select:checked').length;
+            const cnt = document.getElementById('redirSelCount');
+            if (cnt) cnt.textContent = `${n} selected`;
+            const btn = document.getElementById('redirPushBtn');
+            if (btn) btn.disabled = n === 0;
+            syncSelectAllState();
+        }
+
+        const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+        // Poll a redirect-tool task to completion. Bounded (≈5 min) so a task
+        // stuck in 'running' can't hang the modal forever; total falls back so
+        // the width math never goes NaN.
+        async function _pollTask(statusUrl, progId, totalFallback) {
+            const MAX_POLLS = 600;  // 600 × 500ms ≈ 5 minutes
+            for (let i = 0; i < MAX_POLLS; i++) {
+                const s = await fetch(statusUrl);
+                if (!s.ok) throw new Error((await s.json()).detail || 'Status poll failed');
+                const task = await s.json();
+                const total = task.total || totalFallback || 1;
+                const done = task.processed || 0;
+                const el = document.getElementById(progId);
+                if (el) el.style.width = Math.min(100, Math.round(done / total * 100)) + '%';
+                if (task.status === 'completed' || task.status === 'failed') return task;
+                await _sleep(500);
+            }
+            throw new Error('Timed out waiting for the task to finish');
+        }
+
+        async function pushSelectedToRedirect() {
+            _redirPreflight = null;  // drop any prior preflight so a failed
+                                     // re-preflight can't submit stale data
+            const pairs = getSelectedRedirPairs();
+            if (!pairs.length) { alert('No redirects selected'); return; }
+            const statuscode = document.getElementById('redirStatusCode').value || '301';
+            const country = document.getElementById('redirCountry').value || 'NL+BE';
+            const label = `redirect-generator-${new Date().toISOString().split('T')[0]}`;
+            const rows = pairs.map(p => ({
+                old: p.original, new: p.redirect, statuscode, country, label,
+            }));
+
+            const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('pushModal'));
+            const body = document.getElementById('pushModalBody');
+            const footer = document.getElementById('pushModalFooter');
+            footer.innerHTML = '';
+            body.innerHTML = `<p>Preflighting ${rows.length} redirect(s)…</p>
+                <div class="progress"><div id="pushProg" class="progress-bar" role="progressbar" style="width:0%"></div></div>`;
+            modal.show();
+
+            try {
+                const start = await fetch(`${REDIRECT_API}/preview`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rows }),
+                });
+                if (!start.ok) throw new Error((await start.json()).detail || 'Preview failed');
+                const { task_id } = await start.json();
+                const task = await _pollTask(`${REDIRECT_API}/preview-status/${task_id}`, 'pushProg', rows.length);
+                if (task.status === 'failed') throw new Error(task.error || 'Preflight failed');
+                _redirPreflight = task.result;
+                const st = _redirPreflight.stats || {};
+                const skipped = (st.total || 0) - (st.submittable || 0);
+                body.innerHTML = `
+                    <p class="mb-2">Preflight complete:</p>
+                    <ul class="mb-3">
+                        <li><strong>${st.submittable || 0}</strong> ready to submit</li>
+                        <li>${st.flattened || 0} chain-flattened</li>
+                        <li>${st.skipped_home || 0} skipped (homepage)</li>
+                        <li>${skipped} total skipped / blocked</li>
+                    </ul>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="pushReplace">
+                        <label class="form-check-label" for="pushReplace">Overwrite existing redirects (replace_existing)</label>
+                    </div>
+                    ${st.submittable ? '' : '<div class="alert alert-warning mt-2 mb-0">Nothing submittable in this selection.</div>'}`;
+                footer.innerHTML = `
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button id="pushConfirmBtn" class="btn btn-danger" ${st.submittable ? '' : 'disabled'}>Push ${st.submittable || 0} to production</button>`;
+                // Listener rather than an inline onclick with the label interpolated
+                // into it — the label is generated here, so it never needs to make a
+                // round trip through an HTML attribute.
+                const confirmBtn = document.getElementById('pushConfirmBtn');
+                if (confirmBtn) confirmBtn.addEventListener('click', () => confirmPushToRedirect(label));
+            } catch (e) {
+                body.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(e.message)}</div>`;
+                footer.innerHTML = `<button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>`;
+            }
+        }
+
+        async function confirmPushToRedirect(label) {
+            if (!_redirPreflight) return;
+            const replace = document.getElementById('pushReplace')?.checked || false;
+            const body = document.getElementById('pushModalBody');
+            const footer = document.getElementById('pushModalFooter');
+            footer.innerHTML = '';
+            body.innerHTML = `<p>Submitting to production…</p>
+                <div class="progress"><div id="pushProg2" class="progress-bar" role="progressbar" style="width:0%"></div></div>`;
+            try {
+                const start = await fetch(`${REDIRECT_API}/submit`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        processed: _redirPreflight.processed, label,
+                        input_method: 'text', replace_existing: replace,
+                    }),
+                });
+                if (!start.ok) throw new Error((await start.json()).detail || 'Submit failed');
+                const { task_id } = await start.json();
+                const task = await _pollTask(`${REDIRECT_API}/submit-status/${task_id}`,
+                    'pushProg2', (_redirPreflight.processed || []).length);
+                if (task.status === 'failed') throw new Error(task.error || 'Submit failed');
+                const res = task.result || {};
+                body.innerHTML = `<div class="alert alert-success mb-2">Done — ${res.success || 0} succeeded, ${res.failed || 0} failed.${res.run_id ? ` Run #${res.run_id}.` : ''}</div>
+                    <p class="small text-muted mb-0">See the Redirect tool → Recent Results for full per-row details.</p>`;
+                footer.innerHTML = `<button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>`;
+            } catch (e) {
+                body.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(e.message)}</div>`;
+                footer.innerHTML = `<button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>`;
+            }
         }
 
         // Add one empty rule row of each type on load
