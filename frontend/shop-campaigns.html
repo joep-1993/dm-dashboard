@@ -54,6 +54,50 @@
             margin-right: 4px; vertical-align: 1px; opacity: .3;
         }
         .stat-card.metric-on .label .tile-dot { opacity: 1; }
+        /* ---- Periodevergelijking + sparkline, overgenomen uit seo-stats.html ----
+           De tegels stonden hier al, maar zonder context: "€ 0,42 Avg CPC" zegt pas
+           iets naast de vorige periode. Zelfde vocabulaire als SEO Stats, zodat de
+           twee pagina's hetzelfde blijven lezen. */
+        .delta-badge { display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 1px 7px; border-radius: 20px; }
+        .delta-badge.up { background: #e3f9f0; color: #00854c; }
+        .delta-badge.down { background: #fdecec; color: #c0392b; }
+        .delta-badge.flat { background: #eee; color: #888; }
+        .stat-card .stat-delta { margin-top: 5px; }
+        /* Caption op een eigen regel: de tegel wordt hoger in plaats van breder.
+           Met tien tegels op één rij (nowrap) is breder hier geen optie —
+           UI_BLUEPRINT §Stat tiles, punt 1. */
+        .stat-card .stat-delta .stat-delta-cap {
+            display: block; margin-top: 2px; font-size: 0.58rem; text-transform: uppercase;
+            letter-spacing: .04em; color: #b0acbe; white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis;
+        }
+        /* Flex-kolom + margin-top:auto duwt elke sparkline naar de onderrand, zodat
+           een tegel zonder badge (# Campaigns) dezelfde geometrie houdt als de rest. */
+        #statsRow .stat-card { display: flex; flex-direction: column; }
+        .tile-spark { position: relative; height: 30px; margin-top: 6px; }
+        #statsRow .stat-card .tile-spark { margin-top: auto; }
+        /* # Campaigns is een voorraadtelling: geen badge, geen lijn. Zonder deze
+           regel houdt hij wel de hoogte van de andere tegels en staat zijn inhoud
+           bovenaan met een leeg vlak eronder — dat leest als een tegel die niet
+           geladen is. Centreren maakt er een bewuste keuze van. */
+        #statsRow .stat-card:not(.metric-tile) { justify-content: center; }
+        /* Tijdens het laden: de badge verdwijnt (hij hoort bij de vórige periode en
+           zou dus een verkeerd getal claimen), de lijn dimt maar blijft staan zodat
+           de rij niet in hoogte springt. Zelfde afspraak als de h3-skeleton. */
+        #statsRow.is-loading .stat-card .stat-delta { visibility: hidden; }
+        #statsRow.is-loading .stat-card .tile-spark { opacity: 0.25; }
+        /* De spark-tooltip hangt aan <body>, niet in de tegel: een tegel van ~100px
+           zou hem afknippen. Vandaar position:fixed en een z-index boven de kaart. */
+        .spark-tip {
+            position: fixed; z-index: 3000; pointer-events: none;
+            background: #242628; color: #f0f0f3; border-radius: 8px;
+            padding: 6px 10px; font-size: 12px; line-height: 1.35; white-space: nowrap;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+            opacity: 0; transition: opacity .1s ease;
+            transform: translate(-50%, -100%);
+        }
+        .spark-tip .st-date { color: #a9a9b5; font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em; }
+        .spark-tip .st-val { font-weight: 700; }
         .perf-table { font-size: 0.9rem; }
         /* UI_BLUEPRINT table headers: grey #f8f9fa, sticky, 6px 14px, 1rem
            (a touch larger than the 0.9rem body), bold — not the old purple
@@ -489,6 +533,138 @@
             }
             return fmt(key, v);
         }
+
+        // ---- Periodevergelijking + sparkline (patroon uit seo-stats.html) --------
+        // Metrics waar OMHOOG slecht is. Alleen de kleur draait; het teken en het
+        // getal blijven staan. Kosten die stijgen zijn "+8%" in rood, niet "-8%" —
+        // het cijfer liegen om de kleur te laten kloppen is erger dan geen kleur.
+        const LOWER_IS_BETTER = new Set(['cost', 'avg_cpc']);
+
+        function pctBadge(pct, digits = 1, invert = false) {
+            if (pct === null || pct === undefined || !isFinite(pct)) return '<span class="delta-badge flat">n/a</span>';
+            const good = invert ? pct < 0 : pct > 0;
+            const cls = pct === 0 ? 'flat' : (good ? 'up' : 'down');
+            const sign = pct > 0 ? '+' : '';
+            return `<span class="delta-badge ${cls}">${sign}${pct.toLocaleString('nl-NL', { maximumFractionDigits: digits })}%</span>`;
+        }
+
+        // Datumrekenen op de kalender, niet via toISOString(): die zet eerst om naar
+        // UTC, en in CEST levert dat de dag ervoor op. Zelfde reden als hierboven.
+        function shiftDays(iso, n) {
+            const [y, m, d] = iso.split('-').map(Number);
+            const dt = new Date(y, m - 1, d + n);
+            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        }
+        function rangeLenDays(a, b) {
+            const [ay, am, ad] = a.split('-').map(Number), [by, bm, bd] = b.split('-').map(Number);
+            return Math.round((new Date(by, bm - 1, bd) - new Date(ay, am - 1, ad)) / 86400000) + 1;
+        }
+
+        let tileDeltas = null;      // key -> % t.o.v. de vorige even lange periode
+        let tileDeltaDays = 0;      // lengte van dat venster, staat in de caption
+        const sparks = {};
+
+        function destroySparks() {
+            Object.keys(sparks).forEach(id => { sparks[id].destroy(); delete sparks[id]; });
+        }
+
+        function sparkTip() {
+            let el = document.getElementById('sparkTip');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'sparkTip';
+                el.className = 'spark-tip';
+                document.body.appendChild(el);
+            }
+            return el;
+        }
+
+        function sparkExternalTooltip(ctx, key) {
+            const { chart, tooltip } = ctx;
+            const el = sparkTip();
+            if (!tooltip.opacity) { el.style.opacity = 0; return; }
+            const dp = (tooltip.dataPoints || [])[0];
+            if (!dp) { el.style.opacity = 0; return; }
+            el.innerHTML = `<div class="st-date">${dp.label}</div>`
+                         + `<div class="st-val">${dp.parsed.y === null ? '–' : fmt(key, dp.parsed.y)}</div>`;
+            // Positie uit de viewport-rect van het canvas, zodat de tegel hem niet
+            // afknipt, en horizontaal geklemd zodat de buitenste tegel hem ook toont.
+            const r = chart.canvas.getBoundingClientRect();
+            el.style.left = Math.min(Math.max(r.left + tooltip.caretX, 70), window.innerWidth - 70) + 'px';
+            el.style.top = (r.top - 6) + 'px';
+            el.style.opacity = 1;
+        }
+
+        function renderSpark(id, dates, values, colour, key) {
+            const el = document.getElementById(id);
+            if (!el || !values || !values.length) return;
+            if (sparks[id]) sparks[id].destroy();
+            sparks[id] = new Chart(el, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [{
+                        data: values, borderColor: colour, backgroundColor: colour + '22',
+                        borderWidth: 1.6, fill: true, tension: 0.35,
+                        pointRadius: 0, pointHoverRadius: 3, pointHitRadius: 14,
+                        pointHoverBackgroundColor: colour, pointHoverBorderColor: '#fff',
+                        spanGaps: false,   // een lege dag blijft een gat, geen duik naar nul
+                    }],
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false, layout: { padding: 0 },
+                    // Geen assen: de tegel noemt het getal en de eenheid al; de lijn
+                    // is er alleen voor de vorm.
+                    scales: { x: { display: false }, y: { display: false } },
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { enabled: false, external: c => sparkExternalTooltip(c, key) },
+                    },
+                },
+            });
+        }
+
+        // Huidige periode vs het even lange venster er direct vóór (7d→vorige 7d,
+        // 30d→vorige 30d…). Aparte fetch op hetzelfde endpoint, dat al een cache
+        // per bereik heeft — dus geen backend-wijziging voor nodig.
+        async function loadTileDeltas() {
+            const myToken = loadToken;
+            tileDeltas = null;
+            const start = document.getElementById('startDate').value;
+            const end = document.getElementById('endDate').value;
+            if (!lastData || !start || !end) { renderStats(); return; }
+            // Meet het venster aan de dagen die er ECHT zijn: de API kan minder dagen
+            // teruggeven dan het bereik, en dan telt de basislijn er meer dan de
+            // huidige periode — een verschil dat niets met de trend te maken heeft.
+            const effEnd = (lastData.daily || [])
+                .reduce((m, r) => (!m || String(r.date) > m) ? String(r.date) : m, null) || end;
+            const n = rangeLenDays(start, effEnd);
+            const params = new URLSearchParams({ start_date: shiftDays(start, -n), end_date: shiftDays(start, -1) });
+            let prev;
+            try {
+                const r = await fetch(`${API}/performance?${params}`);
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                prev = (await r.json()).totals;
+            } catch (e) {
+                renderStats();   // geen badges is beter dan verkeerde badges
+                return;
+            }
+            // De await hierboven kan zijn load hebben overleefd: renderStats() leest
+            // lastData, dus doorgaan is precies hoe de basislijn van run A bij de
+            // totalen van run B terechtkomt.
+            if (myToken !== loadToken || !prev) { if (myToken === loadToken) renderStats(); return; }
+            const cur = lastData.totals || {};
+            const d = {};
+            ORDER.forEach(k => {
+                const p = prev[k];
+                d[k] = (p === null || p === undefined || !p) ? null : ((cur[k] - p) / p) * 100;
+            });
+            tileDeltas = d;
+            tileDeltaDays = n;
+            renderStats();
+        }
+
         // Local calendar date, NOT toISOString(): that converts to UTC first, so in
         // CEST a date at local midnight (which is what the All preset and any
         // Date-only value are) comes back as the DAY BEFORE.
@@ -700,9 +876,17 @@
         function renderStats() {
             const t = lastData.totals;
             const row = document.getElementById('statsRow');
+            // Vóór de innerHTML-wissel, anders houdt Chart.js canvassen vast die
+            // niet meer in de DOM staan.
+            destroySparks();
+            row.classList.remove('is-loading');
             row.innerHTML = '';
+            const days = (lastData.daily || []).map(r => String(r.date));
             const campCard = document.createElement('div');
             campCard.className = 'stat-card';
+            // # Campaigns is een voorraadtelling, geen reeks over de periode: geen
+            // sparkline en geen periodevergelijking, want er is niets om mee te
+            // vergelijken. De flex-kolom houdt hem even hoog als de rest.
             campCard.innerHTML = `<h3>${(lastData.campaign_total || 0).toLocaleString('nl-NL')}</h3><div class="label"># Campaigns</div>`;
             row.appendChild(campCard);
             ORDER.forEach(key => {
@@ -718,8 +902,20 @@
                 // title on the value carries the exact figure, since fmtTile may
                 // abbreviate it and the narrow tile may ellipsis it.
                 card.innerHTML = `<h3${cls} title="${fmt(key, v)}">${fmtTile(key, v)}</h3>`
-                    + `<div class="label"><span class="tile-dot" style="background:${m.color}"></span>${m.label}</div>`;
+                    + `<div class="label"><span class="tile-dot" style="background:${m.color}"></span>${m.label}</div>`
+                    + (tileDeltas
+                        ? `<div class="stat-delta">${pctBadge(tileDeltas[key], 1, LOWER_IS_BETTER.has(key))}`
+                          + `<span class="stat-delta-cap">vs vorige ${tileDeltaDays}d</span></div>`
+                        : '')
+                    + `<div class="tile-spark"><canvas id="spark_${key}"></canvas></div>`;
                 row.appendChild(card);
+            });
+            // Pas tekenen als de canvassen in de DOM staan — Chart.js meet de
+            // container, en buiten de DOM is die 0 breed.
+            ORDER.forEach(key => {
+                renderSpark(`spark_${key}`, days,
+                            (lastData.daily || []).map(r => r[key]),
+                            METRICS[key].color, key);
             });
         }
 
@@ -728,7 +924,16 @@
         function toggleMetricFromTile(key) {
             if (selected.has(key)) selected.delete(key); else selected.add(key);
             renderChart();
-            renderStats();
+            // Bewust NIET renderStats(): dat sloopt en herbouwt tien sparkline-
+            // charts terwijl er alleen een rand en een stip van dekking veranderen.
+            // Alleen de aangeklikte tegel bijwerken houdt het klikken licht.
+            const card = document.getElementById(`spark_${key}`)?.closest('.stat-card');
+            if (!card) { renderStats(); return; }   // vangnet als de opbouw ooit verandert
+            const on = selected.has(key);
+            card.classList.toggle('metric-on', on);
+            card.classList.toggle('metric-off', !on);
+            card.title = on ? `Click to hide ${METRICS[key].label} in the chart`
+                            : `Click to show ${METRICS[key].label} in the chart`;
         }
 
         function initTable() {
@@ -880,8 +1085,16 @@
         // legend stays usable and nothing shifts) — only the values shimmer.
         function showStatsSkeleton() {
             const row = document.getElementById('statsRow');
+            destroySparks();   // vóór de innerHTML-wissel, zie renderStats()
+            row.classList.add('is-loading');
             const bar = '<h3><span class="skel-bar"></span></h3>';
-            row.innerHTML = `<div class="stat-card">${bar}<div class="label"># Campaigns</div></div>`;
+            // De badge- en sparkline-ruimte wordt óók in de skeleton gereserveerd,
+            // anders is een ladende tegel lager dan een geladen tegel en springt de
+            // hele rij bij elke fetch. Zelfde reden als de op de h3 afgemeten
+            // skel-bar hierboven.
+            const placeholder = '<div class="stat-delta"><span class="delta-badge flat">&nbsp;</span>'
+                              + '<span class="stat-delta-cap">&nbsp;</span></div><div class="tile-spark"></div>';
+            row.innerHTML = `<div class="stat-card">${bar}<div class="label"># Campaigns</div>${placeholder}</div>`;
             ORDER.forEach(key => {
                 const m = METRICS[key];
                 const on = selected.has(key);
@@ -894,7 +1107,8 @@
                     if (selected.has(key)) selected.delete(key); else selected.add(key);
                     showStatsSkeleton();
                 };
-                card.innerHTML = bar + `<div class="label"><span class="tile-dot" style="background:${m.color}"></span>${m.label}</div>`;
+                card.innerHTML = bar + `<div class="label"><span class="tile-dot" style="background:${m.color}"></span>${m.label}</div>`
+                    + placeholder;
                 row.appendChild(card);
             });
         }
@@ -929,11 +1143,18 @@
                 if (myToken !== loadToken) return;   // a newer load started; drop this one
                 lastData = payload;
                 hideChartSkeleton();
+                // Badges van het vórige bereik horen niet boven de nieuwe totalen:
+                // renderStats() tekent ze pas weer als loadTileDeltas() klaar is.
+                tileDeltas = null;
                 renderStats();
                 renderChart();
                 initTable();
                 renderMeta();
                 document.getElementById('exportBtn').disabled = false;
+                // Niet awaiten: de tegels, de grafiek en de tabel staan er al, en de
+                // vergelijking is een tweede call op hetzelfde endpoint. Hij vult de
+                // badges aan zodra hij binnen is.
+                loadTileDeltas();
                 if (topRes.ok) {
                     lastTop = await topRes.json();
                     renderTop();
