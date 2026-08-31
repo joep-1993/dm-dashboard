@@ -403,6 +403,15 @@ def _mutate_with_retry(what: str, fn, retries: int = 5, base_delay: float = 0.5)
 # the same run (~2 min total) instead of failing the shop.
 _MERCHANT_LINK_RETRY_DELAYS = (5, 10, 20, 30, 60)  # seconds
 
+# After creating the MC-side AdsLink, the ProductLinkInvitation is not visible on
+# the Ads side immediately. Poll for it so the link is actually accepted before
+# campaign creation starts. Without this, each campaign's own RESOURCE_NOT_FOUND
+# retry has to absorb the full propagation delay — and on 2026-08-31 that wasn't
+# enough: 5 labels × 5 retries (~11 min) still failed for three shops whose MC
+# accounts were brand-new.  Accepting the invitation here fixes the root cause
+# (no active link) instead of retrying the symptom (campaign create fails).
+_INVITATION_ACCEPT_DELAYS = (5, 10, 15, 15, 20, 20, 20, 20)  # ~125s total
+
 
 def _is_merchant_link_not_ready(ex: GoogleAdsException) -> bool:
     """
@@ -1962,8 +1971,14 @@ def link_to_google_ads(mc_parent_id: str, mc_account_id: str, ads_customer_id: s
     1. MC side: add an adsLink on the sub-account (creates a pending invitation).
     2. Ads side: accept the pending ProductLinkInvitation so campaigns can
        reference the merchant_id.
+
+    When the MC-side link is newly created, step 2 polls with retries
+    (_INVITATION_ACCEPT_DELAYS) until the invitation becomes visible on the
+    Ads side. Without this, campaign creation fails with RESOURCE_NOT_FOUND
+    because the link was never actually accepted.
     """
     service = _get_mc_service()
+    newly_linked = False
     try:
         # Get current account info
         account = service.accounts().get(merchantId=mc_parent_id, accountId=mc_account_id).execute()
@@ -1991,20 +2006,35 @@ def link_to_google_ads(mc_parent_id: str, mc_account_id: str, ads_customer_id: s
                 merchantId=mc_parent_id, accountId=mc_account_id, body=account
             ).execute()
             logger.info("MC side: linked MC %s to Google Ads %s", mc_account_id, ads_customer_id)
+            newly_linked = True
     except Exception as ex:
         logger.error("Error linking MC %s to Ads %s (MC side): %s", mc_account_id, ads_customer_id, ex)
         return False
 
-    # Step 2: accept the pending invitation from the Google Ads side
+    # Step 2: accept the pending invitation from the Google Ads side.
+    # When we just created the MC-side link, the invitation is not visible
+    # immediately (eventual consistency). Poll with retries so the link is
+    # actually accepted before campaign creation starts.
     try:
-        accepted = _accept_mc_invitation(ads_customer_id, int(mc_account_id))
+        mc_id_int = int(mc_account_id)
+        accepted = _accept_mc_invitation(ads_customer_id, mc_id_int)
+        if not accepted and newly_linked:
+            for attempt, delay in enumerate(_INVITATION_ACCEPT_DELAYS, 1):
+                logger.info(
+                    "Invitation for MC %s not visible yet in Ads %s; "
+                    "retry %d/%d in %ds",
+                    mc_account_id, ads_customer_id,
+                    attempt, len(_INVITATION_ACCEPT_DELAYS), delay,
+                )
+                time.sleep(delay)
+                accepted = _accept_mc_invitation(ads_customer_id, mc_id_int)
+                if accepted:
+                    break
         if not accepted:
-            # Not an error: the invitation often isn't visible on the Ads side yet
-            # right after the MC-side link is created (eventual consistency). The
-            # campaign create retries RESOURCE_NOT_FOUND to bridge this window.
             logger.warning(
-                "No PENDING_APPROVAL ProductLinkInvitation found yet for MC %s in "
-                "Ads %s; link may still be propagating (campaign create will retry).",
+                "No PENDING_APPROVAL ProductLinkInvitation found%s for MC %s in "
+                "Ads %s; campaign create will retry with RESOURCE_NOT_FOUND.",
+                " after retries" if newly_linked else "",
                 mc_account_id, ads_customer_id,
             )
     except Exception as ex:
