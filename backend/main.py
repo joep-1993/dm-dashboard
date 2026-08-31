@@ -3149,14 +3149,23 @@ async def faq_publish_v2(request: dict = None):
     Body: {environment, mode, limit, replace}. `mode` defaults to "new" — only
     URLs never pushed or whose faq_json changed since their last successful push,
     tracked in pa.faq_v2_push_state. "all" re-pushes everything (~1.7M records).
-    See backend/faq_v2_publisher for why `replace` defaults to false (the endpoint
-    is additive, and a true replace costs one DELETE per URL — ~280k of them).
+
+    `replace` defaults to TRUE, matching /publish-v2/url. It used to default to
+    false to save one DELETE per URL, and that is what let the live store grow to
+    53% of URLs carrying more than 6 questions (avg 13.7, worst 42, measured
+    2026-08-31): /faq upserts on (url, question), and a regenerated FAQ has new
+    question TEXT, so the previous set never gets overwritten — it just stays
+    live. The saving was never real either. In mode="new" only URLs whose
+    faq_json actually changed are pushed, so the DELETEs scale with the
+    regeneration volume, not with the ~280k published URLs. Defaulting here
+    rather than at each caller on purpose: the frontend Publish button sends only
+    {environment, mode}, so a per-caller fix would have left it additive.
     """
     request = request or {}
     env = request.get("environment", "production")
     mode = request.get("mode", "new")
     limit = request.get("limit")
-    replace = bool(request.get("replace", False))
+    replace = bool(request.get("replace", True))
     if env not in ("dev", "staging", "production"):
         raise HTTPException(status_code=400, detail="Invalid environment. Use: dev, staging, production")
     if mode not in ("new", "all"):

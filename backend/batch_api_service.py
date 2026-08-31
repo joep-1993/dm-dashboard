@@ -512,7 +512,11 @@ def _run_faq_batch(num_faqs: int = 6):
                         save_failed += 1
                         continue
 
-                    faq_items = [FAQItem(question=item["question"], answer=item["answer"]) for item in faqs_data]
+                    # Same cap as generate_faqs_for_page(): num_faqs is a prompt
+                    # instruction, not a guarantee, and /faq keeps every extra
+                    # question live forever.
+                    faq_items = [FAQItem(question=item["question"], answer=item["answer"])
+                                 for item in faqs_data[:num_faqs]]
                     faq_page = FAQPage(url=url, page_title="", faqs=faq_items)
 
                     faq_json = json.dumps([asdict(faq) for faq in faq_items], ensure_ascii=False)

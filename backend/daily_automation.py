@@ -507,17 +507,31 @@ def step_publish_kopteksten_records():
 
 
 def step_publish_faq_v2():
-    """Incremental FAQ publish via /faq (one record per question)."""
+    """Incremental FAQ publish via /faq (one record per question).
+
+    replace=True is not optional here. /faq is additive with (url, question) as
+    its upsert key, and the link validator regenerates a URL's FAQ from scratch
+    whenever it finds a dead product link — new question texts, so nothing
+    upserts and the previous 6 stay live. Without the per-URL DELETE that
+    replace=True does, every regeneration stacked another 6 questions on the
+    page: a sample of 60 published URLs on 2026-08-31 found 53% carrying more
+    than 6 live, averaging 13.7 and peaking at 42.
+
+    Cost is one DELETE per URL actually pushed, and mode="new" only pushes URLs
+    whose faq_json md5 changed — so it scales with the regeneration volume, not
+    with the 280k published URLs.
+    """
     log = logging.getLogger("automation")
+    payload = {"environment": "production", "mode": "new", "replace": True}
     resp = SESSION.post(
         f"{BASE_URL}/api/faq/publish-v2",
-        json={"environment": "production", "mode": "new"},
+        json=payload,
         timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
     )
     if resp.status_code == 401 and _reauth_on_401(resp):
         resp = SESSION.post(
             f"{BASE_URL}/api/faq/publish-v2",
-            json={"environment": "production", "mode": "new"},
+            json=payload,
             timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
         )
     resp.raise_for_status()

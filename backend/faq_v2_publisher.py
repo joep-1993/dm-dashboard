@@ -27,9 +27,10 @@ TWO SEMANTICS THAT SHAPE THIS MODULE:
    in place. So this is safe to re-run.
 2. It is ADDITIVE, not a full-set replace. Questions we DON'T send are left
    alone. Regenerating a URL's FAQ with different question text therefore leaves
-   the old questions live. A true replace needs DELETE-then-POST per URL, and at
-   280k+ URLs that is 280k extra round trips — offered as `replace=True` for
-   narrow re-pushes, NOT the default.
+   the old questions live. A true replace needs DELETE-then-POST per URL, so
+   `replace=True` is the DEFAULT everywhere (2026-08-31). It was off until then,
+   which is how the live store came to hold 53% of URLs with more than 6
+   questions — see publish_faq_v2 for the measurements and the reasoning.
 
 INCREMENTAL PUSHES (mode="new", the default)
 `pa.faq_content_v2` carries no push state of its own, so this module keeps its
@@ -273,15 +274,28 @@ def _stamp_state(rows, env):
         return_db_connection(conn)
 
 
-def publish_faq_v2(env="production", limit=None, replace=False, mode="new", task_id=None):
+def publish_faq_v2(env="production", limit=None, replace=True, mode="new", task_id=None):
     """Push FAQ Q&A pairs to the /faq section.
 
     mode    — "new" (default): only URLs never pushed or whose faq_json changed
               since their last successful push. "all": every URL, every run.
     limit   — cap on URLs (not records); for a trial run.
     replace — DELETE each URL's questions before posting it, so the published set
-              matches ours exactly. One extra request PER URL, so only sensible
-              with a small `limit`. Off by default.
+              matches ours exactly. ON by default, and it should stay that way.
+
+    Why replace defaults to true (changed 2026-08-31). It used to default to
+    false to save one DELETE per URL. That saving is what let the live store rot:
+    /faq upserts on (url, question), and a regenerated FAQ has new question TEXT,
+    so nothing overwrites the previous set — it just accumulates. Measured before
+    the fix: 53% of published URLs carried more than 6 questions, average 13.7,
+    worst 42. The saving was never real either — in mode="new" only URLs whose
+    faq_json changed get pushed, so the DELETEs scale with regeneration volume,
+    not with the ~280k published URLs.
+
+    The default lives HERE, not only at the caller. Fixing it at the API endpoint
+    first was not enough: the endpoint is one caller of several, and a caller that
+    simply omits the argument — which is every caller that has not thought about
+    it — is exactly the caller that must not get the additive behaviour.
     """
     if env not in FAQ_API_URLS:
         return {"success": False, "message": f"unknown env {env!r}"}
@@ -498,7 +512,7 @@ def _run(task_id, env, limit, replace, mode):
                                    completed_at=time.time())
 
 
-def start_faq_v2_task(env="production", limit=None, replace=False, mode="new"):
+def start_faq_v2_task(env="production", limit=None, replace=True, mode="new"):
     task_id = str(uuid.uuid4())
     with _task_lock:
         _tasks[task_id] = {"status": "queued", "env": env, "mode": mode, "progress": {}}

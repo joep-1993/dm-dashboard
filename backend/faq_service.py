@@ -553,9 +553,14 @@ def generate_faqs_for_page(page_data: Dict, num_faqs: int = 6):
         # Get list of valid URLs from page_data
         valid_urls = [item["url"] for item in page_data.get("product_urls", [])]
 
+        # num_faqs was only ever an instruction in the prompt; whatever the model
+        # returned went straight through. Publishing is additive on (url, question),
+        # so an over-long answer doesn't just sit in the DB — every extra question
+        # lands live and stays there. The batch path in batch_api_service applies
+        # the same cap.
         faq_items = [
             FAQItem(question=item["question"], answer=clean_urls_in_answer(item["answer"], valid_urls))
-            for item in faqs_data
+            for item in faqs_data[:num_faqs]
         ]
 
         return FAQPage(
