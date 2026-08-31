@@ -1,6 +1,104 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een additieve API met een zuinige default laat de content rotten (2026-08-31, FAQ / Publish 2.0)
+
+Joep zag 34 vragen live op een pagina waar de limiet 6 is. De generatie was onschuldig:
+`pa.faq_content_v2` hield voor die URL precies 6 items, en over 20.000 rijen is het 19.996x
+exact 6 (4x vijf, waar het model er zelf minder gaf). Het publiceren was de dader.
+
+### Het mechanisme: (url, question) als upsert-key + hergeneratie = optellen
+
+`/faq` upsert op **(url, question)** en is **additief** — vragen die we niet meesturen blijven
+staan. Dat stond al in de docstring van `faq_v2_publisher`. Wat er niet bij stond is wat het in
+combinatie met de rest van de pijplijn doet:
+
+**`link_validator.reset_faq_to_pending()` gooit de lokale content-rij weg** zodra er een dode
+productlink in een antwoord zit, waarna het model bij hergeneratie *andere vraagteksten*
+produceert. Andere tekst = andere upsert-key = niets wordt overschreven. De vorige 6 blijven
+live en er komen 6 bij. Elke validatieronde +6, voor altijd.
+
+Zichtbaar aan bijna-duplicaten op de pagina, wat de beste vroege indicator is:
+
+- "Wat zijn de voordelen van een waterafstotende rugzak voor kinderen?" (17 aug)
+- "Wat zijn de voordelen van waterafstotende rugzakken voor kinderen?" (20 aug)
+
+Omvang voor de fix, steekproef van 60 gepubliceerde URL's: **53% droeg meer dan 6 vragen,
+gemiddeld 13,7, ergste 42**. Die stapel stond ook in de `FAQPage`-schema, dus Google kreeg 'm
+integraal.
+
+### De zuinigheid die de default rechtvaardigde bestond niet
+
+`replace=False` was gekozen om één DELETE per URL te sparen — "280k extra round trips". Die
+rekensom klopt alleen voor `mode="all"`. In `mode="new"` worden alleen URL's gepusht waarvan de
+`faq_json`-md5 veranderde, dus de DELETEs schalen met het **hergeneratie**-volume, niet met de
+280k gepubliceerde URL's. De besparing was er nooit; de schade wel. Als een API additief is, is
+"replace kost een extra request" geen argument maar een acceptatie van datarot.
+
+### Ik heb de fix twee keer op de verkeerde laag gezet
+
+Dit is de scherpste les van de sessie, en hij is generiek.
+
+1. Eerst `replace: true` in `daily_automation.step_publish_faq_v2`. Leek af. Maar de
+   **Publish-knop in de FAQ-tool** stuurt alleen `{environment, mode}` (`frontend/js/faq.js`),
+   dus één klik had de hele opruiming teruggedraaid.
+2. Toen de default op het **endpoint** (`main.py`). Geverifieerd met een POST zonder `replace`
+   die `"replace": true` terugkreeg — dus de fix wérkte, op dat pad. Tijdens de opruiming
+   publiceerde vervolgens iets 4.755 URL's additief langs een pad dat dat endpoint niet raakte.
+3. Pas toen op `publish_faq_v2` en `start_faq_v2_task` zélf.
+
+De regel die eruit volgt: **een default die een gevaarlijke standaardwaarde repareert, hoort op
+de laagste laag die het gedrag bepaalt, niet bij de aanroeper die je toevallig als eerste
+opendeed.** De aanroeper die het argument weglaat is per definitie degene die er niet over heeft
+nagedacht — precies de aanroeper die het veilige gedrag nodig heeft. Twee keer "geverifieerd dat
+mijn fix werkt" en twee keer was de verificatie waar én het gat open, want ik toetste het pad dat
+ik net had aangeraakt.
+
+### `pa.urls.url` is een PAD, geen volledige URL
+
+Kostte me de eerste verkeerde conclusie. `GET /faq?url=<volledige https://www.beslist.nl/...>`
+gaf HTTP 200 met **0 records**, en `/automated-content/records` ook `[]` — waaruit ik bijna
+concludeerde dat de live FAQ ergens anders vandaan kwam. De publisher stuurt `u.url` uit
+`pa.urls`, en dat is `/products/...` zonder schema en host. Met de padvorm kwamen alle 34 records
+terug, mét `created_at` per record, wat meteen de zes push-datums opleverde. **Een lege 200 van
+een lookup-endpoint is geen bewijs van afwezigheid zolang je de sleutelvorm niet hebt
+geverifieerd tegen wat de schrijver stuurt.**
+
+### Een vervuilde URL is onzichtbaar voor `mode="new"`
+
+Belangrijk voor elke toekomstige opruiming: `mode="new"` vergelijkt `md5(faq_json)` met
+`pa.faq_v2_push_state.content_md5`. Bij een vervuilde URL is de *content* niet veranderd — alleen
+het live resultaat is fout. Die URL wordt dus overgeslagen, voor altijd. Een fix in de publisher
+repareert daarom nooit met terugwerkende kracht; opruimen vraagt een eigen pad. Twee werkende
+routes, beide gebruikt deze sessie:
+
+- `scripts/faq_v2_dedupe_live_sweep.py` — praat direct met `/faq`, parallelle DELETEs,
+  checkpoint per chunk zodat `--resume` exact verder gaat. Bewust niet de bulk-publisher met
+  `mode="all"`: die taak leeft in het geheugen van uvicorn en begint altijd bij de laagste
+  `url_id`, dus een herstart zes uur ver kost alles.
+- **Push-state ongeldig maken** (`content_md5` op een sentinel) en dan een gewone
+  `mode="new"`-publish. Gebruikt voor de 4.755 URL's van punt 3 hierboven; 811 sec, 0 fouten.
+  Elegant omdat het volledig op bestaande, geteste code leunt.
+
+### De DB staat in UTC, de applicatielogs in CEST
+
+`pa.*`-timestamps komen uit `now()` op een `Etc/UTC`-sessie; `logs/uvicorn-8003.log` schrijft
+Europe/Amsterdam. Twee uur verschil, en bij het uitzoeken van "wie publiceerde er tijdens mijn
+sweep" leidde dat bijna tot de verkeerde dader. Vastpinnen doe je met een schrijfactie waarvan je
+het echte tijdstip kent — mijn eigen smoke-test van 1 URL stond als `09:27:05` in `push_state` en
+als `11:27` in het log, en daarmee lag de offset vast.
+
+### Resultaat
+
+Sweep op productie: **258.443 URL's, 1.550.609 records, 0 mislukt**, ~3u bij 21-24 URL/s. Daarna
+4.755 URL's hersteld. Nameting op twee verse steekproeven (250 uit de hele populatie, 120 uit de
+herstelde set): **100% live == opgeslagen, alles exact 6**.
+
+Wat bewust bleef liggen: **19.865 URL's hebben live FAQ's zonder lokale content-rij**, omdat de
+validator die weggooide en de hergeneratie nog niet bij is. 17.870 staan op `pending` en genezen
+vanzelf bij de volgende publish; 1.993 staan op `failed` en houden hun oude FAQ tot die
+onderliggende fout is opgelost.
+
 ## Het kanaalrapport meet stickers, niet verkeer — twee aff-903-breuken in één week (2026-08-28, Redshift/SEO-analyse)
 
 Joep vroeg wat er met DMA organic (`aff_id=903`) gebeurde en of er een Google-update achter zat.

@@ -4,6 +4,53 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-31 — FAQ: additieve publish opgeruimd, default op de publisher gezet
+
+Aanleiding: Joep zag 34 vragen live op een pagina waar de limiet 6 hoort te zijn. Diagnose en
+lessen in LEARNINGS (zelfde datum, "Een additieve API met een zuinige default"). Commit `aff75e2`.
+
+Gedaan:
+
+- [x] **Oorzaak vastgesteld en van de generatie losgekoppeld**: `pa.faq_content_v2` hield 6 items
+      (19.996 van 20.000 rijen exact 6), live stonden er 34 uit zes push-datums. `/faq` upsert op
+      `(url, question)` en is additief; `link_validator.reset_faq_to_pending` hergenereert met
+      andere vraagteksten, dus niets overschrijft.
+- [x] **Omvang gemeten**: 53% van de gepubliceerde URL's droeg meer dan 6 vragen, gemiddeld 13,7,
+      ergste 42 (steekproef n=60).
+- [x] **`replace=True` als default op `publish_faq_v2` en `start_faq_v2_task`**, na twee te hoge
+      fixes (eerst `daily_automation`, toen het endpoint — zie LEARNINGS).
+- [x] **Harde `[:num_faqs]`-rem** in `generate_faqs_for_page` en het batch-API-pad; dat was tot nu
+      toe alleen een instructie in de prompt.
+- [x] **`scripts/faq_v2_dedupe_live_sweep.py`** geschreven en op productie gedraaid: 258.443
+      URL's, 1.550.609 records, 0 mislukt, ~3u. Resumebaar via checkpoint-bestand.
+- [x] **4.755 URL's hersteld** die tijdens de sweep opnieuw additief gepubliceerd waren, via
+      push-state-invalidatie + gewone `mode="new"`-publish (811 sec, 0 fouten).
+- [x] **Nagemeten op twee verse steekproeven** (250 uit de hele populatie, 120 uit de herstelde
+      set): 100% live == opgeslagen, alles exact 6.
+- [x] **Backend herstart** (PID 12176) zodat de endpoint-fix live ging; nieuwe default
+      geverifieerd met een POST zonder `replace` die `"replace": true` terugkreeg.
+
+Open:
+
+- [ ] **Wie publiceerde er 4.755 URL's om 11:29-11:31 CEST?** Die batch is additief gepusht
+      (15 batches van 333 = de vorm van `publish_faq_v2`), maar in `logs/uvicorn-8003.log` staat
+      ná de herstart maar één `POST /api/faq/publish-v2`, en dat was mijn eigen smoke-test van 1
+      URL. Dus die publish liep **niet** via deze backend. Mogelijk draait er een tweede
+      dashboard-instantie of een `daily_automation.py` op een andere host tegen dezelfde gedeelde
+      Postgres — met ongepatchte code. Uitzoeken, want zolang dat pad bestaat kan het de opruiming
+      opnieuw ongedaan maken. Check: draait `daily_automation.py` ergens anders, en wijst zijn
+      `BASE_URL` naar een andere backend?
+- [ ] **1.993 URL's met `faq_jobs='failed'`** houden een verouderde live FAQ zonder lokale
+      content-rij. Die genezen niet vanzelf; de onderliggende fout moet eerst opgelost worden.
+      (De 17.870 `pending`-broertjes genezen wél bij de volgende publish.)
+- [ ] **Brakke test `test_faq_delete_route_single_and_clears_url_validation`** in
+      `backend/test_kopteksten_faq_audit.py` staat rood en stond dat al vóór deze sessie. Vals
+      alarm: hij snijdt 1400 tekens uit `delete_faq_result` en de `DELETE FROM pa.url_validation`
+      die hij zoekt staat net buiten dat venster. Venster oprekken of op de handler-grens knippen.
+- [ ] **`gsd_ll_service` vertraagt elke backend-start met ~30s** met drie retries op een Excel in
+      `C:\Users\l.davidowski\...` die niet meer bestaat. Losstaand van deze sessie, maar het valt
+      op bij elke herstart.
+
 ### 2026-08-28 — DMA organic (aff 903): twee attributiebreuken, geen Google-update
 
 Vraag van Joep. Uitwerking in LEARNINGS (zelfde datum, "Het kanaalrapport meet stickers, niet
