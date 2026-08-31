@@ -678,7 +678,15 @@
                     labels: dates,
                     datasets: [{
                         data: values, borderColor: colour, backgroundColor: colour + '22',
-                        borderWidth: 1.6, fill: true, tension: 0.35,
+                        borderWidth: 1.6,
+                        // 'start' = vul tot de ONDERKANT van de schaal. `fill: true` is in
+                        // Chart.js een alias voor 'origin' (y=0), en dat ziet er alleen goed
+                        // uit zolang een reeks nooit negatief wordt. Margin is 16 van de 30
+                        // dagen negatief, dus daar vulde hij alleen de band tussen de lijn en
+                        // de nullijn — het vlak onder de lijn bleef leeg. Met 'start' krijgt
+                        // elke tegel dezelfde wash, ongeacht of de reeks door nul gaat.
+                        fill: 'start',
+                        tension: 0.35,
                         pointRadius: 0, pointHoverRadius: 3, pointHitRadius: 14,
                         pointHoverBackgroundColor: colour, pointHoverBorderColor: '#fff',
                         spanGaps: false,   // een lege dag blijft een gat, geen duik naar nul
@@ -688,7 +696,16 @@
                     responsive: true, maintainAspectRatio: false, layout: { padding: 0 },
                     // Geen assen: de tegel noemt het getal en de eenheid al; de lijn
                     // is er alleen voor de vorm.
-                    scales: { x: { display: false }, y: { display: false } },
+                    //
+                    // `grace` is hier geen opsmuk. Zonder marge loopt de y-as exact van
+                    // datamin tot datamax, dus de hoogste piek wordt op de bovenste pixel
+                    // getekend en de helft van de 1,6px-lijn valt buiten het canvas — de
+                    // toppen zagen er afgekapt uit (Joep, 31-08, op Impressions en Margin).
+                    // Gemeten: het canvas is 87,0x30,0 in een wrapper van 87,2x30,0, dus het
+                    // was géén maatprobleem maar puur het ontbreken van verticale lucht.
+                    // Percentage en geen vaste pixels: 30px hoog met wisselende reeksen,
+                    // dus de marge moet met het bereik meeschalen.
+                    scales: { x: { display: false }, y: { display: false, grace: '12%' } },
                     interaction: { mode: 'index', intersect: false },
                     plugins: {
                         legend: { display: false },
