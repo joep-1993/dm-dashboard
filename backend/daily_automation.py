@@ -614,7 +614,6 @@ def main():
         ("Reset FAQ validation",              step_reset_faq_validation),
         ("Reset Kopteksten validation",       step_reset_kopteksten_validation),
         ("Validate links (parallel)",         step_validate_parallel),
-        ("Recheck skipped URLs",              step_recheck_skipped_urls),
     ]
 
     completed_steps = []
@@ -639,6 +638,18 @@ def main():
                 f"Completed steps: {', '.join(completed_steps) or 'None'}"
             )
             sys.exit(1)
+
+    # --- Recheck skipped URLs (non-fatal — continue to content generation on failure) ---
+    recheck_failed = False
+    log.info("--- Starting: Recheck skipped URLs ---")
+    try:
+        step_recheck_skipped_urls()
+        completed_steps.append("Recheck skipped URLs")
+        log.info("--- Completed: Recheck skipped URLs ---")
+    except Exception as e:
+        recheck_failed = True
+        log.warning(f"--- FAILED (non-fatal): Recheck skipped URLs --- Error: {e}", exc_info=True)
+        log.info("Continuing to content generation — recheck will retry next run")
 
     # --- Content generation (non-fatal on timeout — always continue to publish) ---
     log.info("--- Starting: Regenerate content (parallel) ---")
@@ -700,11 +711,15 @@ def main():
         )
 
     any_timed_out = process_results and any(r["timed_out"] for r in process_results.values())
-    icon = ":warning:" if any_timed_out else ":white_check_mark:"
-    label = "Partial" if any_timed_out else "Complete"
+    partial = any_timed_out or recheck_failed
+    icon = ":warning:" if partial else ":white_check_mark:"
+    label = "Partial" if partial else "Complete"
+
+    recheck_note = "\nRecheck skipped URLs: failed (retries next run)" if recheck_failed else ""
 
     send_slack_message(
         f"{icon} *DM Tools - Daily Automation {label}*"
+        f"{recheck_note}"
         f"{process_summary}"
         f"{publish_summary}\n"
         f"Duration: {str(duration).split('.')[0]}"
