@@ -1,6 +1,241 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Twee tools exporteren naar één importcontract, en de padregel staat nu op twee plekken (2026-09-01, Excel-export Canonicals + Redirect Generator)
+
+Joeps verzoek was klein: laat de Excel-export van Canonicals en Redirect Generator de kolommen
+`old, new, statuscode, country, label` bevatten, met relatieve URL's. Het interessante zit in wat
+dat contract precies is en waarom het niet op één plek af te dwingen valt.
+
+### Het contract is vijf kolommen én pad-only
+
+`redirect_tool_router.py` heeft `EXPECTED_COLUMNS = ["old", "new", "statuscode", "country", "label"]`
+en leest het bestand met `dtype=str`, dus een numerieke `statuscode`-cel (200/301) komt er als
+string uit en `int(str(...).strip())` in `_process_one` slikt beide vormen. Twee dingen die je bij
+het schrijven van een export moet weten omdat ze verderop in de keten pas stuklopen:
+
+- **`country` mag `NL+BE` zijn.** `normalize_country()` mapt dat naar de literal `"nl, be"` die de
+  API opslaat, en die waarde zit in de `url_UNIQUE`-key: `country="nl"` posten naar een target waar
+  al een `"nl, be"`-regel op staat geeft een duplicate-key-fout. `NL+BE` is dus niet slordig
+  ingevuld, het is de juiste waarde.
+- **URL's moeten relatief.** De redirect API slaat `fromUrl`/`toUrl` pad-only op, en de
+  canonicalisatieregel van dit project laat `?` en `#` vallen vóór elke insert. Een export met
+  `https://www.beslist.nl/...` erin is dus geen kwestie van smaak.
+
+### De duplicatie die je niet kunt wegnemen
+
+`strip_domain()` in `redirect_tool_service.py` is de enige plek waar de pad-regel staat: volledige
+URL, bare hostname (`www.beslist.nl/foo`), pad, hostname zonder pad, plus query- en fragment-strip,
+allemaal in één functie. Canonicals exporteert via de backend (`POST /api/canonical/export-excel`)
+en importeert die functie dus gewoon — dezelfde code die de import straks op dezelfde rij toepast.
+
+De Redirect Generator kan dat niet: die exporteert client-side met SheetJS en doet daarvoor geen
+enkele backend-call. Daar staat nu een `toRelativeUrl()` in `301-generator.html` die `strip_domain()`
+tak voor tak spiegelt, met de verwijzing ernaartoe in het commentaar. Getest op dezelfde acht
+gevallen aan beide kanten, identieke uitkomst — maar het blijft een kopie: **wie `strip_domain()`
+aanpast, moet die JS-functie meenemen.** Wil je dat gat dicht, dan is de route een
+export-endpoint voor de Redirect Generator (zoals Canonicals er een heeft), niet een derde kopie.
+
+### `toISOString()` is de verkeerde klok voor een `dd-mm-jjjj`-label
+
+Het label is `JVS Canonicals <dd-mm-jjjj>` / `JVS Redirects <dd-mm-jjjj>`, opgebouwd op het moment
+van exporteren. De voor de hand liggende JS (`new Date().toISOString().split('T')[0]`, zoals de
+bestaande push-naar-Redirect-tool-code hem gebruikt) geeft UTC: exporteer je in CEST na 22:00, dan
+staat de dag van gisteren in het label. Vandaar `_labelDate()` met `getDate()/getMonth()` in lokale
+tijd. De backend gebruikt `datetime.now()` en deze host staat op CEST, dus beide kanten schrijven
+dezelfde datum — dat is een eigenschap van de host, geen garantie in de code.
+
+## Een fallback die succes verzint, maakt van het logboek een alibi (2026-09-01, IndexNow-flow + domeinkeuze)
+
+Voortgekomen uit de Bing-audit (zelfde datum). `pa.index_now_joep` bevatte 159 dagen lang
+**uitsluitend** `response_code = 200`. Dat leek het bewijs dat het kanaal werkt. Het was het bewijs
+dat de flow niets anders kón opschrijven.
+
+### Het mechanisme
+
+In `indexnow_submitter` staat op de HTTP-node `onError: continueRegularOutput`, en de code-node
+erachter deed:
+
+    const responseCode = item.json.statusCode || 200;   // <- hier
+
+Bij succes is die 200 echt (`fullResponse: true` staat aan). Bij een **fout** levert
+`continueRegularOutput` een item **zonder** `statusCode`, en dan verzint `|| 200` er een. Een 403,
+429 of timeout kwam dus als een keurige 200 in de tabel. Dezelfde bug in Python-vorm in
+`backend/indexnow_service.py`: `_save_submissions(batch, response_code)` stond búiten elke
+succescheck, dus een 403 schreef 403-rijen weg.
+
+**Waarom dat erger is dan een gemiste melding:** de dedup is `SELECT DISTINCT url FROM
+pa.index_now_joep` — op `url` alleen, zonder `response_code`. Elke rij, ongeacht code, retireert die
+URL voorgoed. Een gelogde mislukking betekent dus dat die 10.000 URL's Bing **nooit meer** bereiken.
+Vandaar de regel die nu overal geldt: **bij niet-geaccepteerd loggen we niets** (de postgres-node
+krijgt `SELECT 1`), zodat de volgende run ze gewoon opnieuw oppakt.
+
+### 200 en 202 zijn niet hetzelfde, en dat werd pas duidelijk door te meten
+
+IndexNow-contract: 200 = submitted, 202 = received maar **key validation pending**, 403 = key
+invalid, 422 = URL's horen niet bij de host, 429 = rate limited. Live geprobeerd op onze eigen key:
+
+| submit | antwoord |
+|---|---|
+| `.nl`-URL, onze key | **200** |
+| `.nl`-URL, onze key, `keyLocation` naar `/llms.txt` (bestaat, bevat de key niet) | **200** |
+| `.nl`-URL, onze key, **geen** `keyLocation` | **200** |
+| `.be`-URL, zelfde key (met of zonder keyLocation) | **202** |
+| verzonnen key (ook 20 min later opnieuw) | **202** |
+
+Twee conclusies. Eén: de .nl-key is bij Bing **op host-niveau geregistreerd** — het sleutelbestand
+`/2e11f87f….txt` geeft een harde 404 en dat maakt niets uit. Vrijwel zeker aangemaakt in Bing
+Webmaster Tools, wat betekent dat er een BWT-account bestáát (BWT toont je IndexNow-keys; daar is
+het in een minuut na te kijken). Wanneer dat bestand "weg" is, is niet te dateren en het heeft er
+waarschijnlijk nooit gestaan: root-`.txt` is op deze site per bestand ingericht (`llms.txt`,
+`llms-full.txt`, `robots.txt`, `ads.txt` = 200 `text/plain`; `security.txt` en een willekeurige naam
+= 404), geen Wayback-snapshot, geen enkele bot-fetch in de logs, en de key staat pas sinds
+2026-02-11 in de repo terwijl n8n al op 2025-07-14 inzond.
+
+Twee: **202 mag niet als succes tellen.** Bing gaat dan het key-bestand op die host zoeken, vindt
+het niet, en gooit de batch weg. Logging van een 202 zou dezelfde bug in een nieuwe jas zijn. Alleen
+een echte **200** wordt gelogd.
+
+### beslist.be heeft een eigen 10.000/dag, maar niet met de .nl-key
+
+Bing wijst het quotum **per domein** toe, dus .be heeft zijn eigen budget naast .nl. Consequentie
+voor onze kant: de dagteller moest óók per domein, anders sluit een volle .nl-dag .be buiten. Staat
+nu zo in `get_today_count(domain)` (filter `url LIKE 'https://<host>/%'`, plus
+`response_code = 200`, wat sinds deze fix klopt).
+
+De key is per host: het 202-antwoord hierboven is precies waarom .be een eigen key uit BWT nodig
+heeft, of het key-bestand gehost op de .be-root.
+
+### Waar de flow écht leeft
+
+`docs/indexnow_n8n.json` in de repo **staat in `.gitignore`** (de export bevat de key) en was een
+oude 11-node-versie waarin `fetch_urls_from_redshift` nog een placeholder-query had. Ik keek daardoor
+eerst naar de verkeerde flow. De echte export is
+`Downloads\claude\indexnow_submitter_new.json`: 12 nodes, node-namen met een `1`-suffix
+(`has_urls?1`, `submit_to_indexnow1`, `build_tracking_insert1`, `build_summary1`), plus `get_dates`
+en `validate_suppliers`. Keten: `dedup_and_batch → validate_suppliers → has_urls?1 → submit →
+build_tracking_insert1 → log_to_tracking_table → build_summary1 → Slack`. Lokale JSON is nu
+bijgewerkt naar die echte versie mét fix; het vastgelegde verslag staat in
+`docs/indexnow_n8n_fix.md` (geen key erin, dus dat mag wél de repo in).
+
+Tweede vondst in `build_summary1`: die las `totalLogged` uit `$input`, en `$input` is daar de
+**output van de postgres-node** — een queryresultaat zonder `url_count`. De Slack-melding zei
+daardoor altijd "New URLs submitted: 0". Nu leest hij bij `build_tracking_insert1`.
+
+### n8n-code-nodes zijn droog te testen
+
+Geen n8n-API beschikbaar, dus getest door de `jsCode` uit de JSON te trekken en in Node te draaien
+met een gemockte context — `new Function('$input','$', js)` en `$`/`$input` als
+`{all:()=>arr, first:()=>arr[0]}`. Daarmee alle vier de paden langs (200 / 403 / 429 / error-item
+zonder statusCode) plus het escapen van een apostrof (`o'brien` → `o''brien`). Scheelt wachten op een
+echte storing.
+
+### Wat er in de tool zit
+
+`DOMAINS`-dict met key per domein uit `INDEXNOW_KEY_NL` / `INDEXNOW_KEY_BE`, `submit_urls(urls,
+domain)`, `GET /api/indexnow/domains`, en `domain` op submit / upload-excel / today-count. Drie
+vangrails vóór er één request uitgaat: geen key → vooraf geweigerd; URL's van een ander domein →
+eruit gefilterd (IndexNow geeft daar 422 op, en één losse .nl-URL zou de hele .be-batch meesleuren);
+onbekend domein → HTTP 400. Frontend: dropdown in de kaartkop die voor beide tabs geldt, ververst de
+dagteller, laat de placeholder meelopen, en zet "op www.beslist.nl" achter de teller — een bloot
+getal is dubbelzinnig zodra er twee domeinen zijn.
+
+Getest op een wegwerp-uvicorn op **:8013**, zodat de live :8003 niet aangeraakt werd. Dat is de
+manier: een tweede instance op een andere poort is gratis en bespaart een herstart die een lopende
+Tier-A-run sloopt.
+
+## Bing kent ons niet omdat het ons niet crawlt — en het "Bing"-label in dim_visit is 80% betaald (2026-09-01, Bing-audit)
+
+Joeps vraag: hoe doen we het in Bing, en wat zijn de quick wins. Rapport:
+https://claude.ai/code/artifact/d758ee4a-7a84-47da-8bf5-1bbfaf5c2421
+
+### Eerst de valkuil, anders meet je het verkeerde verhaal
+
+`datamart.dim_visit.referer_source` is de enige plek waar de zoekmachine/AI-bron per visit staat
+(Google, Bing, ChatGPT, Gemini, Perplexity, Overig). Maar **`referer_source='Bing'` is voor 80%
+betaald verkeer**: aff 127 = Bing NL SEA, 128 = Bing BE SEA, 883 = Microsoft Shopping (alle
+`traffic_type=Paid`). Alleen `aff_id=0 AND channel_id=4` is organisch.
+
+Zonder dat filter zie je aug-2025 → aug-2026 een daling van 37% en concludeer je dat Bing-SEO
+wegzakt. Met het filter: **10.300 → 10.306 visits. Exact vlak.** De hele daling zit in SEA
+(127: 33.561→20.281, 128: 23.902→12.431, 883: 17.952→10.754, alle ~−40%). Dat is een SEA-vraag.
+
+Tweede gotcha in dezelfde tabel: **`month` is nul-gepadd.** `month='8'` matcht NUL rijen, `'08'`
+werkt. En `year`/`month` zijn de partitiekolommen — een 24-maands aggregatie over een `intime`-range
+timeout op 120 s, dezelfde query op `year in ('2025','2026')` niet.
+
+### De stand, en waarom het geen rankingprobleem is
+
+| metriek (aug 2026, organisch) | Bing | Google |
+|---|---|---|
+| visits | 10.306 | 1.616.835 |
+| omzet (cpc+ww+affiliate) | €1.190 | €169.757 |
+| OPB | **€0,1154** | €0,1049 |
+| pageviews/visit | 2,24 | 1,71 |
+| aandeel desktop (≥1024px) | **82%** | 26% |
+
+Een Bing-visit is dus 10% méér waard dan een Google-visit en levert 31% meer pageviews. Het is een
+volumeprobleem, en Bing-organisch is bij ons bovendien een **desktopkanaal** — beoordeel Bing-werk
+op een desktopviewport, niet op mobiel.
+
+### Het volume zit vast op de crawl, en dat is te meten
+
+Uit `pa.bothits_*` (CloudFront, 30 dagen, alleen host beslist.nl — .be zit niet in die logs), op de
+1.024.727 URL's in `pa.urls`:
+
+| bot | unieke URL's | dekking | hits/maand |
+|---|---|---|---|
+| Googlebot | 248.224 | 24,2% | 34,9 mln |
+| Applebot | 238.416 | 23,3% | 16,5 mln |
+| **bingbot** | **7.028** | **0,69%** | **0,39 mln** |
+
+35× minder dan de andere twee. Met dit tempo heeft Bing simpelweg geen index van beslist.nl, en dan
+kan geen enkele titel- of koptekstverbetering die 10k/maand voorbij.
+
+En van dat piepkleine budget (165.273 hits/14d) gaat **26% naar `/data/graphql`** — 43.178 hits,
+tegen 35 voor Googlebot in dezelfde periode. Dat pad staat op `Disallow` onder `User-agent: *`, net
+als `/outclick/redirect` (bingbot: 291). Vermoedelijk rendert Bing onze SPA en haalt de JS-runtime
+de GraphQL-API op, buiten de robots-check om. Zonde, want de HTML is al server-side gerenderd:
+58× `itemprop="name"` op een C-url zonder dat er JavaScript hoeft te lopen.
+
+Rest van het budget: producten 35,9%, R-urls 26,6%, **C-urls 7,9%** — terwijl C-urls 24% van de
+Bing-organische entries opleveren. Googlebot besteedt 93% aan producten + C-urls, bingbot 44%.
+
+### Wat NIET het probleem is (gemeten, om het uit te sluiten)
+
+- Geen cloaking of lege shell: bingbot krijgt dezelfde bytes als Googlebot (63,9 vs 59,9 KB gzip
+  per C-url, 19,7 vs 19,0 KB per product).
+- On-page is in orde: canonical, `robots: index,follow`, hreflang nl-NL/nl-BE, H1, title.
+- **De `Crawl-Delay: 20` onder `User-Agent: msnbot` remt bingbot niet.** Bing's eigen docs: bingbot
+  zoekt zijn eigen token en valt anders terug op `*` — msnbot-regels leest hij niet. Hij remt wél
+  Yahoo's Slurp, dat ook op 20 staat. Let op voor later: een crawl-delay in robots.txt **overrúled**
+  Crawl Control in Bing Webmaster Tools, dus in een nieuwe `bingbot`-groep hoort er géén.
+- Wel wat traag: bingbot krijgt C-urls in 526 ms en R-urls in 758 ms (Googlebot 344/533), en we
+  hebben nog steeds alleen gzip, geen brotli.
+
+### Sitemaps: het oppervlak is goed, het signaal niet
+
+3 indexen in robots.txt, 95 bestanden, 1.263.420 URL's NL (955.498 `/p/`, 304.347 browse/`/c/`,
+3.575 categorie). Maar **alle 50.000 URL's in één bestand dragen dezelfde `lastmod`**, namelijk het
+generatiemoment. Voor Bing, dat `lastmod` gebruikt om te bepalen wát het opnieuw ophaalt, is "alles
+is 5 minuten geleden gewijzigd" hetzelfde als geen signaal. Bij 1,26 mln URL's op een budget van
+400k hits/maand is dat precies het signaal dat je niet weg wil gooien. Extra: op
+`/sitemapxml/nl/current/sitemap-index.xml` staat een stale index (200, niet in robots.txt) waarvan
+alle children naar `http://sitemap.pbeslwsoktin.net` wijzen.
+
+### Waar Bing relatief wél presteert
+
+Per 1.000 Google-organische visits levert Bing gemiddeld 6,4. Bovenkant: Horloges 12,3, Computers
+11,4, Parfumerie 11,0, Sanitair 10,7, Elektronica 10,5. Onderkant: Eten & drinken 2,4, Sport 4,5,
+Meubels 4,7. Onderzoekend, prijsvergelijkend, desktop — precies waar een grotere Bing-index het
+eerst zou renderen.
+
+### Terzijde, uit dezelfde kolom
+
+ChatGPT 7.780 visits over jun–aug met een OPB van €0,33, Gemini 1.962 à €0,31, Perplexity 620 à
+€0,18 — tot 2,9× een Google-visit. Ongefilterd op kanaal, dus grover gemeten, maar de orde van
+grootte staat: klein volume, hoge waarde per visit. Aparte analyse waard.
+
 ## Drie plekken noemen zich seoPriority en maar één geeft het effectieve antwoord (2026-09-01, taxv2 / "type"-facetten)
 
 Joep vroeg twee dingen: zet `t_bv` op Bouwfolie aan, en exporteer alle "type"-facetten die

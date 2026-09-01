@@ -241,6 +241,16 @@ def load_offers_by_ean():
     return offers
 
 
+def load_tagdata():
+    """Commercieel bewijs uit Redshift (scripts/get_tagdata.py). Optioneel: zonder
+    dat bestand bouwt de export gewoon door, met commerce = None per product."""
+    path = DATA / "tagdata.json"
+    if not path.exists():
+        return {}, {}
+    d = json.loads(path.read_text(encoding="utf-8"))
+    return d.get("ean_score", {}), d.get("tag", {})
+
+
 def build(topic, limit=None):
     keyword_research = load_keyword_research()
     terms_list = topic.terms
@@ -248,6 +258,7 @@ def build(topic, limit=None):
     clicks = json.loads((DATA / "clicks.json").read_text()) if (DATA / "clicks.json").exists() else {}
     price_map = load_price_map()
     offers_by_ean = load_offers_by_ean()
+    ean_score, tag = load_tagdata()
 
     # --- reviews: load all, track cost + model ---
     review_by_key = {}
@@ -277,10 +288,23 @@ def build(topic, limit=None):
             review_model = review.get("model")
 
     # --- terms ---
+    # Eén item per PAGINA, niet per zoekterm: termen met dezelfde productlijst
+    # zijn samengevoegd. `also_targets` houdt de overige keywords vast, zodat
+    # de pagina weet waar hij nog meer op mikt.
+    pages_path = DATA / "pages.json"
+    if pages_path.exists():
+        pages = json.loads(pages_path.read_text())
+    else:
+        pages = [{"slug": term_slug(t["term"]), "term": t["term"],
+                  "display": t.get("display") or t["term"], "volume": t.get("volume"),
+                  "volume_combined": t.get("volume"),
+                  "terms": [{"term": t["term"], "volume": t.get("volume")}]}
+                 for t in terms_list]
+
     terms_out = []
-    for t in terms_list:
+    for t in pages:
         term = t["term"]
-        slug = term_slug(term)
+        slug = t.get("slug") or term_slug(term)
         rank_path = DATA / f"rank_{slug}.json"
         if not rank_path.exists():
             print(f"  (geen ranglijst voor '{term}' — overgeslagen)")
@@ -302,6 +326,11 @@ def build(topic, limit=None):
             })
         terms_out.append({
             "term": term,
+            "display": t.get("display") or term,      # paginatitel
+            "volume": t.get("volume"),
+            "volume_combined": t.get("volume_combined"),
+            # De overige keywords die op deze pagina uitkomen.
+            "also_targets": [x for x in (t.get("terms") or []) if x["term"] != term],
             "slug": slug,
             "has_mockup_page": bool(t.get("has_mockup_page")),
             "intro": rank_data["intro"],
@@ -309,6 +338,20 @@ def build(topic, limit=None):
             "rank_usage": rank_data["usage"],
             "top10": top10,
         })
+
+    # Rankingkosten uit de tokens die per term zijn bewaard. De rank-call doet
+    # geen web_search, dus alleen in- en output tellen.
+    rank_cost = 0.0
+    for t in terms_out:
+        usage = t.get("rank_usage") or {}
+        c = cost_for(topic.rank_model, {"input_tokens": usage.get("input", 0),
+                                        "output_tokens": usage.get("output", 0)}, 0)
+        if c["total"] is None:
+            rank_cost = None
+            break
+        rank_cost += c["total"]
+    if rank_cost is not None:
+        rank_cost = round(rank_cost, 4)
 
     # --- products ---
     product_keys = list(products_master.keys())
@@ -349,6 +392,9 @@ def build(topic, limit=None):
             "plp_url": p["plpUrl"],
             "clicks": clicks.get(key, {}).get("clicks", 0),
             "live_offers": offers,
+            # Wat Beslist zelf van dit EAN vindt (bt.ean_score) en wat onze pixel
+            # bij de winkels heeft gemeten (bt.revenue_per_product).
+            "commerce": {"ean_score": ean_score.get(key), "tag": tag.get(key)},
             "review": review_out,
         }
 
@@ -363,6 +409,7 @@ def build(topic, limit=None):
             "counts": {
                 "keywords": len(keyword_research),
                 "terms": len(terms_list),
+                "pages": len(terms_out),
                 "products": len(products_master),
                 "reviews": len(review_by_key),
             },
@@ -370,8 +417,9 @@ def build(topic, limit=None):
             # geraden tarief is erger dan geen tarief.
             "cost_usd": {
                 "reviews": round(total_review_cost, 2) if total_review_cost else None,
-                "ranking": None,
-                "total": None,
+                "ranking": rank_cost,
+                "total": (round(total_review_cost + rank_cost, 2)
+                          if total_review_cost and rank_cost is not None else None),
             },
         },
         "prompts": {"review": PROMPT, "rank_system": SYSTEM},

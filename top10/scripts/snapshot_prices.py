@@ -108,14 +108,18 @@ def snapshot_offers(topic, master: dict, session: requests.Session, eans: list[s
                 if price is None:
                     continue
                 rows.append({"ean": ean, "shop_name": shop.get("name"), "price": price,
-                             "delivery_cost": 0.0, "url": offer.get("url")})
+                             "delivery_cost": 0.0, "url": offer.get("url"),
+                             # get_tagdata.py koppelt de pixeldata op dit id:
+                             # bt.revenue_per_product heeft één rij per shop-aanbod.
+                             "product_id_v3": offer.get("productIdV3")})
         if i % 25 == 0 or i == len(eans):
             print(f"  offers {i}/{len(eans)}")
         time.sleep(0.15)
 
     path = topic.file("offers_top10.csv")
     with open(path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["ean", "shop_name", "price", "delivery_cost", "url"])
+        w = csv.DictWriter(f, fieldnames=["ean", "shop_name", "price", "delivery_cost",
+                                          "url", "product_id_v3"])
         w.writeheader()
         w.writerows(rows)
     print(f"{len(rows)} aanbiedingen over {len(eans)} producten -> {path.name}")

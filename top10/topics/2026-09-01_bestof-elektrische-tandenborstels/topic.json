@@ -1,0 +1,110 @@
+{
+ "slug": "2026-09-01_bestof-elektrische-tandenborstels",
+ "label": "Elektrische tandenborstels",
+ "created_at": "2026-09-01",
+ "category": {
+  "category_id": 9005269,
+  "name": "Elektrische tandenborstels",
+  "path": [
+   "Elektronica",
+   "Persoonlijke verzorging",
+   "Elektrische tandenborstels"
+  ],
+  "main_category": 655,
+  "category": "elektronica_19875535_19934727"
+ },
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "elektrische tandenborstel",
+   "display": "elektrische tandenborstels",
+   "volume": 49500,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "oral-b elektrische tandenborstel",
+   "display": "Oral-B elektrische tandenborstels",
+   "volume": 12100,
+   "kind": "brand",
+   "params": {
+    "query": "oral-b elektrische tandenborstel"
+   }
+  },
+  {
+   "term": "beste elektrische tandenborstel",
+   "display": "elektrische tandenborstels",
+   "volume": 5400,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "elektrische tandenborstel aanbieding",
+   "display": "elektrische tandenborstels in de aanbieding",
+   "volume": 4400,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "philips elektrische tandenborstel",
+   "display": "Philips elektrische tandenborstels",
+   "volume": 1900,
+   "kind": "brand",
+   "params": {
+    "query": "philips elektrische tandenborstel"
+   }
+  },
+  {
+   "term": "roze elektrische tandenborstel",
+   "display": "roze elektrische tandenborstels",
+   "volume": 590,
+   "kind": "facet:kleur",
+   "params": {
+    "query": "roze elektrische tandenborstel"
+   }
+  },
+  {
+   "term": "elektrische tandenborstel test",
+   "display": "geteste elektrische tandenborstels",
+   "volume": 320,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "beste oral-b elektrische tandenborstel",
+   "display": "Oral-B elektrische tandenborstels",
+   "volume": 320,
+   "kind": "brand",
+   "params": {
+    "query": "beste oral-b elektrische tandenborstel"
+   }
+  },
+  {
+   "term": "frozen elektrische tandenborstel",
+   "display": "Frozen elektrische tandenborstels",
+   "volume": 320,
+   "kind": "facet:personages",
+   "params": {
+    "query": "frozen elektrische tandenborstel"
+   }
+  },
+  {
+   "term": "elektrische tandenborstel kopen",
+   "display": "elektrische tandenborstels",
+   "volume": 260,
+   "kind": "generic",
+   "params": {}
+  }
+ ],
+ "skip_facets": [
+  "type_tand",
+  "type_onderdeel_tand"
+ ]
+}

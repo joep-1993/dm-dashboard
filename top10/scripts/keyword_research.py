@@ -27,21 +27,34 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from shared.topic import add_topic_arg, find_topic, singular            # noqa: E402
 
 SEARCH_API = "https://productsearch-v2.api.beslist.nl/search/products"
-SKIP_FACETS = {"winkel", "merk"}          # winkel is geen zoekterm, merk doen we apart
+
+# Winkel is geen zoekterm; merk behandelen we apart. De rest komt per categorie
+# uit topic.json ("skip_facets") of van --skip-facet, want welk facet een
+# intentieval is verschilt per categorie: bij airfryers is dat
+# 'bereidingsprogramma' (recepten), bij tandenborstels 'type_tand' (dat bevat
+# opzetborstels en flossers — andere producten).
+BASE_SKIP_FACETS = {"winkel", "merk"}
 
 
-def facet_values(topic, per_facet: int) -> list[tuple[str, str]]:
+def facet_values(topic, per_facet: int, skip: set[str]) -> list[tuple[str, str]]:
     """[(facet_urlName, waarde)] — kandidaat-modifiers uit de categorie."""
     r = requests.get(SEARCH_API, params=topic.search_params(limit="1"), timeout=30)
     r.raise_for_status()
     out = []
     for facet in r.json().get("facets") or []:
         name = (facet.get("urlName") or "").lower()
-        if name in SKIP_FACETS:
+        if name in skip:
             continue
         vals = sorted(facet.get("values") or [], key=lambda v: -(v.get("count") or 0))
         for v in vals[:per_facet]:
-            out.append((name, v["facetValue"]))
+            value = (v.get("facetValue") or "").strip()
+            # Kale getallen ('2', '4', '6' uit 'Aantal borstels') leveren
+            # onzintermen op als '2 elektrische tandenborstel'. Die hoeven we
+            # niet aan Keyword Planner voor te leggen om te weten dat ze niets
+            # zijn — anders dan taalfouten, die wél volume kunnen hebben.
+            if not value or value.replace(",", "").replace(".", "").isdigit():
+                continue
+            out.append((name, value))
     return out
 
 
@@ -54,7 +67,7 @@ def brands(topic, top: int) -> list[str]:
     return []
 
 
-def candidates(topic, n_brands: int, per_facet: int) -> dict[str, dict]:
+def candidates(topic, n_brands: int, per_facet: int, skip: set[str]) -> dict[str, dict]:
     """{zoekterm: {kind, params}} — alles wat we aan Keyword Planner voorleggen."""
     noun = topic.label.lower()
     one = singular(topic.label)
@@ -68,7 +81,7 @@ def candidates(topic, n_brands: int, per_facet: int) -> dict[str, dict]:
         for t in (f"{b.lower()} {one}", f"beste {b.lower()} {one}"):
             out.setdefault(t, {"kind": "brand", "params": {"query": t}})
 
-    for facet_name, value in facet_values(topic, per_facet):
+    for facet_name, value in facet_values(topic, per_facet, skip):
         v = value.lower()
         # Waarden die het categoriewoord al bevatten ('Dubbele airfryer') zijn
         # zelf de zoekterm; de rest wordt ervoor geplakt ('6 personen airfryer').
@@ -146,9 +159,11 @@ def main() -> int:
     args = ap.parse_args()
     topic = find_topic(args.topic)
 
-    for name in args.skip_facet:
-        SKIP_FACETS.add(name.lower())
-    cand = candidates(topic, args.brands, args.per_facet)
+    skip = BASE_SKIP_FACETS | {n.lower() for n in (topic.cfg.get("skip_facets") or [])} \
+        | {n.lower() for n in args.skip_facet}
+    if skip - BASE_SKIP_FACETS:
+        print(f"facetten uitgesloten: {', '.join(sorted(skip - BASE_SKIP_FACETS))}")
+    cand = candidates(topic, args.brands, args.per_facet, skip)
     print(f"{len(cand)} kandidaat-termen voor '{topic.label}', volumes ophalen…")
     volumes = lookup_volumes(list(cand))
 
@@ -191,7 +206,12 @@ def main() -> int:
                         "kind": r["kind"]})
 
     was = {t["term"]: t for t in topic.terms}
-    topic.cfg["terms"] = [{"term": r["keyword"], "volume": r["search_volume"], "kind": r["kind"],
+    # 'display' is de paginatitel. Facetwaarden leveren soms kromme
+    # samenstellingen op die wél zoekvolume hebben ('draadloos koptelefoon');
+    # de zoekterm blijft dan staan zoals hij gezocht wordt, maar de kop niet.
+    # Standaard gelijk aan de term; met de hand te corrigeren in topic.json.
+    topic.cfg["terms"] = [{"term": r["keyword"], "display": r["keyword"],
+                           "volume": r["search_volume"], "kind": r["kind"],
                            "params": r["params"],
                            **({"has_mockup_page": True} if was.get(r["keyword"], {}).get("has_mockup_page") else {})}
                           for r in chosen]

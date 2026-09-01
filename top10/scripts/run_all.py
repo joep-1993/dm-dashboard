@@ -71,6 +71,8 @@ def main() -> int:
     ap.add_argument("--top", type=int, default=10, help="aantal zoektermen")
     ap.add_argument("--skip-facet", action="append", default=[],
                     help="facet uitsluiten als bron van zoektermen")
+    ap.add_argument("--tagdata", action="store_true",
+                    help="ook het A-label en de pixeldata ophalen (gratis, duurt minuten)")
     ap.add_argument("--max-products", type=int,
                     help="hoogstens zoveel producten reviewen (rem op de rekening)")
     args = ap.parse_args()
@@ -113,7 +115,11 @@ def main() -> int:
     run("rank_top10.py", "--topic", topic.slug)
 
     # --- gratis afronding ---
+    # snapshot_prices vóór get_tagdata: route B van de pixeldata koppelt op
+    # productIdV3, en dat id komt uit offers_top10.csv.
     run("snapshot_prices.py", "--topic", topic.slug)
+    if args.tagdata:
+        run("get_tagdata.py", "--topic", topic.slug)
     run("export_top10_data.py", "--topic", topic.slug)
     print(f"\n\033[1mklaar.\033[0m Contractbestand: "
           f"{topic.data / 'export'}")

@@ -3,6 +3,107 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-01 (4) — Excel-export van Canonicals en Redirect Generator in het Redirect-tool-formaat
+
+Joeps verzoek: laat beide exports de kolommen `old, new, statuscode, country, label` bevatten —
+statuscode 200 bij Canonicals, 301 bij de Redirect Generator, country altijd `NL+BE`, label
+`JVS Canonicals/Redirects <dd-mm-jjjj>`, URL's relatief. Les in LEARNINGS (zelfde datum, "Twee
+tools exporteren naar één importcontract, en de padregel staat nu op twee plekken").
+Commit: `d8e8ef7`.
+
+Gedaan:
+
+- [x] **Canonicals (backend)**: `POST /api/canonical/export-excel` levert de vijf kolommen i.p.v.
+      `original_url`/`canonical_url`, met `statuscode=200`, `country="NL+BE"` en het datumlabel. De
+      URL's gaan door `strip_domain()` uit `redirect_tool_service.py` — dezelfde functie die de
+      bulk-import op dezelfde rij toepast, dus geen tweede afleiding van de pad-regel.
+- [x] **Redirect Generator (frontend)**: zelfde vijf kolommen met `statuscode=301`. Die export loopt
+      client-side via SheetJS en kan niet bij de backend-functie, dus staat er een `toRelativeUrl()`
+      naast die `strip_domain()` één-op-één spiegelt. Beide kanten op dezelfde acht gevallen getest
+      (volledige URL, bare hostname, pad, hostname zonder pad, query, fragment, leeg, `null`) —
+      identieke uitkomst.
+- [x] **Datum in lokale tijd** (`_labelDate()`): `toISOString()` geeft UTC en zou na 22:00 CEST de
+      dag van gisteren in het label zetten.
+- [x] **Live geverifieerd**: `/api/canonical/export-excel` op :8003 aangeroepen en het bestand
+      teruggelezen met `dtype=str`, precies zoals `redirect_tool_router.py` het inleest — kolomnamen
+      en waarden kloppen. Frontend-export nagerekend met een SheetJS-stub in Node. Geen linter in de
+      repo geconfigureerd, dus in plaats daarvan `ast.parse` op `main.py` en `node --check` op het
+      inline script.
+- [x] **Backend op :8003 herstart** (`--reload` staat uit). Dat maakt en passant de Python-fix én de
+      domein-dropdown uit sessie (3) hierboven live — die stonden al op schijf.
+
+Open:
+
+- [ ] **`toRelativeUrl()` en `strip_domain()` moeten in sync blijven.** Wie de pad-regel aanpast,
+      moet `301-generator.html` meenemen. Het gat structureel dichten betekent een export-endpoint
+      voor de Redirect Generator geven, zoals Canonicals er een heeft — niet een derde kopie.
+- [ ] **"Copy for Excel" kopieert nog twee kolommen met absolute URL's** in beide tools. Bewust
+      gelaten: dat klembord is voor los kijkwerk, niet voor de import. Als dat in de praktijk
+      tóch de route naar de Redirect tool is, moet hij mee.
+
+### 2026-09-01 (3) — Bing-analyse, IndexNow-foutafhandeling en domeinkeuze
+
+Joeps vraag: hoe doen we het in Bing en wat zijn de quick wins. Dat rolde door naar de
+IndexNow-flow. Twee lessen in LEARNINGS (zelfde datum): "Bing kent ons niet omdat het ons niet
+crawlt" en "Een fallback die succes verzint, maakt van het logboek een alibi".
+Rapport: https://claude.ai/code/artifact/d758ee4a-7a84-47da-8bf5-1bbfaf5c2421
+
+Gedaan:
+
+- [x] **Bing-nulmeting** op Redshift + `pa.bothits_*`: organisch 10.306 visits/mnd (0,64% van
+      Google), 20 maanden vlak, OPB €0,1154 (+10% t.o.v. Google), 82% desktop. De YoY-daling van 37%
+      die je zonder kanaalfilter ziet, zit volledig in SEA (aff 127/128/883).
+- [x] **Oorzaak vastgepind op de crawl**: bingbot raakte 7.028 van 1.024.727 URL's aan in 30 dagen
+      (0,69%), tegen Googlebot 248.224 (24,2%) en Applebot 238.416. En 26% van dat budget gaat naar
+      `/data/graphql` (43.178 hits/14d, Googlebot 35), dat op `Disallow` staat onder `*`.
+- [x] **Uitgesloten wat het níét is**: bingbot krijgt dezelfde bytes als Googlebot, on-page (canonical
+      /hreflang/robots-meta/SSR) is in orde, en de `Crawl-Delay: 20` onder `msnbot` remt bingbot niet
+      (Bing leest die groep niet — valt terug op `*`).
+- [x] **IndexNow-forensiek**: de key wordt door Bing geaccepteerd met een verkeerde én zonder
+      `keyLocation` (200), dus het 404'ende sleutelbestand breekt niets — hij is op host-niveau
+      geregistreerd, vrijwel zeker via BWT. Eerdere conclusie "voorkomt uitval" ingetrokken en het
+      rapport herzien (v2).
+- [x] **Echte bug gevonden en gefixt**: `statusCode || 200` achter `onError: continueRegularOutput`
+      logde mislukkingen als 200. Nu: echte code, bij niet-geaccepteerd **niets** loggen (query wordt
+      `SELECT 1`) zodat de URL's de volgende run opnieuw meegaan, plus 🚨-alarm via de bestaande
+      Slack-node en een emoji die de uitkomst volgt. Ook `build_summary1` gerepareerd (las
+      `url_count` uit de postgres-output, zei daardoor altijd "New URLs submitted: 0").
+- [x] **Zelfde fix in `backend/indexnow_service.py`**: `_send_batch` geeft `(code, detail)` en vangt
+      transportfouten als code 0, loggen alleen bij 200, Slack-DM via dezelfde bot-token als
+      `daily_automation.py`. **202 telt bewust niet als succes** (key validation pending = batch wordt
+      weggegooid).
+- [x] **Domeinkeuze in de tool**: `DOMAINS`-dict met key per domein (`INDEXNOW_KEY_NL` /
+      `INDEXNOW_KEY_BE`), `submit_urls(urls, domain)`, per-domein dedup + dagteller + quotum,
+      `GET /api/indexnow/domains`, en `domain` op submit/upload-excel/today-count. Dropdown in de kop
+      van *Submit URLs to IndexNow*, geldt voor Manual én Excel. Vangrails: geen key → vooraf
+      geweigerd, URL's van een ander domein → eruit gefilterd (422-preventie), onbekend domein → 400.
+- [x] **Getest zonder de live backend aan te raken**: wegwerp-uvicorn op :8013 voor alle endpoints en
+      weigerpaden, gemockte n8n-context in Node voor de code-nodes, gestubde service voor de
+      Python-paden, UI gescreenshot in beide domeinstanden. Temp-probe opgeruimd, :8013 gestopt,
+      :8003 ongemoeid.
+- [x] **Repo-hygiëne**: `docs/indexnow_n8n.json` (gitignored, bevat de key) bijgewerkt naar de echte
+      12-node live export mét fix — daar stond een oude 11-node-versie met een placeholder-query.
+      Verslag + paste-klare code in het nieuwe `docs/indexnow_n8n_fix.md`. `.env.example` uitgebreid.
+
+Open:
+
+- [ ] **Backend herstarten** — `--reload` staat uit, dus de Python-fix én de dropdown zijn nog niet
+      live. Bewust niet zelf gedaan: kill+relaunch sloopt een lopende Tier-A/optimizer-run.
+- [ ] **`INDEXNOW_KEY_BE` invullen** — Joep laat een .be-key aanmaken en hosten en communiceert die
+      later (afgesproken 2026-09-01). Tot die tijd weigert de tool .be-submits vooraf, zoals bedoeld.
+- [ ] **n8n-tak voor .be** — de fetch-query filtert op `dv.url like '%beslist.nl%'`, dus de
+      dagelijkse 10K voor .be bestaat nog niet. Alleen de handmatige tool kan nu .be.
+- [ ] **Gefixte flow in n8n importeren** — `Downloads\claude\indexnow_submitter_fixed.json`, of de
+      twee blokken uit `docs/indexnow_n8n_fix.md` in de live nodes plakken. Ik heb geen n8n-API.
+- [ ] **Watchdog op "0 rijen vandaag"** — valt `log_to_tracking_table` zelf om, dan stopt de keten
+      vóór Slack en krijg je niets. Buiten scope gelaten. Nu al relevant: op 2026-09-01 stonden er om
+      13:30 nog geen rijen voor die dag terwijl de trigger op 08:00 staat.
+- [ ] **Toegang tot Bing Webmaster Tools** (beslist.nl én .be) — nodig voor indexdekking, het
+      robots-blokkaderapport, Crawl Control en Bing's query/klik-data, en om te zien welke
+      IndexNow-keys er staan. Geen verificatie op de site (geen `BingSiteAuth.xml`, geen
+      `msvalidate.01`); in DNS wél `MS=ms41169743` / `MS=ms56879607`, maar dat is het M365-formaat.
+- [ ] **Bing quick wins die code/infra raken** — zie BACKLOG (`bingbot`-groep in robots.txt, echte
+      `lastmod` in de sitemaps, stale `sitemap-index.xml`, brotli).
 
 ### 2026-09-01 (2) — t_bv/Bouwfolie op seoPriority, en een export van alle "type"-facetten die uit staan
 

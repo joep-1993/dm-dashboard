@@ -83,19 +83,29 @@ def main() -> int:
     args = ap.parse_args()
     topic = find_topic(args.topic)
 
-    per_term = topic.read_json("products_per_term.json")
+    # Pagina's in plaats van losse termen: termen met dezelfde productlijst
+    # zijn samengevoegd door collect_products. Valt terug op de oude vorm voor
+    # topics die nog van vóór die wijziging zijn.
+    pages = topic.read_json("pages.json", default=None)
+    if pages is None:
+        per_term = topic.read_json("products_per_term.json")
+        pages = [{"slug": slugify(t), "term": t, "display": v.get("display") or t,
+                  "volume": v.get("volume"), "volume_combined": v.get("volume"),
+                  "terms": [{"term": t}], "products": v["products"]}
+                 for t, v in per_term.items()]
+    by_term = {p["term"]: p for p in pages}
     clicks = topic.read_json("clicks.json", default={})
     if not clicks:
         print("let op: geen clicks.json — de ranking draait zonder klikdata")
     client = OpenAI()
 
-    wanted = [t.strip() for t in args.terms.split(",")] if args.terms else list(per_term)
+    wanted = [t.strip() for t in args.terms.split(",")] if args.terms else [p["term"] for p in pages]
     for term in wanted:
-        info = per_term.get(term)
+        info = by_term.get(term)
         if not info:
-            print(f"{term}: onbekende term, overgeslagen")
+            print(f"{term}: geen pagina met deze primaire term, overgeslagen")
             continue
-        out_path = topic.file(f"rank_{slugify(term)}.json")
+        out_path = topic.file(f"rank_{info['slug']}.json")
         if out_path.exists() and not args.force:
             print(f"{term}: al gedaan")
             continue
@@ -119,8 +129,15 @@ def main() -> int:
             print(f"{term}: geen reviews beschikbaar, overgeslagen")
             continue
 
-        volume = info.get("volume")
-        user = (f'Pagina: "Beste {term} — top 10"'
+        volume = info.get("volume_combined") or info.get("volume")
+        # De paginatitel kan afwijken van de zoekterm: 'draadloos koptelefoon'
+        # wordt gezocht, maar 'draadloze koptelefoons' hoort er boven te staan.
+        title = info.get("display") or term
+        # De helft van de zoektermen begint zelf al met 'beste'; zonder dit
+        # wordt de kop 'Beste beste elektrische tandenborstel'.
+        if title.lower().startswith("beste "):
+            title = title[6:]
+        user = (f'Pagina: "Beste {title} — top 10"'
                 + (f" (zoekvolume {volume}/maand).\n" if volume else ".\n")
                 + f"Kandidaten ({len(lines)}):\n\n" + "\n".join(lines))
         resp = client.responses.create(
@@ -136,6 +153,10 @@ def main() -> int:
 
         usage = resp.usage
         data["term"] = term
+        data["display"] = title
+        data["slug"] = info["slug"]
+        data["targets"] = info.get("terms") or [{"term": term, "volume": volume}]
+        data["volume_combined"] = info.get("volume_combined")
         data["model"] = topic.rank_model
         data["usage"] = {"input": getattr(usage, "input_tokens", 0),
                          "output": getattr(usage, "output_tokens", 0)}

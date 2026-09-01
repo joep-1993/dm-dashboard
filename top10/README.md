@@ -35,6 +35,9 @@ venv/bin/python top10/scripts/collect_products.py --topic airfryers
 # 2. kliks per product (Redshift, 90 dagen)      gratis
 venv/bin/python top10/scripts/get_clicks.py --topic airfryers
 
+# 2b. commercieel bewijs: A-label + pixeldata   gratis, maar minutenlang
+venv/bin/python top10/scripts/get_tagdata.py --topic airfryers
+
 # 3. review per uniek product                    KOST GELD — eerst proefdraaien
 venv/bin/python top10/scripts/run_reviews.py --topic airfryers --limit 2
 venv/bin/python top10/scripts/run_reviews.py --topic airfryers
@@ -65,6 +68,7 @@ twee Search-API-parameters in `topic.json`, en de zoektermen staan eronder.
 |-----|-----|
 | `scripts/run_all.py` | de hele pijplijn, met kostenstop vóór de betaalde stappen |
 | `scripts/keyword_research.py` | zoekvolumes via Keyword Planner; kiest de termen |
+| `scripts/get_tagdata.py` | `bt.ean_score` (A-label) + `bt.revenue_per_product` (pixel) |
 | `shared/topic.py` | topic-configuratie, paden, modelkeuze uit `.env` |
 | `shared/taxonomy.py` | categorieboom ophalen, cachen, doorzoeken |
 | `shared/llm_websearch.py` | één web-search-call bij OpenAI, met bronnen en kosten |
@@ -123,6 +127,51 @@ de gekozen termen na en sluit zo'n facet uit met
 samenstellingen op ("draadloos koptelefoon" in plaats van "draadloze") die wel
 volume hebben. Het model krijgt die term letterlijk als paginatitel, dus
 corrigeer de tekst in `topic.json` als het in een kop terechtkomt.
+
+**`bt.ean_score` heeft vier labels, geen drie.** Naast `A`/`B`/`C` bestaat
+`APlus`. Filteren op `label = 'A'` gooit stil de béste producten weg.
+
+**Elke historische rij in `bt.ean_score` draagt `load_end_date = 9999-12-31`,**
+dus een "nog open"-filter levert alle versies op. Erger: één EAN kan meerdere
+elkaar tegensprekende rijen hebben op dezelfde nieuwste `load_start_date`, en
+dan is een `row_number()`-greep niet-deterministisch — twee runs, twee labels.
+`get_tagdata.py` kiest de hoogste `totaal_ean_score` en schrijft in
+`score_variants` hoeveel varianten het oneens waren. Bij `> 1`: eerst
+controleren voordat je erop stuurt.
+
+**Een lege `session_starts` is informatie, geen ontbrekende waarde.** Alleen
+winkels die onze tag draaien rapporteren sessies en shopomzet. `transactions`
+is veel breder gevuld omdat dat ook uit attributie komt, dus een
+affiliate-winkel kan transacties tonen met nul sessies. Sommeer nooit over
+aanbiedingen zonder te tellen hoeveel er rapporteren: `reports_sessions` is die
+telling.
+
+**Kale getallen worden geen zoekterm.** Een facet als "Aantal borstels" (2, 4,
+6) zou "2 elektrische tandenborstel" opleveren. Die gaan er vóór het
+volume-onderzoek uit, want anders dan taalfouten kunnen die nooit iets zijn.
+
+**Facet-uitsluitingen zijn categoriewerk.** `skip_facets` in `topic.json` (of
+`--skip-facet`) houdt facetten buiten de termen die een ándere productsoort
+beschrijven: bij airfryers `bereidingsprogramma` (recepten), bij
+tandenborstels `type_tand` (opzetborstels, flossers).
+
+**Een pagina is een groep termen, niet één term.** `collect_products.py`
+voegt termen met een identieke productlijst samen: bij elektrische
+tandenborstels vielen vijf generieke termen ("… kopen", "… test", "…
+aanbieding", "beste …") op één pagina van 59.880/maand. Zonder dat kreeg je
+vier pagina's met dezelfde kop en hetzelfde #1-product — duplicate content, en
+vier keer een rank-call. De term met het hoogste volume wordt de primaire, de
+rest blijft als `also_targets` aan de pagina hangen. Exact gelijke
+verzamelingen, geen gelijkenisdrempel: gemeten liggen de duplicaten op precies
+1,00 en het eerstvolgende paar op 0,74.
+
+Gevolg voor `--top N`: dat kiest *termen*, en na samenvoegen houd je minder
+pagina's over. Wil je er tien, vraag er dan ruimer op (`--top 16`).
+
+**`display` is de paginatitel, `term` de zoekterm.** Die twee lopen uiteen
+zodra een facetwaarde krom samenstelt ("draadloos koptelefoon") of als de term
+zelf met "beste" begint. De term blijft staan zoals mensen hem intypen; de kop
+corrigeer je in `topic.json`.
 
 **Kosten blijven `null` zolang het model niet in `pricing.json` staat.** Een
 geraden tarief is erger dan geen tarief; vul het aan zodra je het echte tarief
