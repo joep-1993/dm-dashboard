@@ -4051,11 +4051,27 @@ def export_canonical_excel(request: CanonicalExportRequest):
             detail=f"Too many rows ({len(request.results)}); max {MAX_CANONICAL_URLS}",
         )
 
+    # Same column contract as the Redirect Tool's bulk import (old, new,
+    # statuscode, country, label), so an export can be fed straight back in
+    # without hand-editing. Paths only: the redirect API stores path-only
+    # fromUrl/toUrl, so reuse the Redirect Tool's own strip_domain rather than
+    # re-deriving the rule here.
+    from backend.redirect_tool_service import strip_domain
+
+    label = f"JVS Canonicals {datetime.now().strftime('%d-%m-%Y')}"
     rows = [
-        {"original_url": r.get("original", ""), "canonical_url": r.get("canonical", "")}
+        {
+            "old": strip_domain(str(r.get("original", "") or "")),
+            "new": strip_domain(str(r.get("canonical", "") or "")),
+            "statuscode": 200,
+            "country": "NL+BE",
+            "label": label,
+        }
         for r in request.results
     ]
-    df = pd.DataFrame(rows, columns=["original_url", "canonical_url"])
+    df = pd.DataFrame(
+        rows, columns=["old", "new", "statuscode", "country", "label"]
+    )
     buf = BytesIO()
     df.to_excel(buf, index=False, engine="openpyxl")
     buf.seek(0)

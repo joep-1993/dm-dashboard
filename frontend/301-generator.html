@@ -626,17 +626,50 @@
             });
         }
 
+        // Mirror of backend strip_domain() in redirect_tool_service.py: the
+        // redirect API stores path-only fromUrl/toUrl, so an export that feeds
+        // the Redirect Tool must carry relative URLs. Query and fragment go
+        // too — the project canonicalization rule drops them before any insert.
+        function toRelativeUrl(url) {
+            const s = String(url == null ? '' : url).trim().split('#')[0].split('?')[0];
+            if (!s) return '';
+            if (s.startsWith('/')) return s;
+            const scheme = s.indexOf('://');
+            if (scheme !== -1) {
+                const rest = s.slice(scheme + 3);
+                const slash = rest.indexOf('/');
+                return slash === -1 ? '/' : rest.slice(slash);
+            }
+            // bare hostname like www.beslist.nl/foo
+            const host = s.split('/')[0];
+            if (s.includes('/') && host.includes('.')) return s.slice(host.length);
+            return '/' + s;
+        }
+
         function downloadResults() {
             if (results.length === 0) return;
 
-            const aoa = [['original', 'redirect']];
-            results.forEach(r => aoa.push([r.original, r.redirect]));
+            // Same column contract as the Redirect Tool's bulk import, so an
+            // export can be fed straight back in without hand-editing.
+            const label = `JVS Redirects ${_labelDate()}`;
+            const aoa = [['old', 'new', 'statuscode', 'country', 'label']];
+            results.forEach(r => aoa.push([
+                toRelativeUrl(r.original), toRelativeUrl(r.redirect), 301, 'NL+BE', label,
+            ]));
 
             const ws = XLSX.utils.aoa_to_sheet(aoa);
-            ws['!cols'] = [{ wch: 80 }, { wch: 80 }];
+            ws['!cols'] = [{ wch: 80 }, { wch: 80 }, { wch: 11 }, { wch: 9 }, { wch: 28 }];
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'Redirects');
             XLSX.writeFile(wb, '301_redirects.xlsx');
+        }
+
+        // dd-mm-yyyy in local time (toISOString would shift the date across
+        // midnight for a CEST afternoon export).
+        function _labelDate() {
+            const d = new Date();
+            const p2 = (n) => String(n).padStart(2, '0');
+            return `${p2(d.getDate())}-${p2(d.getMonth() + 1)}-${d.getFullYear()}`;
         }
 
         // ---- Selection + filter (push-to-Redirect-tool) -------------------
