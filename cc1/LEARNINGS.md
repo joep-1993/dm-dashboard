@@ -1,6 +1,104 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een INSERT is een aanname over de tabel, en die aanname kan verouderd zijn (2026-09-01, dubbelen in pa.mc_ids_efficy)
+
+Joeps vraag: zitten er dubbele records in `pa.mc_ids_efficy` (zelfde `shop_name`/`shop_id`/`domain`,
+andere `mc_created`), en kan de schrijffunctie zo worden aangepast dat het niet meer kan. Ja, drie
+keys — en de tabel had op 05-08 al een upsert gekregen die dit had moeten voorkomen.
+
+### Welke rij de juiste is, beslist Google Ads — niet de tabel
+
+De drie dubbelen: Farmaline.be 643423 BE en Casebump.nl 652006 NL stonden er twee keer met
+**dezelfde** `mc_created`, Vergewallet.nl 666787 NL twee keer met een **andere** (`5847225352` en
+`5847763988`). Bij die laatste is "welke moet blijven" geen kwestie van datum of laagste id: lees
+`campaign.shopping_setting.merchant_id` van de niet-REMOVED campagnes van die shop, want dat MC
+account gebruikt de campagne echt. Live was `5847225352`; `5847763988` hing aan niets — een
+weesaccount.
+
+Diezelfde vergelijking over alle 565 keys getrokken (één API-pass over de accounts, `_parse_campaign_name`
+voor shop_id/country) gaf gratis drie rijen die geen dubbel zijn maar wél een verkeerde waarde
+houden: Kamera-express.nl 182 NL, Hbm-machines.com|NL 207860 NL, Welhof.com|BE 651763 BE. De
+`current_mc_state`-tiebreak (oudste datum, dan laagste `mc_created`) koos hier toevallig goed, maar
+is dus geen autoriteit. `reconcile_run_logs` is dat wel, want die leest de merchant_id uit de live
+campagnes en plant dan een UPDATE.
+
+### `stl_query` + `stl_querytext` maakten de oorzaak zichtbaar
+
+Zonder die twee had ik "twee concurrent runs" moeten gokken. Met een join op `query` en een filter
+op de tabelnaam komt er per statement een starttime, xid en pid uit — en daarmee de duur van een
+transactie:
+
+```sql
+SELECT q.starttime, q.xid, q.pid, LEFT(REGEXP_REPLACE(t.text,'\\s+',' '), 220)
+FROM stl_query q
+JOIN (SELECT query, LISTAGG(text) WITHIN GROUP (ORDER BY sequence) AS text
+      FROM stl_querytext GROUP BY query) t ON t.query = q.query
+WHERE q.starttime > '2026-08-31' AND t.text ILIKE '%mc_ids_efficy%'
+ORDER BY q.starttime
+```
+
+Wat eruit rolde: xid `715709761` deed een DELETE om 09:27:04 en de bijbehorende INSERT om **09:39:45**,
+en de volgende DELETE/INSERT om 09:46:21 / 09:49:18. Eén transactie van 22 minuten voor twee keys.
+Ook zichtbaar: handmatige opruimwerk van Joep om 12:24 (`delete ... where shop_name = 'Bouwlampkoning.nl'
+and mc_created = '5847763163'`), wat losstaand bewijs was dat er weesaccounts worden aangemaakt.
+
+### Waarom de upsert van 05-08 niet genoeg was
+
+Die upsert leest de state, en schrijft dan. Twee gaten:
+
+1. **De INSERT-tak deed geen DELETE.** "Deze key bestaat nog niet" is een conclusie uit een lezing
+   van een moment eerder. Twee overlappende GSD-runs lazen elk hun eigen state op hun eigen
+   connectie, en een lezer ziet op Redshift alleen *gecommitte* rijen — dus zolang die transactie
+   van 22 minuten openstond, leek de tabel voor die keys leeg. Beide runs concludeerden "absent",
+   beide deden een bare INSERT. De UPDATE-tak had wél een DELETE en was daarmee immuun.
+2. **"Zelfde mc id → doe niets" maakte de schade permanent.** Farmaline en Casebump stonden er twee
+   keer met dezelfde waarde, dus er zou nooit een UPDATE gepland worden. De tabel mocht schade die
+   hij kón zien (`current_mc_state` gaf het rijaantal al terug) niet opruimen.
+
+De generieke les: bij een read-then-write op een store zonder unique constraint is elk pad dat
+*niet* eerst opruimt een pad dat op een lezing vertrouwt. Maak de write onvoorwaardelijk idempotent
+per key, dan hoeft de lezing niet te kloppen.
+
+### De fix, en waarom de lock het minst belangrijke deel is
+
+In `push_mc_ids_to_redshift`:
+
+- **Elke key die geschreven wordt gaat er eerst uit, inserts inbegrepen.** Eén rij eruit, één rij
+  erin, ongeacht wat het plan dacht. Dit is wat de invariant garandeert.
+- **Twee statements in plaats van twee per key**: één `DELETE ... WHERE (shop_id || '|' || UPPER(domain)) IN %s`
+  plus één `execute_values`-INSERT. Daarmee krimpt het venster van minuten naar seconden — de traagheid
+  wás de kwetsbaarheid. (psycopg2 rendert een 1-tuple als `IN ('x')`, dus dat geval werkt ook; de
+  `||`-concat op een BIGINT slikt Redshift, zoals `scripts/dedup_mc_ids_efficy.py` al deed.)
+- **Nieuwe `repair`-tak in `mc_upsert_plan`**: zelfde mc id maar >1 rij → samenklappen, met de
+  *opgeslagen* (oudste) datum, zodat de aanmaakdatum niet met vandaag wordt overschreven.
+  `reconcile_run_logs` triggert nu ook op alleen-duplicaten (`duplicated`/`to_repair`/`repaired`),
+  dus een volgende run heelt de tabel zelf.
+- **`_mc_ids_write_lock`**: `pg_advisory_xact_lock` in de **gedeelde PostgreSQL**, want Redshift heeft
+  geen advisory locks. Transaction-scoped, dus een crash kan hem niet laten hangen. Bewust
+  best-effort — is PostgreSQL onbereikbaar, dan gaat de write door met een warning. De lock voorkomt
+  dubbel werk en een verspilde Redshift-transactie; hij is niet wat de correctheid draagt.
+- **Tripwire na de write**: de geschreven keys terugleren en ERROR loggen + `duplicates_remaining` in
+  het resultaat zetten als er nog een key >1 rij heeft. Dit dubbel heeft twee opruimrondes gekost
+  (05-08 en 01-09) omdat het stil was.
+
+### Een `@contextmanager` die de yield in de try zet, wist de echte fout
+
+Eerste versie was `try: <lock pakken>; yield True; except: yield False`. Een test die een exception
+in de body gooide liet zien wat daar gebeurt: die exception komt via `gen.throw()` in dat
+except-blok terecht, en een tweede `yield` maakt er `RuntimeError("generator didn't stop after
+throw()")` van. De echte Redshift-fout zou dus verdwijnen in de `result["error"]` van de caller.
+Alleen het *pakken* van de lock hoort in de try; de yield staat in een eigen `try/finally`.
+
+### Wat dit niet oplost
+
+Dat er dubbele MC sub-accounts wórden aangemaakt. `get_mc_id()` in `_get_or_create_mc_account`
+zoekt op shopnaam, en een net aangemaakt account is nog niet zichtbaar in de lijst, dus de volgende
+run maakt een tweede. Op 01-09 alleen al: Vergewallet NL (`5847763988`), Bouwlampkoning
+(`5847763163`), Hondenvoerdirect NL kreeg om 08:47 `5847763523` en later `5846988996`,
+Speelgoedvoorvolwassenen `5847225313` → `5847229129`. De efficy-tabel is nu duplicaat-proof, maar
+Merchant Center houdt die weesaccounts. Joep pakt dat zelf op.
+
 ## Twee tools exporteren naar één importcontract, en de padregel staat nu op twee plekken (2026-09-01, Excel-export Canonicals + Redirect Generator)
 
 Joeps verzoek was klein: laat de Excel-export van Canonicals en Redirect Generator de kolommen

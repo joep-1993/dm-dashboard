@@ -3,6 +3,57 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-01 (5) — Dubbelen in pa.mc_ids_efficy: geverifieerd, opgeruimd, en de write is nu duplicaat-proof
+
+Joeps vraag: zitten er dubbele records in `pa.mc_ids_efficy` (zelfde `shop_name`/`shop_id`/`domain`,
+andere `mc_created`), die wil hij verifiëren, en pas de schrijffunctie aan zodat het niet meer kan.
+Les in LEARNINGS (zelfde datum, "Een INSERT is een aanname over de tabel, en die aanname kan
+verouderd zijn"). Commit: `a8bac25`.
+
+Gedaan:
+
+- [x] **Drie dubbele keys gevonden**, alle drie vandaag geschreven: Farmaline.be 643423 BE en
+      Casebump.nl 652006 NL tweemaal met dezelfde `mc_created`, Vergewallet.nl 666787 NL met
+      `5847225352` én `5847763988`. 568 rijen over 565 keys.
+- [x] **Geverifieerd tegen de live campagnes** (`campaign.shopping_setting.merchant_id`, niet-REMOVED):
+      Farmaline `692176179` ✓, Casebump `5362712739` ✓, Vergewallet live = `5847225352`, dus
+      `5847763988` is een weesaccount. Diezelfde sweep over alle 565 keys gaf drie rijen die geen
+      dubbel zijn maar wel een stale waarde: Kamera-express.nl 182 NL, Hbm-machines.com|NL 207860 NL,
+      Welhof.com|BE 651763 BE.
+- [x] **Oorzaak bewezen uit `stl_query`/`stl_querytext`**: de write deed DELETE+INSERT per key en
+      xid `715709761` liep 09:27:04 → 09:49:18 (22 minuten). Twee overlappende GSD-runs (activity log:
+      08:48:57 en 10:04:44), en een lezer ziet alleen gecommitte rijen — dus beide planden een INSERT.
+      De INSERT-tak deed géén DELETE.
+- [x] **`push_mc_ids_to_redshift` DELETE't nu élke key die hij schrijft**, inserts inbegrepen, in twee
+      statements (één `DELETE ... IN %s` + één batch-INSERT) in plaats van twee per key.
+- [x] **`repair`-tak in `mc_upsert_plan`**: zelfde mc id maar >1 rij → samenklappen met de opgeslagen
+      (oudste) datum. Viel eerst onder "unchanged", waardoor Farmaline/Casebump zichzelf nooit konden
+      herstellen. `reconcile_run_logs` triggert nu ook op alleen-duplicaten.
+- [x] **`_mc_ids_write_lock`**: `pg_advisory_xact_lock` in de gedeelde PostgreSQL om de read-then-write.
+      Best-effort; de delete-before-insert draagt de correctheid.
+- [x] **Tripwire**: na de write de keys terugleren, ERROR + `duplicates_remaining` bij een key met >1 rij.
+- [x] **Getest**: 9 unit-cases van de classifier (incl. lowercase domain, dubbele input-rijen), de
+      nieuwe SQL op een scratch-tabel in Redshift, de lock (exclusief, vrijgegeven, exception uit de
+      body komt ongewijzigd door — dat was eerst fout), en een echte no-op push van 5 bestaande rijen
+      (568 → 568 rijen, `unchanged=5`).
+- [x] **De drie overbodige rijen verwijderd** via de nieuwe functie zelf, niet met de hand: 568 → 565
+      rijen, 0 keys met >1 rij, `repaired: 3`, `duplicates_remaining: 0`, `locked: True`. Vergewallet
+      houdt `5847225352`; de BE-rij en alle aanmaakdatums zijn niet aangeraakt.
+
+Open:
+
+- [ ] **:8003 draait nog op de oude code.** De server is om 12:38 herstart (sessie 4), mijn commit is
+      later. `--reload` staat uit, dus tot een kill+relaunch schrijft de live server nog met de oude
+      functie. De data is wél goed.
+- [ ] **`_get_or_create_mc_account` maakt dubbele MC sub-accounts aan** — `get_mc_id()` zoekt op
+      shopnaam en een net aangemaakt account is nog niet zichtbaar in de lijst. Weesaccounts van 01-09:
+      Vergewallet NL `5847763988`, Bouwlampkoning `5847763163`, plus Hondenvoerdirect NL en
+      Speelgoedvoorvolwassenen die elk twee ids kregen. **Joep fikst dit zelf**, staat hier voor de
+      context.
+- [ ] **Drie stale waarden** (Kamera-express 182 NL, Hbm-machines 207860 NL, Welhof.com|BE 651763 BE)
+      staan er nog. Geen dubbelen, dus buiten de opdracht gelaten; `reconcile_run_logs` corrigeert die
+      zodra hij die shops in zijn venster ziet, want hij leest de merchant_id uit de live campagnes.
+
 ### 2026-09-01 (4) — Excel-export van Canonicals en Redirect Generator in het Redirect-tool-formaat
 
 Joeps verzoek: laat beide exports de kolommen `old, new, statuscode, country, label` bevatten —
