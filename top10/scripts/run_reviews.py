@@ -90,8 +90,15 @@ def main() -> int:
             errors += status.startswith("FOUT")
             print(f"[{i}/{len(products)}] {ean} {status}" + (f" ${cost:.4f}" if cost else ""))
 
-    print(f"\nklaar. {errors} fouten." + (f" Nieuwe kosten ${total:.2f}." if total else
-          " Kosten onbekend: geen tarief voor dit model in shared/pricing.json."))
+    # Onderscheid: niets nieuws gedaan (dan is $0 juist), of wel gedraaid maar
+    # geen tarief bekend. Die twee door elkaar halen leest als een storing.
+    if not todo:
+        tail = " Niets nieuws: alles stond al in de cache."
+    elif total:
+        tail = f" Nieuwe kosten ${total:.2f}."
+    else:
+        tail = " Kosten onbekend: geen tarief voor dit model in shared/pricing.json."
+    print(f"\nklaar. {errors} fouten." + tail)
     return 0
 
 

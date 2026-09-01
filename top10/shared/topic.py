@@ -87,6 +87,12 @@ class Topic:
             "sortDirection": self.cfg.get("sort_direction", "desc"),
             "limit": str(self.cfg.get("limit_per_term", 20)),
         }
+        # Facetfilters uit de categorie-URL (/c/type_elek_fiets~23791934). Die
+        # horen bij de scope van het topic: elke zoekopdracht blijft binnen dat
+        # facet, zoals de gebruiker de categorie heeft opgegeven.
+        for facet, values in (self.cfg.get("filters") or {}).items():
+            for i, v in enumerate(values):
+                params[f"filters[{facet}][{i}]"] = str(v)
         params.update({k: v for k, v in extra.items() if v is not None})
         return params
 

@@ -1,0 +1,108 @@
+{
+ "slug": "2026-09-01_bestof-elektrische-fatbike",
+ "label": "Elektrische fatbike",
+ "created_at": "2026-09-01",
+ "category": {
+  "category_id": 9001191,
+  "name": "Elektrische fietsen",
+  "path": [
+   "Fietsen",
+   "Fietsen",
+   "Elektrische fietsen",
+   "Elektrische fatbike"
+  ],
+  "main_category": 38000,
+  "category": "fietsen_484520_484533"
+ },
+ "filters": {
+  "type_elek_fiets": [
+   "23791934"
+  ]
+ },
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "beste elektrische fatbike",
+   "volume": null,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "elektrische fatbike kopen",
+   "volume": null,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "engwe elektrische fatbike",
+   "volume": null,
+   "kind": "brand",
+   "params": {
+    "query": "Engwe elektrische fatbike"
+   }
+  },
+  {
+   "term": "fafrees elektrische fatbike",
+   "volume": null,
+   "kind": "brand",
+   "params": {
+    "query": "Fafrees elektrische fatbike"
+   }
+  },
+  {
+   "term": "ttgo elektrische fatbike",
+   "volume": null,
+   "kind": "brand",
+   "params": {
+    "query": "TTGO elektrische fatbike"
+   }
+  },
+  {
+   "term": "cortina elektrische fatbike",
+   "volume": null,
+   "kind": "brand",
+   "params": {
+    "query": "Cortina elektrische fatbike"
+   }
+  },
+  {
+   "term": "gazelle elektrische fatbike",
+   "volume": null,
+   "kind": "brand",
+   "params": {
+    "query": "Gazelle elektrische fatbike"
+   }
+  },
+  {
+   "term": "bafang elektrische fatbike",
+   "volume": null,
+   "kind": "brand",
+   "params": {
+    "query": "Bafang elektrische fatbike"
+   }
+  },
+  {
+   "term": "cube elektrische fatbike",
+   "volume": null,
+   "kind": "brand",
+   "params": {
+    "query": "CUBE elektrische fatbike"
+   }
+  },
+  {
+   "term": "samebike elektrische fatbike",
+   "volume": null,
+   "kind": "brand",
+   "params": {
+    "query": "Samebike elektrische fatbike"
+   }
+  }
+ ]
+}

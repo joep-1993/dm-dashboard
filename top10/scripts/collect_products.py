@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from shared.topic import add_topic_arg, find_topic, slugify           # noqa: E402
 
 SEARCH_API = "https://productsearch-v2.api.beslist.nl/search/products"
+IMAGE_BASE = "https://hwimages.beslist.net/beslist-images/"
 
 
 def norm(p: dict) -> dict:
@@ -31,7 +32,15 @@ def norm(p: dict) -> dict:
     """
     eans = p.get("eans") or []
     hist = p.get("priceHistory") or []
+    # De API geeft een sjabloonpad met een {size}-placeholder en zonder host.
+    # De werkende combinatie is hwimages.beslist.net/beslist-images/ met F300 —
+    # cdn.beslist.net geeft 403, ongeacht de maat.
+    images = p.get("images") or []
+    image = None
+    if images and images[0].get("url"):
+        image = IMAGE_BASE + images[0]["url"].replace("{size}", "F300")
     return {
+        "image": image,
         "ean": eans[0] if eans else p.get("groupId"),
         "eans": eans,
         "groupId": p.get("groupId"),

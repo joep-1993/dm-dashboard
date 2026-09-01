@@ -62,15 +62,6 @@
    }
   },
   {
-   "term": "roze elektrische tandenborstel",
-   "display": "roze elektrische tandenborstels",
-   "volume": 590,
-   "kind": "facet:kleur",
-   "params": {
-    "query": "roze elektrische tandenborstel"
-   }
-  },
-  {
    "term": "elektrische tandenborstel test",
    "display": "geteste elektrische tandenborstels",
    "volume": 320,
@@ -87,20 +78,29 @@
    }
   },
   {
-   "term": "frozen elektrische tandenborstel",
-   "display": "Frozen elektrische tandenborstels",
-   "volume": 320,
-   "kind": "facet:personages",
-   "params": {
-    "query": "frozen elektrische tandenborstel"
-   }
-  },
-  {
    "term": "elektrische tandenborstel kopen",
    "display": "elektrische tandenborstels",
    "volume": 260,
    "kind": "generic",
    "params": {}
+  },
+  {
+   "term": "philips sonicare elektrische tandenborstel",
+   "display": "Philips Sonicare tandenborstels",
+   "volume": 170,
+   "kind": "brand",
+   "params": {
+    "query": "philips sonicare elektrische tandenborstel"
+   }
+  },
+  {
+   "term": "beste philips elektrische tandenborstel",
+   "display": "Philips elektrische tandenborstels",
+   "volume": 30,
+   "kind": "brand",
+   "params": {
+    "query": "beste philips elektrische tandenborstel"
+   }
   }
  ],
  "skip_facets": [

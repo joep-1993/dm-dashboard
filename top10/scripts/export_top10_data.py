@@ -389,6 +389,7 @@ def build(topic, limit=None):
             "title": p["title"],
             "brand": p["brand"],
             "min_price_at_build": price_map.get(key),
+            "image": p.get("image"),
             "plp_url": p["plpUrl"],
             "clicks": clicks.get(key, {}).get("clicks", 0),
             "live_offers": offers,

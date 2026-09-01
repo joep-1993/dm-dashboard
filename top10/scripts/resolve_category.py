@@ -27,13 +27,59 @@ from shared.topic import RANK_MODEL, REVIEW_MODEL, Topic, new_topic_dir  # noqa:
 SEARCH_API = "https://productsearch-v2.api.beslist.nl/search/products"
 
 
-def product_count(node: dict) -> int | None:
-    """Indicatief aantal producten in deze categorie (Search API ``total``)."""
+def parse_filters(url: str) -> dict[str, list[str]]:
+    """/c/type_elek_fiets~23791934~~kleur~123+456 -> {facet: [waarden]}.
+
+    Een categorie-URL mag een facetfilter dragen; dan is dát de gevraagde
+    scope ("Fatbikes" binnen Elektrische fietsen) en blijft elke zoekopdracht
+    erbinnen. Scheidingstekens volgen de site: ~~ tussen facetten, ~ tussen
+    facet en waarden, + tussen waarden.
+    """
+    parts = [p for p in url.split("?")[0].split("#")[0].split("/") if p]
+    if "c" not in parts:
+        return {}
+    tail = parts[parts.index("c") + 1:]
+    if not tail:
+        return {}
+    filters = {}
+    for chunk in tail[0].split("~~"):
+        bits = chunk.split("~")
+        if len(bits) >= 2 and bits[0]:
+            filters[bits[0]] = [v for v in "~".join(bits[1:]).split("+") if v]
+    return filters
+
+
+def facet_value_names(node: dict, filters: dict) -> dict[str, str]:
+    """Namen van de gefilterde facetwaarden, voor het label van het topic."""
+    if not filters:
+        return {}
     try:
         r = requests.get(SEARCH_API, params={"mainCategory": str(node["root_id"]),
                                              "category": node["slug"],
                                              "countryLanguage": "nl-nl",
                                              "isBot": "false", "limit": "1"}, timeout=30)
+        names = {}
+        for facet in r.json().get("facets") or []:
+            wanted = filters.get((facet.get("urlName") or "").lower())
+            if not wanted:
+                continue
+            for v in facet.get("values") or []:
+                if str(v.get("id")) in [str(w) for w in wanted]:
+                    names[str(v["id"])] = v["facetValue"]
+        return names
+    except Exception:
+        return {}
+
+
+def product_count(node: dict, filters: dict | None = None) -> int | None:
+    """Indicatief aantal producten in deze categorie (Search API ``total``)."""
+    extra = {f"filters[{f}][{i}]": v for f, vals in (filters or {}).items()
+             for i, v in enumerate(vals)}
+    try:
+        r = requests.get(SEARCH_API, params={"mainCategory": str(node["root_id"]),
+                                             "category": node["slug"],
+                                             "countryLanguage": "nl-nl",
+                                             "isBot": "false", "limit": "1", **extra}, timeout=30)
         return r.json().get("total") if r.status_code == 200 else None
     except Exception:
         return None
@@ -73,27 +119,34 @@ def seed_terms(label: str, brand_names: list[str]) -> list[dict]:
     return terms
 
 
-def show(hits: list[dict]) -> None:
+def show(hits: list[dict], filters: dict | None = None) -> None:
     print(f"\n{len(hits)} kandidaat-categorieën:\n")
+    if filters:
+        print(f"  (met facetfilter {filters})\n")
     for h in hits:
         path = " > ".join(p for p in h["path"] if p)
-        n = product_count(h)
+        n = product_count(h, filters)
         print(f"  id {h['id']:<9} {path}")
         print(f"  {'':<12} slug={h['slug']}  main={h['root_id']}  producten≈{n if n is not None else '?'}\n")
     print("Kies er één:  --create <id>")
 
 
-def create(node: dict, args) -> Topic:
-    label = node["name"]
+def create(node: dict, args, filters: dict | None = None) -> Topic:
+    filters = filters or {}
+    # Met een facetfilter is de facetwaarde de naam van het onderwerp: de
+    # gebruiker vroeg om "Fatbikes", niet om "Elektrische fietsen".
+    names = facet_value_names(node, filters)
+    label = ", ".join(names.values()) if names else node["name"]
     brand_names = brands(node) if not args.no_brand_terms else []
     directory = new_topic_dir(label)
     cfg = {
         "slug": directory.name,
         "label": label,
         "created_at": date.today().isoformat(),
-        "category": {"category_id": node["id"], "name": label,
-                     "path": [p for p in node["path"] if p],
+        "category": {"category_id": node["id"], "name": node["name"],
+                     "path": [p for p in node["path"] if p] + ([label] if names else []),
                      "main_category": node["root_id"], "category": node["slug"]},
+        "filters": filters,
         "country_language": "nl-nl",
         "sort": "popularity",
         "sort_direction": "desc",
@@ -105,8 +158,9 @@ def create(node: dict, args) -> Topic:
     t = Topic(directory)
     print(f"\naangemaakt: {directory.relative_to(Path.cwd()) if str(directory).startswith(str(Path.cwd())) else directory}")
     print(f"  categorie : {' > '.join(cfg['category']['path'])} (id {node['id']})")
-    print(f"  search    : mainCategory={node['root_id']} category={node['slug']}")
-    print(f"  producten : ≈{product_count(node)}")
+    print(f"  search    : mainCategory={node['root_id']} category={node['slug']}"
+          + (f" filters={filters}" if filters else ""))
+    print(f"  producten : ≈{product_count(node, filters)}")
     print(f"  modellen  : review={t.review_model}  rank={t.rank_model}")
     print(f"  termen    : {len(cfg['terms'])} ({sum(1 for x in cfg['terms'] if x['kind']=='brand')} merktermen)")
     for x in cfg["terms"]:
@@ -143,8 +197,9 @@ def main() -> int:
             print(f"geen categorie gevonden voor '{args.name}'", file=sys.stderr)
             return 1
 
+    filters = parse_filters(args.url or "")
     if not args.create:
-        show(hits)
+        show(hits, filters)
         return 0
 
     if args.create is True:
@@ -154,7 +209,7 @@ def main() -> int:
         if not node:
             print(f"categorie-id {args.create} niet gevonden", file=sys.stderr)
             return 1
-    create(node, args)
+    create(node, args, filters)
     return 0
 
 

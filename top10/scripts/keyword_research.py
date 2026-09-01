@@ -67,7 +67,8 @@ def brands(topic, top: int) -> list[str]:
     return []
 
 
-def candidates(topic, n_brands: int, per_facet: int, skip: set[str]) -> dict[str, dict]:
+def candidates(topic, n_brands: int, per_facet: int, skip: set[str],
+               use_facets: bool) -> dict[str, dict]:
     """{zoekterm: {kind, params}} — alles wat we aan Keyword Planner voorleggen."""
     noun = topic.label.lower()
     one = singular(topic.label)
@@ -81,7 +82,7 @@ def candidates(topic, n_brands: int, per_facet: int, skip: set[str]) -> dict[str
         for t in (f"{b.lower()} {one}", f"beste {b.lower()} {one}"):
             out.setdefault(t, {"kind": "brand", "params": {"query": t}})
 
-    for facet_name, value in facet_values(topic, per_facet, skip):
+    for facet_name, value in (facet_values(topic, per_facet, skip) if use_facets else []):
         v = value.lower()
         # Waarden die het categoriewoord al bevatten ('Dubbele airfryer') zijn
         # zelf de zoekterm; de rest wordt ervoor geplakt ('6 personen airfryer').
@@ -155,15 +156,23 @@ def main() -> int:
     ap.add_argument("--min-volume", type=int, default=10)
     ap.add_argument("--skip-facet", action="append", default=[], metavar="URLNAME",
                     help="facet uitsluiten als bron van termen, bv. bereidingsprogramma")
+    # Standaard UIT. Een facetwaarde maakt van "elektrische tandenborstels" stil
+    # "Frozen elektrische tandenborstels" — een andere pagina dan gevraagd. Wie
+    # een facet wil, zegt dat: met deze vlag, of door een categorie-URL met een
+    # /c/-filter op te geven (dan zit het facet al in de scope).
+    ap.add_argument("--facet-terms", action="store_true",
+                    help="facetwaarden ook als zoekterm gebruiken (standaard niet)")
     ap.add_argument("--apply", action="store_true", help="topic.json en keywords.csv wegschrijven")
     args = ap.parse_args()
     topic = find_topic(args.topic)
 
     skip = BASE_SKIP_FACETS | {n.lower() for n in (topic.cfg.get("skip_facets") or [])} \
         | {n.lower() for n in args.skip_facet}
-    if skip - BASE_SKIP_FACETS:
+    if not args.facet_terms:
+        print("facetwaarden worden niet als zoekterm gebruikt (--facet-terms zet ze aan)")
+    elif skip - BASE_SKIP_FACETS:
         print(f"facetten uitgesloten: {', '.join(sorted(skip - BASE_SKIP_FACETS))}")
-    cand = candidates(topic, args.brands, args.per_facet, skip)
+    cand = candidates(topic, args.brands, args.per_facet, skip, args.facet_terms)
     print(f"{len(cand)} kandidaat-termen voor '{topic.label}', volumes ophalen…")
     volumes = lookup_volumes(list(cand))
 
