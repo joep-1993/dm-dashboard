@@ -38,6 +38,8 @@
         #historyContent .col-urls { width: 20%; }
         #historyContent .col-export { width: 30%; }
         .batch-row td { vertical-align: middle; }
+        /* Sits on the info-coloured card header, so it needs its own contrast. */
+        .domain-select { width: auto; min-width: 11rem; }
     </style>
 </head>
 <body>
@@ -114,6 +116,9 @@
                             <div>
                                 <strong>Today's usage:</strong>
                                 <span id="todayCount">-</span> / <span id="dailyLimit">10,000</span> URLs
+                                <!-- Naming the domain matters: the quota is per domain, so a bare
+                                     number would be ambiguous the moment .be is in the picker. -->
+                                <span class="text-muted small" id="counterDomain"></span>
                             </div>
                             <div class="flex-grow-1 mx-3">
                                 <div class="progress" style="height: 20px;">
@@ -129,8 +134,18 @@
                 <div class="card mb-4">
                     <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Submit URLs to IndexNow</h5>
+                        <!-- Bing's 10k/day is a per-DOMAIN quota, so the picker also
+                             re-reads the counter above — the two must never show one
+                             shared total. -->
+                        <div class="d-flex align-items-center gap-2">
+                            <label for="domainSelect" class="form-label mb-0 small">Domein</label>
+                            <select class="form-select form-select-sm domain-select" id="domainSelect" onchange="onDomainChange()">
+                                <option value="www.beslist.nl">www.beslist.nl</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="card-body">
+                        <div id="domainWarning" class="alert alert-warning py-2 px-3 small d-none" role="alert"></div>
                         <!-- Tabs -->
                         <ul class="nav nav-tabs mb-3" role="tablist">
                             <li class="nav-item">
@@ -256,15 +271,65 @@
             bar.style.width = pct + '%';
             bar.textContent = pct + '%';
             bar.className = 'progress-bar' + (pct >= 90 ? ' bg-danger' : pct >= 70 ? ' bg-warning' : ' bg-success');
+            const dom = document.getElementById('counterDomain');
+            if (dom) dom.textContent = 'op ' + selectedDomain();
             const badge = document.getElementById('remainingBadge');
             badge.textContent = remaining.toLocaleString() + ' remaining';
             badge.style.cssText = 'border: 1px solid #00b894; color: #00b894; background: transparent;';
             badge.className = 'badge';
         }
 
+        // Selected domain. Every submit and every counter read goes through this —
+        // Bing's 10k/day is per domain, so mixing them up would either block .be on a
+        // busy .nl day or fire .be URLs with the .nl key (which answers 202 and drops
+        // the batch).
+        function selectedDomain() {
+            const el = document.getElementById('domainSelect');
+            return el ? el.value : 'www.beslist.nl';
+        }
+
+        async function loadDomains() {
+            const sel = document.getElementById('domainSelect');
+            try {
+                const response = await fetch(`${API_BASE}/api/indexnow/domains`);
+                if (!response.ok) return;
+                const data = await response.json();
+                if (!data.domains || !data.domains.length) return;
+                sel.innerHTML = data.domains.map(d =>
+                    `<option value="${escapeHtml(d.domain)}" data-configured="${d.configured}"${d.default ? ' selected' : ''}>` +
+                    `${escapeHtml(d.domain)}${d.configured ? '' : ' (geen key)'}</option>`
+                ).join('');
+            } catch (e) { /* keep the hardcoded .nl fallback */ }
+            updateDomainWarning();
+        }
+
+        function updateDomainWarning() {
+            const sel = document.getElementById('domainSelect');
+            const warn = document.getElementById('domainWarning');
+            const opt = sel.selectedOptions[0];
+            const configured = !opt || opt.dataset.configured !== 'false';
+            if (configured) {
+                warn.classList.add('d-none');
+                warn.textContent = '';
+            } else {
+                warn.classList.remove('d-none');
+                warn.innerHTML = `Voor <strong>${escapeHtml(sel.value)}</strong> is nog geen IndexNow-key ingesteld. ` +
+                    `Maak er een aan in Bing Webmaster Tools (of host het key-bestand op https://${escapeHtml(sel.value)}/) ` +
+                    `en zet hem in <code>.env</code>. Submits naar dit domein worden tot die tijd geweigerd.`;
+            }
+            // Placeholder mee laten lopen, zodat het voorbeeld bij het gekozen domein hoort.
+            const ta = document.getElementById('urlInput');
+            if (ta) ta.placeholder = `https://${sel.value}/products/...\nhttps://${sel.value}/products/...`;
+        }
+
+        function onDomainChange() {
+            updateDomainWarning();
+            loadTodayCount();
+        }
+
         async function loadTodayCount() {
             try {
-                const response = await fetch(`${API_BASE}/api/indexnow/today-count`);
+                const response = await fetch(`${API_BASE}/api/indexnow/today-count?domain=${encodeURIComponent(selectedDomain())}`);
                 if (response.ok) {
                     const data = await response.json();
                     updateCounter(data.today_count, data.daily_limit);
@@ -277,7 +342,10 @@
         // declared further down this same script block, and calling it during
         // script evaluation hits the temporal dead zone (ReferenceError, silently
         // swallowed by the async function — the table just renders empty).
-        window.addEventListener('DOMContentLoaded', () => {
+        window.addEventListener('DOMContentLoaded', async () => {
+            // Domains first: loadTodayCount() reads the picker, so a counter fetched
+            // before the list is populated would report the fallback domain.
+            await loadDomains();
             loadTodayCount();
             loadHistory();
         });
@@ -356,7 +424,7 @@
                 const response = await fetch(`${API_BASE}/api/indexnow/submit`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ urls })
+                    body: JSON.stringify({ urls, domain: selectedDomain() })
                 });
 
                 if (!response.ok) {
@@ -379,6 +447,7 @@
 
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
+            formData.append('domain', selectedDomain());
 
             setLoading('submitExcelBtn', true);
             try {

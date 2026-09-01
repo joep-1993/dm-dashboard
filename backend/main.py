@@ -4,7 +4,7 @@ load_dotenv()
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response as FastAPIResponse, Body
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Response as FastAPIResponse, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, RedirectResponse, Response, HTMLResponse, JSONResponse
@@ -5083,14 +5083,22 @@ async def keyword_planner_keyword_redirects_download(request: dict):
 # IndexNow Endpoints
 # ============================================================
 
+@app.get("/api/indexnow/domains")
+async def indexnow_domains():
+    """Domains the tool can submit to, and whether each has a key configured."""
+    from backend.indexnow_service import list_domains
+
+    return {"status": "success", "domains": list_domains()}
+
+
 @app.post("/api/indexnow/submit")
 async def indexnow_submit(request: dict):
     """
     Submit URLs to IndexNow API.
-    Accepts {"urls": ["https://...", ...]}
+    Accepts {"urls": ["https://...", ...], "domain": "www.beslist.nl"}
     Deduplicates against previously submitted URLs in Redshift.
     """
-    from backend.indexnow_service import submit_urls
+    from backend.indexnow_service import submit_urls, DEFAULT_DOMAIN
 
     urls = request.get("urls", [])
     if not urls:
@@ -5100,20 +5108,27 @@ async def indexnow_submit(request: dict):
     if not urls:
         raise HTTPException(status_code=400, detail="No valid URLs provided")
 
+    domain = request.get("domain") or DEFAULT_DOMAIN
+
     try:
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, submit_urls, urls)
+        result = await loop.run_in_executor(None, submit_urls, urls, domain)
         return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/indexnow/upload-excel")
-async def indexnow_upload_excel(file: UploadFile = File(...)):
+async def indexnow_upload_excel(
+    file: UploadFile = File(...),
+    domain: str = Form(None),
+):
     """
     Upload an Excel file with a URL column and submit to IndexNow.
     """
-    from backend.indexnow_service import submit_urls
+    from backend.indexnow_service import submit_urls, DEFAULT_DOMAIN
 
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="File must be .xlsx or .xls")
@@ -5143,10 +5158,12 @@ async def indexnow_upload_excel(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="No valid URLs found in the file")
 
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, submit_urls, urls)
+        result = await loop.run_in_executor(None, submit_urls, urls, domain or DEFAULT_DOMAIN)
         return result
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -5210,14 +5227,26 @@ async def indexnow_export_by_date(date: str):
 
 
 @app.get("/api/indexnow/today-count")
-async def indexnow_today_count():
-    """Get the number of URLs submitted today and the daily limit."""
-    from backend.indexnow_service import get_today_count, DAILY_LIMIT
+async def indexnow_today_count(domain: str = None):
+    """URLs submitted today and the daily limit — per domain when one is given.
+
+    Bing's 10k/day is a per-domain quota, so the counter in the UI follows the
+    selected domain rather than showing one shared total.
+    """
+    from backend.indexnow_service import get_today_count, DAILY_LIMIT, _resolve_domain
 
     try:
+        resolved = _resolve_domain(domain) if domain else None
         loop = asyncio.get_running_loop()
-        count = await loop.run_in_executor(None, get_today_count)
-        return {"status": "success", "today_count": count, "daily_limit": DAILY_LIMIT}
+        count = await loop.run_in_executor(None, get_today_count, resolved)
+        return {
+            "status": "success",
+            "today_count": count,
+            "daily_limit": DAILY_LIMIT,
+            "domain": resolved,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

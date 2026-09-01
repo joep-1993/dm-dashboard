@@ -64,7 +64,7 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── keyword_planner_service.py # Keyword Planner: Google Ads search volume lookup
 │   ├── category_keyword_service.py # Category Keyword Volumes: keyword+category combinations + facet volume processing
 │   ├── run_facet_volumes.py    # Batch facet volume processing script (all maincats, resume-capable)
-│   ├── indexnow_service.py     # IndexNow: submit URLs to IndexNow API with local PostgreSQL dedup + 10K daily limit
+│   ├── indexnow_service.py     # IndexNow: submit URLs per domain (beslist.nl/.be) with Redshift dedup + 10K daily limit PER DOMAIN
 │   ├── index_checker_service.py # SEO Index Checker: Google Search Console URL Inspection API
 │   ├── index_checker.py        # Standalone index checker script
 │   ├── mc_id_finder_router.py # MC ID Finder APIRouter
@@ -536,9 +536,12 @@ gotchas are in `backend/faq_v2_publisher.py`'s docstring.
 - `POST /api/keyword-planner/category-volumes/download` - Download category volume results as Excel (JSON: `{"deepest_cat_results": [...]}`)
 
 ### IndexNow
-- `POST /api/indexnow/submit` - Submit URLs to IndexNow API (JSON: `{"urls": [...]}`)
-- `POST /api/indexnow/upload-excel` - Upload Excel with URL column, deduplicate, submit
+- `GET /api/indexnow/domains` - Domains the tool can submit to + whether each has a key configured
+- `POST /api/indexnow/submit` - Submit URLs to IndexNow API (JSON: `{"urls": [...], "domain": "www.beslist.nl"}`)
+- `POST /api/indexnow/upload-excel` - Upload Excel with URL column, deduplicate, submit (form field `domain`)
 - `GET /api/indexnow/history` - Recent submission history from Redshift
+- `GET /api/indexnow/today-count?domain=` - URLs submitted today + daily limit, per domain
+  - Bing allocates the 10K/day PER DOMAIN, so .be has its own budget; the key is per host too (the .nl key answers 202 on a .be URL). Keys come from `INDEXNOW_KEY_NL` / `INDEXNOW_KEY_BE`; without one the tool refuses that domain up front. Only HTTP **200** is logged — a 202 or error writes nothing, because dedup keys on `url` alone and a logged failure would retire those URLs forever. See `docs/indexnow_n8n_fix.md`.
 
 ### SEO Index Checker
 - `POST /api/index-checker/check` - Check index status via Google Search Console (JSON: `{"urls": [...]}`, max 8,000)
