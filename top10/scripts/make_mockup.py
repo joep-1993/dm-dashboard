@@ -28,7 +28,8 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from mockup_style import CSS, FONT_LINK, PLACEHOLDER, TICK                # noqa: E402
+from mockup_style import (CSS, FONT_LINK, HEADER_CSS, ICON_CART, ICON_CHEVRON,     # noqa: E402
+                          ICON_HEART, ICON_SEARCH, LOGO_SVG, PLACEHOLDER, TICK)
 from shared.topic import add_topic_arg, find_topic                        # noqa: E402
 
 E = html.escape
@@ -283,10 +284,19 @@ def build(topic, page_index: int) -> tuple[str, str]:
   <span class="sp"></span>
   <button onclick="document.body.classList.toggle('data')">Datalaag aan/uit</button>
 </div>
-<header class="top"><div class="top-inner">
-  <a class="wordmark" href="#">beslist<span>.nl</span></a>
-  <div class="top-kicker">{E(" › ".join(meta["category"]["path"]))}</div>
+<header class="site"><div class="site-inner">
+  <a class="logo" href="{SITE}" title="beslist.nl">{LOGO_SVG}</a>
+  <button class="cat" type="button"><span>Bekijk alle<br>categorieën</span>{ICON_CHEVRON}</button>
+  <form class="search" onsubmit="return false">
+    <input type="text" placeholder="Zoeken naar..." aria-label="Zoeken naar">
+    <button type="submit" aria-label="Zoeken">{ICON_SEARCH}</button>
+  </form>
+  <div class="tools">
+    <a href="#" aria-label="Verlanglijstje">{ICON_HEART}</a>
+    <a href="#" aria-label="Winkelwagen">{ICON_CART}</a>
+  </div>
 </div></header>
+<div class="crumbs"><div class="crumbs-inner">{E(" › ".join(meta["category"]["path"]))}</div></div>
 <main class="page">
   <div class="lead">
     <h1>De {len(top)} beste <em>{E(page["display"])}</em></h1>
@@ -337,7 +347,7 @@ def build(topic, page_index: int) -> tuple[str, str]:
     doc = ("<!doctype html>\n<html lang=\"nl\"><head><meta charset=\"utf-8\">"
            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
            f"<title>{E(title)} — beslist.nl (mockup)</title>{FONT_LINK}"
-           f"<style>{CSS}</style></head><body>{body}</body></html>")
+           f"<style>{CSS}{HEADER_CSS}</style></head><body>{body}</body></html>")
     return doc, title
 
 
