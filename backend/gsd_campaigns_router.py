@@ -11,6 +11,7 @@ from backend.gsd_campaigns_service import (
     remove_campaign,
     get_redshift_shop_changes,
     run_gsd_script,
+    GsdRunInProgress,
     cancel_run,
     get_run_progress,
     preview_gsd_script,
@@ -98,18 +99,24 @@ async def get_campaigns(
         result = await loop.run_in_executor(executor, get_all_gsd_stats)
         campaigns = result.get("campaigns", [])
 
-        # Apply filters
+        # Apply filters. `(x or "")` rather than a .get() default throughout: these keys
+        # are always PRESENT and can hold None — _parse_campaign_name yields shop_name=None
+        # for any campaign whose name misses its [shop:...] token — and a dict default only
+        # fires on a missing key, never on a present None. One such campaign in the account
+        # made every search 500 with "'NoneType' object has no attribute 'lower'".
         if country:
-            campaigns = [c for c in campaigns if c.get("country", "").upper() == country.upper()]
+            campaigns = [c for c in campaigns
+                         if (c.get("country") or "").upper() == country.upper()]
         if status:
-            campaigns = [c for c in campaigns if c.get("status", "").upper() == status.upper()]
+            campaigns = [c for c in campaigns
+                         if (c.get("status") or "").upper() == status.upper()]
         if search:
             search_lower = search.lower()
             campaigns = [
                 c for c in campaigns
-                if search_lower in c.get("shop_name", "").lower()
-                or search_lower in c.get("campaign_name", "").lower()
-                or search_lower in str(c.get("shop_id", "")).lower()
+                if search_lower in (c.get("shop_name") or "").lower()
+                or search_lower in (c.get("campaign_name") or "").lower()
+                or search_lower in str(c.get("shop_id") or "").lower()
             ]
 
         return {"campaigns": campaigns, "total": len(campaigns)}
@@ -456,7 +463,13 @@ async def run_gsd_script_endpoint(
     shop_names: Optional[str] = Query(None, description="Comma-separated shop names"),
     included: bool = Query(False, description="If true, only include listed shops; if false, exclude them"),
 ):
-    """Run the GSD script. This is a long-running operation."""
+    """Run the GSD script. This is a long-running operation.
+
+    409 when a run is already in flight — anywhere, not just in this process. Two runs
+    over the same change list is not a slow-down but corruption: on 2026-09-01 it produced
+    duplicate campaign names, half-built listing trees and two Merchant Center
+    sub-accounts for two shops. See _gsd_run_lock in the service.
+    """
     # The one that matters most: this creates and pauses real campaigns, and the date
     # decides WHICH shop changes it acts on.
     _check_date(date)
@@ -467,6 +480,11 @@ async def run_gsd_script_endpoint(
             executor, run_gsd_script, date, shop_list, included
         )
         return result
+    except GsdRunInProgress as e:
+        # Not an error in this run — a refusal to start a second one. 409 so the frontend
+        # can say so plainly instead of showing a bare "HTTP 500".
+        logger.warning("GSD run refused: %s", e)
+        raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         logger.error(f"Error running GSD script: {e}")
         raise HTTPException(status_code=500, detail=str(e))

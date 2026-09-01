@@ -218,6 +218,153 @@ def get_run_progress() -> Dict[str, Any]:
     return dict(_run_progress)
 
 
+# --- One run at a time, across processes ------------------------------------
+#
+# On 2026-09-01 two runs went through the SAME 18-shop change list at the same time and
+# tore each other apart. `pa.jvs_gsd_campaign_created` recorded two 6-shop batches 21
+# seconds apart (10:37:01 and 10:37:22) — that table is written once per run, so two
+# batches is two runs — and every symptom of the day follows from it:
+#   * DUPLICATE_CAMPAIGN_NAME: run B built a name run A had created seconds earlier, after
+#     B had already snapshotted its candidates (_fetch_shop_campaign_candidates).
+#   * "The request conflicted with existing data" (CONCURRENT_MODIFICATION): both runs
+#     mutating one resource at once.
+#   * "Listing group cannot be added ... already exists" + "referenced ... was not found":
+#     both runs building a tree in the same ad group.
+#   * Two Merchant Center sub-accounts per shop (Bouwlampkoning.nl, Vergewallet.nl):
+#     _get_or_create_mc_account is a check-then-create and both checks said "absent".
+#   * Duplicate rows in pa.mc_ids_efficy (fixed separately in push_mc_ids_to_redshift).
+# The globals above cannot prevent any of that: they are per-process, so they see one
+# run even when two are live, one shared progress bar counts for both, and cancel_run()
+# stops BOTH. Worse, the Activity Log entry is written by the BROWSER, so the second run
+# left no trace at all — which is why the day looks like it had one run, not two.
+#
+# The lock therefore lives in the shared PostgreSQL DB, not in this process: the two runs
+# that collided may well have been two backends (WSL :8003 and prod :3003) pointed at the
+# same Google Ads accounts, and an in-process flag is blind to that. It is SESSION-scoped
+# (pg_try_advisory_lock on a dedicated connection held for the run) rather than
+# transaction-scoped, because a run is minutes long and does its own Redshift/Postgres
+# transactions in between. Held by the connection, so a crashed or killed run releases it
+# — there is no stale lock to clear by hand.
+GSD_RUN_LOCK_KEY = 0x67736472            # "gsdr"; 32-bit so pg_locks.objid holds it whole
+
+
+class GsdRunInProgress(RuntimeError):
+    """Raised instead of starting a second concurrent GSD run. The router turns this
+    into HTTP 409 so the caller is told, rather than silently racing the run in
+    progress."""
+
+
+def _run_lock_identity() -> str:
+    """Who holds the lock, for the message the second caller gets.
+
+    Hostname first: the case worth naming is two MACHINES (a WSL :8003 and prod
+    win-htz-006:3003) pointed at the same Google Ads accounts. No port — uvicorn takes it
+    as a flag, not an env var, so anything read here would be a guess.
+    """
+    import socket
+    return (f"{socket.gethostname()} pid {os.getpid()} "
+            f"gestart {datetime.now().strftime('%H:%M:%S')}")
+
+
+@contextmanager
+def _session_lock_connection():
+    """A pooled connection fit to hold a SESSION-level advisory lock for minutes.
+
+    autocommit, so a run that takes 20 minutes does not sit `idle in transaction` on a
+    database we share with n8n (that blocks VACUUM cleanup for as long as it lasts). Any
+    session GUC set on it is reset on the way out, because the connection goes back into
+    the pool for someone else — leaking `lock_timeout` in particular would make an
+    unrelated query start failing.
+    """
+    conn = get_db_connection()
+    previous_autocommit = conn.autocommit
+    try:
+        # A pooled connection can come back with a transaction still open, and psycopg2
+        # refuses to switch autocommit on one ("set_session cannot be used inside a
+        # transaction"). Ending it first is safe: nothing of ours is in it.
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        conn.autocommit = True
+        yield conn
+    finally:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("RESET application_name")
+                cur.execute("RESET lock_timeout")
+        except Exception:
+            pass
+        try:
+            conn.autocommit = previous_autocommit
+        except Exception:
+            pass
+        return_db_connection(conn)
+
+
+@contextmanager
+def _gsd_run_lock():
+    """Hold the GSD run lock for the duration of a run, or raise GsdRunInProgress.
+
+    Best-effort in one direction only: if PostgreSQL is unreachable the run proceeds
+    UNLOCKED (a database hiccup must not block the day's campaigns) and says so in the
+    log. It never proceeds when the lock is genuinely held by someone else.
+    """
+    with _session_lock_connection() as conn:
+        holding = False
+        try:
+            try:
+                with conn.cursor() as cur:
+                    # application_name is how the *other* process learns who is running.
+                    cur.execute("SET application_name = %s", (f"gsd_run {_run_lock_identity()}",))
+                    cur.execute("SELECT pg_try_advisory_lock(%s) AS got", (GSD_RUN_LOCK_KEY,))
+                    holding = bool(cur.fetchone()["got"])
+                if not holding:
+                    raise GsdRunInProgress(
+                        f"Er loopt al een GSD-run: {_lock_holder_description(conn)}. "
+                        "Wacht tot die klaar is (of gebruik Cancel) voor je opnieuw start — "
+                        "twee runs tegelijk maken dubbele campagnes en dubbele MC-accounts."
+                    )
+            except GsdRunInProgress:
+                raise
+            except Exception as ex:
+                logger.warning("GSD run lock unavailable (%s) — running UNLOCKED; a second "
+                               "concurrent run is not blocked right now", ex)
+            yield holding
+        finally:
+            if holding:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT pg_advisory_unlock(%s)", (GSD_RUN_LOCK_KEY,))
+                except Exception as ex:
+                    # Not fatal: the lock dies with the connection, and the connection is
+                    # closed or reset right after this.
+                    logger.warning("Could not release the GSD run lock explicitly: %s", ex)
+
+
+def _lock_holder_description(conn) -> str:
+    """Describe the backend currently holding the run lock, from pg_locks."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT a.application_name
+                FROM pg_locks l
+                JOIN pg_stat_activity a ON a.pid = l.pid
+                WHERE l.locktype = 'advisory' AND l.objid = %s AND l.granted
+                  AND a.pid <> pg_backend_pid()
+                LIMIT 1
+                """,
+                (GSD_RUN_LOCK_KEY,),
+            )
+            row = cur.fetchone()
+        if row and row.get("application_name"):
+            return str(row["application_name"]).replace("gsd_run ", "")
+        return "een andere sessie"
+    except Exception:
+        return "een andere sessie"
+
+
 # Last Google Ads error captured by a create/enable helper, so
 # _create_campaigns_for_shop can surface the real reason (not just a code) in
 # the run result instead of a bare "—".
@@ -2583,8 +2730,26 @@ def add_sub_cpr(
         logger.info("Created CPR listing group tree (label=%s) for %s", label, ad_group_resource_name)
         return True
     except GoogleAdsException as ex:
+        # "Listing group cannot be added to the ad group because it already exists" plus
+        # "Listing group referenced in the operation was not found in the ad group" is what
+        # a concurrent build in the SAME ad group looks like: the other writer got the root
+        # in, so our root collides and our children point at a temp id that never existed.
+        # The tree may well be correct now, so check before calling it a failure
+        # (2026-09-01: reported as listing_group_creation_failed on campaigns that had a
+        # perfectly good tree).
+        msg = _gads_err(ex)
+        ag_id = ad_group_resource_name.rstrip("/").split("/")[-1]
+        try:
+            if _tree_targets_label(client.get_service("GoogleAdsService"),
+                                   customer_id, ag_id, "CPR", label):
+                logger.warning("CPR listing group create failed (%s) but the tree is "
+                               "correct for label=%s on %s — treating as done",
+                               msg, label, ad_group_resource_name)
+                return True
+        except Exception as probe_ex:            # a failed probe must not mask the real error
+            logger.warning("Could not verify the CPR tree after a failed create: %s", probe_ex)
         logger.error("Failed to create CPR listing group (shop: %s): %s", shop_name, ex)
-        _last_gads_error["msg"] = _gads_err(ex)
+        _last_gads_error["msg"] = msg
         return False
 
 
@@ -2665,8 +2830,20 @@ def add_sub_cpc(
         logger.info("Created CPC listing group tree for %s", ad_group_resource_name)
         return True
     except GoogleAdsException as ex:
+        # Same re-check as add_sub_cpr: a colliding concurrent build in the same ad group
+        # leaves a tree that may already be right.
+        msg = _gads_err(ex)
+        ag_id = ad_group_resource_name.rstrip("/").split("/")[-1]
+        try:
+            if _tree_targets_label(client.get_service("GoogleAdsService"),
+                                   customer_id, ag_id, "CPC", label):
+                logger.warning("CPC listing group create failed (%s) but the tree is "
+                               "present on %s — treating as done", msg, ad_group_resource_name)
+                return True
+        except Exception as probe_ex:
+            logger.warning("Could not verify the CPC tree after a failed create: %s", probe_ex)
         logger.error("Failed to create CPC listing group (shop: %s): %s", shop_name, ex)
-        _last_gads_error["msg"] = _gads_err(ex)
+        _last_gads_error["msg"] = msg
         return False
 
 
@@ -2915,6 +3092,77 @@ def _is_transient_mc_error(ex: Exception) -> bool:
     return False
 
 
+# Serialises the get-or-create of ONE (parent, shop) Merchant Center sub-account across
+# processes. Two-int advisory key so it can never collide with GSD_RUN_LOCK_KEY.
+MC_ACCOUNT_LOCK_CLASS = 0x6D636163       # "mcac"
+MC_ACCOUNT_LOCK_TIMEOUT_MS = 120_000     # 2 min: an MC create is seconds, a full list is not
+
+
+def _mc_lock_key2(mc_parent_id: str, shop_name: str) -> int:
+    """Stable signed-int32 key for one (parent, shop). zlib.crc32 rather than hash(),
+    which is salted per process and would give each backend its own lock."""
+    import zlib
+    raw = f"{mc_parent_id}|{(shop_name or '').strip().lower()}".encode("utf-8")
+    return zlib.crc32(raw) - 0x80000000   # crc32 is unsigned; shift into int4 range
+
+
+@contextmanager
+def _mc_account_lock(mc_parent_id: str, shop_name: str):
+    """Hold the per-shop MC get-or-create lock. Yields True when held.
+
+    Best-effort: if PostgreSQL is unreachable the caller proceeds unlocked (an MC account
+    still beats no campaigns), and the re-check inside the lock is skipped rather than
+    the whole create.
+    """
+    key2 = _mc_lock_key2(mc_parent_id, shop_name)
+    with _session_lock_connection() as conn:
+        holding = False
+        try:
+            try:
+                with conn.cursor() as cur:
+                    # Blocking, unlike the run lock: the other writer is creating THIS
+                    # shop's account and will be done in seconds, and what we want is its
+                    # result, not an error. lock_timeout keeps that bounded.
+                    cur.execute("SET lock_timeout = %s", (MC_ACCOUNT_LOCK_TIMEOUT_MS,))
+                    cur.execute("SELECT pg_advisory_lock(%s, %s)", (MC_ACCOUNT_LOCK_CLASS, key2))
+                holding = True
+            except Exception as ex:
+                logger.warning("MC account lock unavailable for '%s' (%s) — proceeding unlocked",
+                               shop_name, ex)
+            yield holding
+        finally:
+            if holding:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT pg_advisory_unlock(%s, %s)",
+                                    (MC_ACCOUNT_LOCK_CLASS, key2))
+                except Exception as ex:
+                    logger.warning("Could not release the MC account lock for '%s': %s",
+                                   shop_name, ex)
+
+
+def _lookup_mc_id_with_retry(mc_parent_id: str, shop_name: str) -> tuple[Optional[str], bool]:
+    """``(mc_id, lookup_ok)``. Retries transient MC API errors (read timeout, HTTP
+    500/503). A lookup that returns None (shop not found) is NOT an error and does not
+    retry; a permanent error (403 quota, 404, ...) returns ``(None, False)`` so the caller
+    aborts instead of creating a duplicate for a shop that may already have one."""
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        try:
+            return get_mc_id(mc_parent_id, shop_name), True
+        except Exception as ex:
+            if _is_transient_mc_error(ex) and attempt < max_retries:
+                logger.warning("MC lookup for '%s' failed (attempt %d/%d), retrying in 5s: %s",
+                               shop_name, attempt + 1, max_retries + 1, ex)
+                time.sleep(5)
+                continue
+            logger.error("MC lookup failed for '%s'; skipping create to avoid a duplicate: %s",
+                         shop_name, ex)
+            _last_mc_error["msg"] = _mc_err(ex)
+            return None, False
+    return None, False
+
+
 def _get_or_create_mc_account(
     mc_parent_id: str, shop_name: str, ads_customer_id: str, country: Optional[str] = None
 ) -> tuple[Optional[str], bool]:
@@ -2923,36 +3171,42 @@ def _get_or_create_mc_account(
     Returns ``(mc_id, created)`` where ``created`` is True only when a NEW
     sub-account was created (vs. an existing one being reused). On failure
     returns ``(None, False)``.
+
+    LOOKUP AND CREATE ARE ONE CRITICAL SECTION. This used to be a bare
+    check-then-create, and on 2026-09-01 two concurrent runs both read "absent" for the
+    same shop and both created: Bouwlampkoning.nl got 5847763067 + 5847763163 and
+    Vergewallet.nl got 5847225352 + 5847763988, one of each pair left empty with the
+    campaigns on the other. `accounts.list` is also eventually consistent — a freshly
+    created sub-account is not in the listing for a while (verified the same day: two
+    DELETEd accounts stayed in the listing minutes after the API had already stopped
+    serving them) — so even a single run calling this twice for one shop could duplicate.
+    Hence the lock AND the re-check inside it, not one or the other.
     """
     _last_mc_error["msg"] = None  # cleared per attempt; set on failure below
-    # Retry get_mc_id on transient MC API errors (read timeout, HTTP 500/503).
-    # A lookup that returns None (shop not found) is NOT an error and does not
-    # retry. Permanent errors (403 quota, 404, ...) abort immediately.
-    max_retries = 2
-    mc_id = None
-    for attempt in range(max_retries + 1):
-        try:
-            mc_id = get_mc_id(mc_parent_id, shop_name)
-            break  # success
-        except Exception as ex:
-            if _is_transient_mc_error(ex) and attempt < max_retries:
-                logger.warning("MC lookup for '%s' failed (attempt %d/%d), retrying in 5s: %s",
-                               shop_name, attempt + 1, max_retries + 1, ex)
-                time.sleep(5)
-                continue
-            # Lookup failed permanently — abort rather than create, or we risk a
-            # duplicate sub-account for a shop that may already have one.
-            logger.error("MC lookup failed for '%s'; skipping create to avoid a duplicate: %s",
-                         shop_name, ex)
-            _last_mc_error["msg"] = _mc_err(ex)
-            return None, False
+    mc_id, lookup_ok = _lookup_mc_id_with_retry(mc_parent_id, shop_name)
+    if not lookup_ok:
+        return None, False
+
     created = False
     if mc_id is None:
-        website_url = _shop_website_url(shop_name, country)
-        mc_id = create_merchant_id(mc_parent_id, shop_name, website_url)
-        if mc_id is None:
-            return None, False
-        created = True
+        with _mc_account_lock(mc_parent_id, shop_name) as locked:
+            if locked:
+                # Whoever held the lock before us may have created it. Ask again — this is
+                # the check that the old code was missing.
+                mc_id, lookup_ok = _lookup_mc_id_with_retry(mc_parent_id, shop_name)
+                if not lookup_ok:
+                    return None, False
+                if mc_id is not None:
+                    logger.info("MC sub-account for '%s' appeared while waiting for the "
+                                "lock (%s) — reusing it instead of creating a second one",
+                                shop_name, mc_id)
+            if mc_id is None:
+                website_url = _shop_website_url(shop_name, country)
+                mc_id = create_merchant_id(mc_parent_id, shop_name, website_url)
+                if mc_id is None:
+                    return None, False
+                created = True
+
     link_to_google_ads(mc_parent_id, mc_id, ads_customer_id)
     return mc_id, created
 
@@ -3288,12 +3542,49 @@ def _create_campaigns_for_shop(
             label_resource_name=label_resource_name,
         )
         if campaign_resource is None:
-            results.append({
-                "campaign_name": campaign_name,
-                "action": "error",
-                "reason": "campaign_creation_failed",
-                "error": _last_gads_error["msg"] or "campaign creation failed",
-            })
+            # The create failed. Before filing an error, ask whether the campaign EXISTS
+            # anyway — which is what a lost race looks like from this side. On 2026-09-01
+            # eleven rows in the run result were exactly this: DUPLICATE_CAMPAIGN_NAME
+            # ("the name is already assigned to another active or paused campaign") and
+            # CONCURRENT_MODIFICATION, both raised because a second run had created the
+            # very campaign this one was building, moments after this run snapshotted its
+            # candidates. Reported as an error, that reads as "the campaign is missing"
+            # when in truth it is there and merely unfinished — so the next run had to
+            # rebuild it and the operator had a red row to chase for nothing.
+            #
+            # Deliberately NOT keyed on the error code: reality is the better test, and it
+            # covers every wording Google may use. If the name genuinely does not exist,
+            # nothing is adopted and the error is filed exactly as before. The run lock
+            # (see _gsd_run_lock) should make this unreachable; it is the belt to that
+            # brace, and it also covers the single-run case where `accounts.list`-style
+            # lag hides a campaign this same run just made.
+            create_error = _last_gads_error["msg"] or "campaign creation failed"
+            adopted = check_campaign(client, customer_id, campaign_name)
+            if adopted is None:
+                results.append({
+                    "campaign_name": campaign_name,
+                    "action": "error",
+                    "reason": "campaign_creation_failed",
+                    "error": create_error,
+                })
+                continue
+            logger.warning(
+                "Create of '%s' failed (%s) but the campaign exists (%s) — adopting and "
+                "completing it instead of reporting a failure",
+                campaign_name, create_error, adopted,
+            )
+            if label_resource_name:
+                _apply_label_to_campaign(client, customer_id, adopted, label_resource_name)
+            _apply_branded_label(client, customer_id, adopted, branded)
+            res = _repair_campaign(
+                client, customer_id, adopted, campaign_name, campaign_type, label,
+                shop_name=shop_name)
+            # Keep the create error visible: the row is no longer red, and without this the
+            # run would look like nothing had gone wrong at all.
+            res["create_conflict"] = create_error
+            if res.get("action") == "skipped":
+                res["reason"] = "existed_after_create_conflict"
+            results.append(res)
             continue
 
         # Apply the BRANDED_0 / BRANDED_1 label matching the shop's branded flag.
@@ -3954,8 +4245,26 @@ def run_gsd_script(
     included: bool = False,
     verify: bool = True,
 ) -> Dict[str, Any]:
+    """Run the GSD flow, with at most one run live at a time.
+
+    A thin wrapper so the lock covers the WHOLE run including its side-logs, and so every
+    caller gets it — the endpoint, a future scheduler, a REPL. Raises GsdRunInProgress when
+    another run already holds it; see _gsd_run_lock for what two concurrent runs did on
+    2026-09-01.
     """
-    Main GSD campaign creation/pausing flow.
+    with _gsd_run_lock():
+        return _run_gsd_script_unlocked(date_str, shop_names, included, verify)
+
+
+def _run_gsd_script_unlocked(
+    date_str: Optional[str] = None,
+    shop_names: Optional[List[str]] = None,
+    included: bool = False,
+    verify: bool = True,
+) -> Dict[str, Any]:
+    """
+    Main GSD campaign creation/pausing flow. Call run_gsd_script, not this: this one
+    assumes the caller already holds the run lock.
 
     For each shop change from Redshift:
     - If action='aan': find/create MC account, link to Google Ads,

@@ -2138,7 +2138,21 @@
 
             try {
                 const res = await fetch(`${API_BASE}/api/gsd-campaigns/run?${params.toString()}`, { method: 'POST' });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                // 409 = the backend refused to start a SECOND run while one is live. Nothing
+                // was touched, so this is a warning and not a failed run: no Activity Log
+                // entry, and the message says who is running (see _gsd_run_lock).
+                if (res.status === 409) {
+                    let detail = 'Er loopt al een GSD-run.';
+                    try { const j = await res.json(); if (j && j.detail) detail = j.detail; } catch (e) { /* keep default */ }
+                    content.innerHTML = `<div class="alert alert-warning mb-0" style="font-size:0.9rem;">
+                        <strong>Run niet gestart.</strong> ${escapeHtml(detail)}</div>`;
+                    return;
+                }
+                if (!res.ok) {
+                    let detail = `HTTP ${res.status}`;
+                    try { const j = await res.json(); if (j && j.detail) detail = j.detail; } catch (e) { /* keep status */ }
+                    throw new Error(detail);
+                }
                 const data = await res.json();
                 // Undo payload + newly-created id tracking, from the run result.
                 const pick = (arr) => (arr || [])
