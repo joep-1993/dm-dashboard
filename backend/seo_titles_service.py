@@ -291,9 +291,63 @@ def _rule(rules, slug):
     return r[0], r[1], r[2]
 
 
-def facet_phrase(types, rules):
+# ---- Dependent facets: the child already implies the parent's VALUE -------
+#
+# kleurtint_blauw IS a kleur, houtsoort_materiaal IS a materiaal,
+# doelgroep_kind_baby_mode IS a doelgroep_mode — naming both renders "Blauwe
+# Lichtblauwe Sneakers" / "Houten Eikenhouten Kasten", so the parent is dropped
+# from the phrase. The KEY keeps every facet type: it identifies the URL combo.
+#
+# An IDENTITY parent is the exception. `pl_kleding -> merk` / `type_kranen -> merk`
+# means the facet only becomes AVAILABLE once a brand is picked; the child value
+# does not imply which brand, and "Nike Air Max Sneakers" wants it spelled out.
+# The same holds for a series/productline parent (populaire_serie, serie_*, pl_*):
+# a name is not a value dimension you can infer from a child.
+# (Legacy blueprints agree: of 6.661 omitted parents only 310 were `merk`.)
+_deps_cache = {"deps": None, "loaded_at": 0.0}
+_DEPS_TTL = 600  # seconds
+
+_IDENTITY_PARENT_PREFIXES = ('merk', 'automerk', 'populaire_serie', 'serie_',
+                             'productlijn', 'pl_')
+
+
+def _identity_parent(slug):
+    return 'automerk' in slug or slug.startswith(_IDENTITY_PARENT_PREFIXES)
+
+
+def deps_cached(force=False):
+    """load_facet_deps() behind a TTL cache — facet_phrase() runs once per combo
+    and load_facet_deps() re-runs its DDL on every call."""
+    now = time.time()
+    if not force and _deps_cache["deps"] is not None \
+            and now - _deps_cache["loaded_at"] < _DEPS_TTL:
+        return _deps_cache["deps"]
+    _deps_cache["deps"] = load_facet_deps()
+    _deps_cache["loaded_at"] = now
+    return _deps_cache["deps"]
+
+
+def covered_parents(types, deps):
+    """Parent slugs in `types` whose VALUE is already implied by a dependent child
+    that is also in `types`. Two dependency sources, because pa.facet_dependencies
+    is incomplete (it knows houttype_materiaal -> materiaal but not
+    houtsoort_materiaal): the table, plus the slug-suffix convention
+    (`<child>_<parent>`), which can only fire when both sit in the same key."""
+    pool = set(types)
+    out = set()
+    for child in pool:
+        parents = set(deps.get(child, ()))
+        parents |= {p for p in pool if p != child and child.endswith('_' + p)}
+        out |= {p for p in parents if p in pool and not _identity_parent(p)}
+    return out
+
+
+def facet_phrase(types, rules, deps=None):
     """Ordered placeholder phrase for a set of facet types. Inserts
     !!sub_category!! at SUBCATEGORY_ORDER when the set has no type-facet.
+
+    A parent facet whose dependent child is in the same set is dropped — see
+    covered_parents(). Pass `deps` to override the cached dependency map.
 
     Placement is order_index against SUBCATEGORY_ORDER, with two overrides:
       * a `position` pin from pa.facet_position_rules (see POS_* above) — the only way
@@ -302,6 +356,9 @@ def facet_phrase(types, rules):
       * geschikte_leeftijd is always rendered AFTER the noun regardless of its
         order_index. An explicit pin on it wins over this hardcoded rule.
     """
+    if deps is None:
+        deps = deps_cached()
+    types = [t for t in types if t not in covered_parents(types, deps)]
     items = []  # (order, slug, placeholder)
     has_type = False
     type_orders = []
