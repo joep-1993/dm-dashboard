@@ -94,13 +94,25 @@ def letop(item: dict) -> str:
     return f'<p class="letop"><span class="lbl">Let op</span>{E(item["letop"])}</p>'
 
 
-def cta(prod: dict, ghost: bool = False) -> str:
+def plp(prod: dict) -> str:
+    """Link naar onze eigen productpagina, niet naar de winkel.
+
+    De knop belooft álle prijzen; die staan op de PLP en niet bij één verkoper.
+    Doorlinken naar de goedkoopste winkel maakt de keuze al voor de bezoeker en
+    slaat de vergelijking over — precies waarvoor hij hier is. Alleen als een
+    product geen PLP heeft, valt hij terug op het beste aanbod.
+    """
+    if prod.get("plp_url"):
+        return SITE + prod["plp_url"]
     offers = prod.get("live_offers") or []
-    n = len(offers)
-    href = offers[0]["url"] if offers else (SITE + (prod.get("plp_url") or "/"))
+    return offers[0]["url"] if offers else SITE
+
+
+def cta(prod: dict, ghost: bool = False) -> str:
+    n = len(prod.get("live_offers") or [])
     label = f"Bekijk alle {n} prijzen" if n > 1 else "Bekijk aanbieding"
     cls = "btn btn-ghost" if ghost else "btn"
-    return f'<a class="{cls}" href="{E(href)}" target="_blank" rel="noopener">{E(label)}</a>'
+    return f'<a class="{cls}" href="{E(plp(prod))}" target="_blank" rel="noopener">{E(label)}</a>'
 
 
 def hero(item: dict, prod: dict, volume: int | None) -> str:
@@ -162,9 +174,8 @@ def alt_card(item: dict, prod: dict, top3: list, second: bool) -> str:
 
 
 def rest_row(item: dict, prod: dict) -> str:
-    offers = prod.get("live_offers") or []
-    href = offers[0]["url"] if offers else (SITE + (prod.get("plp_url") or "/"))
-    n = len(offers)
+    href = plp(prod)
+    n = len(prod.get("live_offers") or [])
     return f'''
       <div class="row">
         <div class="n">{item["rank"]}</div>
