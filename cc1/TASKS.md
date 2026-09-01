@@ -4,6 +4,46 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-09-01 (2) — t_bv/Bouwfolie op seoPriority, en een export van alle "type"-facetten die uit staan
+
+Twee losse verzoeken van Joep. Les in LEARNINGS (zelfde datum, "Drie plekken noemen zich
+seoPriority en maar één geeft het effectieve antwoord").
+
+Gedaan:
+
+- [x] **`t_bv` (facet 6710, "Type") op Bouwfolie (categorie 9004802) aangezet.** Settings-rij 8184,
+      `seoPriority: null → true`, via read-merge-PUT op `/api/CategoryFacetSettings` met alle
+      bestaande velden mee (`displayOrder: 1`, rest null) en teruggelezen ter controle. Alle drie
+      de lagen stonden al open: masterfacet `isEnabled: true`, `inheritanceStatus: Direct`,
+      `isHidden` niet gezet.
+- [x] **Facetwaarden nagelopen op Joeps vraag**: alle 7 waarden van 6710 staan al op
+      `seoPriority: true`, allemaal onaangeroerd sinds de seed van 26-02-2026. Maar 3 van de 7
+      hebben producten in Bouwfolie (Afdekvlies 57, Dampremmende folie 5, Dampdichte folie 1); de
+      andere 4 zitten aan geen enkel product.
+- [x] **Export gebouwd van alle categorie×facet-combo's met "type" in naam of slug die niet op
+      `true` staan** — 154 rijen, in `Downloads\claude\seoPriority_0_type_facetten_2026-09-01.xlsx`
+      met een tabblad Toelichting. Route: 933 facetten uit `/api/Facets?searchTerm=type` → 967
+      directe koppelingen via `/api/CategoryFacets?facetId=` → 887 × `/api/CategoryFacetSettings?
+      categoryId=` → lokaal joinen. Verrijkt met productaantal per categorie en het aantal
+      facetwaarden dát producten heeft.
+- [x] **Geprioriteerd in plaats van alleen de vlag getoond**: 95 kandidaten, 49 zonder enige
+      facetwaarde met producten, 8 met `noIndexNoFollow: true` op het masterfacet, 2 met
+      `isEnabled: false`. Zonder die kolom stuur je iemand op 59 combo's af die niets opleveren.
+- [x] Doorgerekend met Excel via COM (`soffice` bestaat niet in deze WSL, `recalc.py` uit de
+      xlsx-skill faalt daarop) — 0 formulefouten.
+
+Open:
+
+- [ ] **De 95 kandidaten aanzetten** — bewust niet gedaan, Joep beslist of dat in bulk moet. Het is
+      dezelfde read-merge-PUT als bij Bouwfolie; `backend/seo_prio_service.py` heeft die write-back
+      al.
+- [ ] **Overwegen: "facetnaam bevat X"-ingang in de SEO Priority-tool.** Die tool begint nu bij
+      Redshift-verkeer op /c/-URL's; deze vraag begon bij de facetnaam en is daarom als los script
+      gedaan. Bij herhaling hoort het in de tool.
+- [ ] **De 4 lege facetwaarden onder `t_bv`** (Dampdoorlatende folie, Isolatiefolie, Radiatorfolie,
+      Spinvliesfolie) hebben seoPriority aan maar 0 producten — taxonomie-/feedvraag, niet iets wat
+      met een vlag op te lossen is.
+
 ### 2026-09-01 (1) — Canonicals-push blokkeerde 67 van 68 schone rijen
 
 Joeps melding: 68 canonicals, push geeft 67 skipped/blocked en 1 ready, ook met

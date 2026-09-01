@@ -1,6 +1,85 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Drie plekken noemen zich seoPriority en maar één geeft het effectieve antwoord (2026-09-01, taxv2 / "type"-facetten)
+
+Joep vroeg twee dingen: zet `t_bv` op Bouwfolie aan, en exporteer alle "type"-facetten die
+seoPriority 0 hebben. Het tweede kostte de tijd, omdat "wat staat er nu" per bron een ander
+antwoord geeft.
+
+### Wat elke bron teruggeeft
+
+| bron | seoPriority | payload | bruikbaar voor |
+|---|---|---|---|
+| `GET /api/CategoryFacets?categoryId=` | **altijd `null`** | ~1 KB/facet | welke facetten zijn dírect gekoppeld |
+| `GET /api/CategoryFacetSettings?categoryId=` | de **rauwe rij** (null = niet gezet) | ~7 KB/categorie | wat je moet mergen vóór een PUT |
+| `GET /api/Categories/{id}` | de **effectieve/geresolveerde waarde**, mét `inheritanceStatus` | **243 KB** | wat er feitelijk geldt |
+
+Dat de categorie-GET het geresolveerde antwoord geeft, stond nergens. Op Bouwfolie (9004802):
+facetten 5972 en 6050 hebben een settings-rij met `seoPriority: null`, maar de categorie-GET
+zegt `True` met `inheritanceStatus: Dependent`. Wie alleen de settings-rijen leest, ziet 297
+facetten met veel te veel nullen. Wie alleen de categorie-GET leest, weet niet welke rij hij
+moet PUT'en. Je hebt ze allebei nodig, voor verschillende vragen.
+
+De 243 KB zit in het `facets`-array (297 facetten mét alle labels per locale). Dat maakt een
+volledige tree-walk over ~3,5k categorieën onbetaalbaar — zie hieronder.
+
+### Er is geen dump-call, dus draai de richting om
+
+`GET /api/CategoryFacetSettings?facetId=6710` → **HTTP 400** `categoryId is required and must be
+positive.` De live swagger bevestigt het: het enige queryparameter is `categoryId`. Categorie-first
+betekent dus elke categorie langs, en `GET /api/Categories` geeft alleen de 32 roots terug —
+`GET /api/Categories/{id}` levert maar **één niveau** `subCategories`, dus een walk is 1 call per
+categorie à 243 KB.
+
+Facet-first is twee ordes goedkoper: `GET /api/CategoryFacets?facetId=X` is **~850 bytes** en geeft
+direct de `categoryId`'s. Route die werkte:
+
+    /api/Facets?searchTerm=type          ->   933 facetten
+    /api/CategoryFacets?facetId=X (933x) ->   967 combo's over 887 categorieën
+    /api/CategoryFacetSettings?categoryId=Y (887x) -> 17.969 settings-rijen, join lokaal
+
+Totaal ~1.800 calls in een paar minuten op 16 threads, i.p.v. een walk van 3,5k × 243 KB.
+`includeInheritance=true` verandert bij een `facetId`-filter niets: je krijgt hoe dan ook alleen
+de directe koppelingen.
+
+### "seoPriority 0" bestaat niet — het is null
+
+Over alle 967 combo's: **813 × `true`, 151 × `null`, 3 × helemaal geen settings-rij, 0 × `false`.**
+Expliciet `false` komt in deze hele set niet voor. Als Joep "seoPriority 0" zegt, bedoelt hij dus
+"niet aan", en dat is in de data `null` of een ontbrekende rij. Een filter op `== False` had een
+leeg bestand opgeleverd.
+
+Van de 154 niet-aan-combo's is maar de helft zinvol aan te zetten: 95 kandidaten, 49 waarvan het
+facet aan geen enkel product in die categorie hangt (Search API geeft er 0 waarden voor terug),
+8 met `noIndexNoFollow: true` op het masterfacet en 2 met `isEnabled: false`. Een export die
+alleen de vlag toont, zet iemand aan het werk aan 59 combo's die niets opleveren.
+
+### Search API: twee dingen die niet in de skill-README staan
+
+- **`mainCategory` is niet verplicht.** `?category=9004802&countryLanguage=nl-nl&isBot=false`
+  geeft gewoon HTTP 200. Dat scheelt het opzoeken van de root per categorie.
+- **`total` kapt af op 10.000.** Elke categorie die groter is rapporteert exact `10000`, dus die
+  waarde is een ondergrens en geen aantal.
+- Bijvangst: `products[].categories[]` bevat `id`, `name` en `mainCategoryName` voor de hele
+  keten. Dat is een gratis id→naam-bron voor de categorieën die `backend/data/cat_urls.csv` mist
+  (hier 4 van de 887, want die csv bevat alleen deepest cats).
+
+### De zoekindex loopt achter op de taxonomie
+
+Direct na de PUT op Bouwfolie gaf `GET /api/Categories/9004802` netjes `seoPriority: True` voor
+6710, maar de Search API bleef `isSeoFacet: false` melden. De site leest die vlag uit de
+zoekindex, niet uit taxv2 (zie SEO_FACETLINKS_DEPENDENT_FACETS.md), dus de noscript-facetlinks
+verschijnen pas na de volgende sync. Bij een controle vlak na een wijziging is `isSeoFacet` dus
+geen bewijs dat er iets misging.
+
+### Overlap met wat er al is
+
+`backend/seo_prio_service.py` doet hetzelfde soort werk (per categorie×facet de huidige
+seoPriority uit taxv2 + een ON/OFF-voorstel + write-back naar `/api/CategoryFacetSettings`), maar
+begint bij Redshift-verkeer op /c/-URL's. Deze exercitie begon bij de facetnaam. Als dit vaker
+terugkomt, hoort een "facetnaam bevat X"-ingang in die tool thuis en niet in een los script.
+
 ## Een lookup die niets beslist, mag geen rij blokkeren (2026-09-01, Canonicals-push / Redirect-preflight)
 
 Joeps melding: 68 canonicals gegenereerd, push naar productie geeft **67 skipped/blocked, 1
