@@ -11,6 +11,15 @@ Overgezet uit de skill `get-top-10-data`, die vastzat aan één categorie
 
 ## Een categorie draaien
 
+Alles in één keer, met een stop vóór de eerste betaalde stap:
+
+```bash
+venv/bin/python top10/scripts/run_all.py "airfryers"              # tot de kostenraming
+venv/bin/python top10/scripts/run_all.py --topic airfryers --yes  # ook de betaalde stappen
+```
+
+Of stap voor stap — handig als er iets misgaat, want alles cachet per item:
+
 ```bash
 # 0. categorie opzoeken (toont kandidaten, maakt nog niets aan)
 venv/bin/python top10/scripts/resolve_category.py "airfryers"
@@ -54,6 +63,7 @@ twee Search-API-parameters in `topic.json`, en de zoektermen staan eronder.
 
 | Pad | Wat |
 |-----|-----|
+| `scripts/run_all.py` | de hele pijplijn, met kostenstop vóór de betaalde stappen |
 | `scripts/keyword_research.py` | zoekvolumes via Keyword Planner; kiest de termen |
 | `shared/topic.py` | topic-configuratie, paden, modelkeuze uit `.env` |
 | `shared/taxonomy.py` | categorieboom ophalen, cachen, doorzoeken |
@@ -118,6 +128,7 @@ corrigeer de tekst in `topic.json` als het in een kop terechtkomt.
 geraden tarief is erger dan geen tarief; vul het aan zodra je het echte tarief
 hebt.
 
-## Nog niet gedaan
+## Aanroepen als skill
 
-- **Eén commando voor de hele pijplijn** en de skill-beschrijving bijwerken.
+De skill `get-top-10-data` (in `~/.claude/skills/`) wijst naar deze map, dus
+"gebruik de top10 skill voor categorie X" komt hier uit.
