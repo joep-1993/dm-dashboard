@@ -4,6 +4,47 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-09-01 (1) — Canonicals-push blokkeerde 67 van 68 schone rijen
+
+Joeps melding: 68 canonicals, push geeft 67 skipped/blocked en 1 ready, ook met
+`replace_existing` aan. Les in LEARNINGS (zelfde datum, "Een lookup die niets beslist, mag geen
+rij blokkeren").
+
+Gedaan:
+
+- [x] **Gereproduceerd zonder Joep iets te laten overdoen** door run #11 uit `canonical_runs`
+      terug te spelen door `preflight_rows`. Resolver-only hercontrole: alle 68 schoon — geen
+      bestaande regel, geen homepage, geen multi-value facet. De 67 skips waren allemaal
+      `preflight error: Read timed out`.
+- [x] **Oorzaak gemeten**: `GET /api/redirects?urlContains=…` is een substringscan over ~820k
+      rijen en is duur juist als de term *niets* matcht (2,4–15 s, vaak 503/504). Preflight stelt
+      die no-match-vraag 2× per rij, 24 parallel → API onderuit → `raise_on_error=True` maakte er
+      niet-submittable rijen van. Swagger heeft geen exacte `toUrl`-parameter, dus de scan is niet
+      te vermijden.
+- [x] **Beslissend vs. informatief gescheiden** (`_incoming_or_degraded`): de twee
+      `urlContains`-lookups degraderen nu i.p.v. de rij te blokkeren; de resolvercalls die wél
+      over submittability beslissen blijven hard falen (run-#21-bescherming intact).
+- [x] **Eigen budget voor de list-endpoint**: `LIST_TIMEOUT=15`, `LIST_RETRIES=1`,
+      `_LIST_SEMAPHORE` met `LIST_CONCURRENCY=6` (was: 24 parallel op `LOOKUP_TIMEOUT=12` met 3
+      retries). `_get_with_retry()` accepteert nu `timeout`/`retries`.
+- [x] **Redenen zichtbaar gemaakt**: `stats.skip_reasons` + `stats.incoming_degraded` in de
+      preflight, effectieve uitsplitsing (ná replace-toggle) opgeslagen bij de run.
+- [x] **Canonicals-modal gerepareerd**: `renderPushSummary()` rekent uit de per-rij `processed`
+      i.p.v. `stats.submittable`, dus teller én knoplabel volgen nu het `replace_existing`-vinkje
+      (dat bewoog eerder nooit mee en leek daardoor stuk). Plus "Skipped because:"-uitsplitsing.
+- [x] **Geverifieerd op exact dezelfde 68 rijen**, live via `/api/redirect-tool/preview`:
+      68 submittable, 0 skipped, 4 chain-flattened, 0 degraded, 112 s. Backend op :8003 herstart.
+
+Open:
+
+- [ ] **De 68 canonicals zelf pushen** — bewust aan Joep gelaten, ik heb niets naar productie
+      geschreven.
+- [ ] **Gat tussen ~500 en 2.000 rijen**: `PREFETCH_THRESHOLD=2000`, dus een batch van 1.000 doet
+      2.000 tabelscans en loopt tegen de 5-minutencap van `_pollTask`. De bulk-prefetch is ~164
+      pagina-calls ongeacht batchgrootte en dus mogelijk juist sneller; kost wel ~200 MB en heeft
+      de run-#21-geschiedenis (partiële index). Niet aangeraakt, meten voordat je de drempel
+      verlaagt.
+
 ### 2026-08-31 (5) — SA360-biedstrategieën: kan dit geautomatiseerd? (onderzoek, geen code)
 
 Joeps vraag. Uitwerking in LEARNINGS (zelfde datum, "SA360-biedstrategieën zijn niet via een

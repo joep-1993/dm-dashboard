@@ -1,6 +1,124 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een lookup die niets beslist, mag geen rij blokkeren (2026-09-01, Canonicals-push / Redirect-preflight)
+
+Joeps melding: 68 canonicals gegenereerd, push naar productie geeft **67 skipped/blocked, 1
+ready to push** — ook met "Overwrite existing redirects (replace_existing)" aangevinkt.
+
+Uitkomst: **geen enkele van de 68 was echt geblokkeerd.** Alle 68 waren schoon. De 67 skips
+waren allemaal `preflight error: Read timed out` op een lookup die niet eens meebeslist of een
+rij mag worden weggeschreven.
+
+### De twee read-endpoints van de Redirect-API hebben omgekeerde kostencurves
+
+| call | wat het doet | gemeten |
+|---|---|---|
+| `GET /api/redirect?searchterm=…` | resolver, geïndexeerde key-lookup | ~0,1 s |
+| `GET /api/redirects?urlContains=…` | substring-match over from/to URL, ~820k rijen | **2,4–15 s, vaak 503/504** |
+
+Het contra-intuïtieve zit in de tweede: de kosten hangen niet aan de lengte van de term maar
+aan het **aantal matches**. Een term die matcht vult de `limit=50`-pagina vroeg en komt snel
+terug; een term die *niets* matcht moet de hele tabel af. Gemeten op dezelfde categorie:
+
+    urlContains=huishoudelijke_apparatuur_19968037_23583843/c/   0,43 s   50 rijen
+    urlContains=<hele /c/-URL met facetten>                      2,35 s    0 rijen
+    urlContains=kleur~20090077~~merk~23798038                    7,76 s    0 rijen
+    urlContains=<hele /c/-URL, andere rij>                       15,07 s   HTTP 504
+
+De swagger (`https://redirect.api.beslist.nl/swagger.json`) heeft **geen** exacte
+`toUrl`-parameter — `urlContains` is de enige manier om "wat wijst hiernaartoe" te vragen. Die
+scan is dus niet weg te optimaliseren, alleen te beperken.
+
+### Waarom dit precies bij een verse batch ontploft
+
+`preflight_rows` stelt per rij twee keer de no-match-vraag: is `old` al een toUrl (informatief:
+"deze regels gaan straks chainen") en is `final_new` al een toUrl (voor de country-upgrade). Bij
+een batch **nieuwe** redirects is het antwoord per definitie altijd nee — dus 2 × 68 = 136
+volledige tabelscans, en de worker pool vuurde er **24 tegelijk** af. De API gaat daarop
+onderuit; `LOOKUP_TIMEOUT` stond op 12 s met 3 retries, en elke gefaalde call kwam via
+`raise_on_error=True` naar boven als `preflight error: …` → rij niet-submittable.
+
+### De faalmodus was ontstaan uit een goede fix
+
+`raise_on_error=True` is er niet voor niets: het is de fix voor run #21, waar een stille
+lookupfout als "geen bestaande regel" werd gelezen en 8.789 rijen alsnog op een POST-fout
+klapten. Die reflex is juist — maar hij is op **moduleniveau** toegepast in plaats van per call.
+Van de drie lookups per rij beslist alleen de resolver (`check_url_is_fromUrl`) over
+submittability. De twee `urlContains`-calls leveren weergave-info en een country-veld. Die
+mochten nooit fataal zijn.
+
+**Generieke les: classificeer elke externe lookup expliciet als *beslissend* of *informatief*,
+en laat alleen de beslissende falen. Een informatieve lookup die een rij kan blokkeren is een
+beschikbaarheidsprobleem dat zich voordoet als een datavalidatie.**
+
+### Waarom `replace_existing` niet kon helpen, en waarom het vinkje stuk leek
+
+Twee losse dingen die samen de verwarring maakten:
+
+1. `replace_existing` werkt uitsluitend op de skip-reason `source has existing rule`
+   (`SKIP_REASON_EXISTING`). Deze 67 rijen hadden `preflight error`, dus de vlag was per
+   definitie niet van toepassing.
+2. Het getal in het push-modal kwam uit `stats.submittable`, en dat wordt berekend **voordat**
+   de gebruiker het vinkje ziet. Aanvinken veranderde dus nooit iets aan de teller of het
+   knoplabel — ook niet in de gevallen waar de vlag wél zou werken. De Redirect-tool zelf doet
+   dit al goed (`replaceExistingOn()` + effectieve skip per rij); het Canonicals-modal was een
+   uitgeklede kopie die dat stuk miste.
+
+### Wat de diagnose mogelijk maakte
+
+`canonical_runs` in de shared Postgres bewaart per run de rules **en** de `{original,
+canonical}`-paren. Daarmee is een klacht van een gebruiker exact te replayen zonder hem iets te
+laten overdoen: run ophalen via `/api/canonical/runs/{id}` en de paren door `preflight_rows`
+halen. Dat is de ingang bij elke "de tool blokkeert mijn rijen"-melding.
+
+Wat de diagnose *bemoeilijkte*: het modal toonde alleen `X ready / Y total skipped / blocked`.
+Een teller zonder reden is niet te debuggen — de reden zat wél per rij in `processed[].skip_reason`,
+alleen niet in de UI.
+
+### De fix
+
+`backend/redirect_tool_service.py`
+
+- `_incoming_or_degraded()`: de twee `urlContains`-lookups degraderen nu (rij blijft
+  submittable, `incoming_check_failed` op de rij, `incoming_degraded` in de stats) i.p.v. de rij
+  weg te gooien. De strikte `_cached_fromurl`-calls blijven hard falen — géén run-#21 regressie.
+- Eigen budget voor de list-endpoint, want hij hoort niet in dezelfde categorie als de resolver:
+  `LIST_TIMEOUT = 15`, `LIST_RETRIES = 1` (een tabelscan opnieuw proberen voegt alleen load toe),
+  en `_LIST_SEMAPHORE` met `LIST_CONCURRENCY = 6`. `_get_with_retry()` kreeg daarvoor
+  `timeout`/`retries` als parameters.
+- Stats bevatten nu `skip_reasons` (uitsplitsing per reden, transient gegroepeerd onder
+  `preflight error`) en `incoming_degraded`; `start_submit` slaat de *effectieve* uitsplitsing
+  (ná de replace-toggle) op bij de run.
+
+`frontend/canonical.html`
+
+- `renderPushSummary()` rekent de samenvatting uit de per-rij `processed` i.p.v. uit
+  `stats.submittable`, en hangt aan de `onchange` van het vinkje. `canonEffectiveSkip()` spiegelt
+  `_will_submit()` in de backend — de string `'source has existing rule'` moet daar letterlijk
+  gelijk blijven.
+- Het modal toont nu "Skipped because:" met aantallen per reden, en een aparte waarschuwing als
+  er gedegradeerde rijen zijn ("die worden alsnog gepusht, alleen de info ontbreekt").
+
+### Verificatie, op exact dezelfde 68 rijen
+
+Vóór (live, oude code): 1 submittable, 67 × `preflight error: Read timed out`.
+Ná (live via `/api/redirect-tool/preview`):
+
+    68 total · 68 submittable · 0 skipped · 4 chain-flattened · 0 degraded   (112 s)
+
+Alleen het verlagen van de concurrency van 24 → 6 was al genoeg om de API überhaupt te laten
+antwoorden: nul degradaties. De degradatiepad is het vangnet, niet de oplossing.
+
+### Wat blijft staan
+
+112 s voor 68 rijen is normaal voor deze endpoint (136 tabelscans à 6 tegelijk) en past ruim
+binnen de 5-minutencap van `_pollTask`. Maar tussen ~500 en 2.000 rijen blijft deze preflight
+traag: `PREFETCH_THRESHOLD = 2000` schopt de bulk-prefetch pas daarboven in, dus een batch van
+1.000 doet 2.000 scans. Bewust niet aangeraakt — de prefetch kost ~200 MB en heeft zijn eigen
+geschiedenis (run #21, partiële index). Als dat gat ooit pijn doet: de prefetch is ~164
+pagina-calls ongeacht batchgrootte en dus mogelijk juist *sneller* dan honderden scans.
+
 ## SA360-biedstrategieën zijn niet via een API te schrijven — en de foutmelding wees de verkeerde kant op (2026-08-31)
 
 Joeps vraag: kunnen we in SA360 biedstrategieën geautomatiseerd aanpassen of koppelen, en is

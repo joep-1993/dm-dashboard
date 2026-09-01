@@ -51,6 +51,14 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── ai_titles_service.py  # AI-powered title generation
 │   ├── canonical_service.py  # Canonical URL transformation
 │   ├── redirect_301_service.py # 301 redirect management
+│   ├── redirect_tool_service.py # Redirect-tool: preflight + submit tegen redirect.api.beslist.nl
+│   │   # TWEE READ-ENDPOINTS MET OMGEKEERDE KOSTEN: /api/redirect (resolver, ~0,1 s, BESLIST over
+│   │   # submittability -> mag hard falen, run-#21-bescherming) vs /api/redirects?urlContains
+│   │   # (substringscan over ~820k rijen, duur juist als de term NIETS matcht: 2,4-15 s + 503/504).
+│   │   # Die tweede is informatief (chain-info + country-upgrade) en degradeert daarom via
+│   │   # _incoming_or_degraded i.p.v. de rij te skippen; eigen budget LIST_TIMEOUT/LIST_RETRIES +
+│   │   # _LIST_SEMAPHORE(6) want 24 parallelle scans leggen de API om. Zie LEARNINGS 2026-09-01.
+│   │   # PREFETCH_THRESHOLD=2000 -> batches van ~500-2000 rijen doen honderden scans en zijn traag.
 │   ├── rfinder_service.py    # /r/ URL discovery from Redshift
 │   ├── seo_content_generator.py # SEO content from Product Search API
 │   ├── keyword_planner_service.py # Keyword Planner: Google Ads search volume lookup
