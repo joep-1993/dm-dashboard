@@ -706,6 +706,65 @@
             throw new Error('Timed out waiting for the task to finish');
         }
 
+        // The skip reason a row will ACTUALLY be dropped for, given the state of
+        // the replace-existing toggle. Mirrors _will_submit() in
+        // redirect_tool_service.start_submit: with the toggle on, a row whose
+        // source already has a rule is DELETE+POSTed rather than skipped. The
+        // string must match SKIP_REASON_EXISTING in that module verbatim.
+        function canonEffectiveSkip(row, replace) {
+            if (!row.skip_reason) return null;
+            if (replace && row.existing_target
+                && row.skip_reason === 'source has existing rule') return null;
+            return row.skip_reason;
+        }
+
+        // Recompute the summary from the per-row preflight instead of trusting
+        // stats.submittable: that number is computed BEFORE the user sees the
+        // replace-existing checkbox, so it never moved when they ticked it —
+        // the box looked broken even though the submitter honoured it.
+        function renderPushSummary() {
+            if (!_canonPreflight) return;
+            const rows = _canonPreflight.processed || [];
+            const st = _canonPreflight.stats || {};
+            const replace = document.getElementById('pushReplace')?.checked || false;
+            const reasons = {};
+            let submittable = 0;
+            rows.forEach(r => {
+                const reason = canonEffectiveSkip(r, replace);
+                if (!reason) { submittable++; return; }
+                // Each transient failure carries its own exception text; tally
+                // them as one line or the list is as long as the batch.
+                const key = reason.startsWith('preflight error') ? 'preflight error (redirect API unreachable)' : reason;
+                reasons[key] = (reasons[key] || 0) + 1;
+            });
+            const skipped = rows.length - submittable;
+            const reasonLines = Object.entries(reasons)
+                .sort((a, b) => b[1] - a[1])
+                .map(([k, v]) => `<li>${v} &mdash; ${escapeHtml(k)}</li>`)
+                .join('');
+            const summary = document.getElementById('pushSummary');
+            if (summary) summary.innerHTML = `
+                <ul class="mb-2">
+                    <li><strong>${submittable}</strong> ready to submit</li>
+                    <li>${st.flattened || 0} chain-flattened</li>
+                    <li>${skipped} skipped / blocked</li>
+                </ul>
+                ${reasonLines ? `<p class="small mb-1">Skipped because:</p><ul class="small mb-0">${reasonLines}</ul>` : ''}`;
+            const warn = document.getElementById('pushSummaryWarn');
+            if (warn) {
+                const degraded = st.incoming_degraded || 0;
+                warn.innerHTML = [
+                    submittable ? '' : '<div class="alert alert-warning mt-2 mb-0">Nothing submittable in this selection.</div>',
+                    degraded ? `<div class="alert alert-warning mt-2 mb-0">${degraded} row(s): the redirect API's incoming-rules lookup timed out. Those rows are still submitted &mdash; only the "what already points here" info is missing.</div>` : '',
+                ].join('');
+            }
+            const btn = document.getElementById('pushConfirmBtn');
+            if (btn) {
+                btn.disabled = submittable === 0;
+                btn.textContent = `Push ${submittable} to production`;
+            }
+        }
+
         async function pushSelectedToRedirect() {
             _canonPreflight = null;  // drop any prior preflight so a failed
                                      // re-preflight can't submit stale data
@@ -736,24 +795,19 @@
                 const task = await _pollTask(`${REDIRECT_API}/preview-status/${task_id}`, 'pushProg', rows.length);
                 if (task.status === 'failed') throw new Error(task.error || 'Preflight failed');
                 _canonPreflight = task.result;
-                const st = _canonPreflight.stats || {};
-                const skipped = (st.total || 0) - (st.submittable || 0);
                 body.innerHTML = `
                     <p class="mb-2">Preflight complete:</p>
-                    <ul class="mb-3">
-                        <li><strong>${st.submittable || 0}</strong> ready to submit</li>
-                        <li>${st.flattened || 0} chain-flattened</li>
-                        <li>${st.skipped_home || 0} skipped (homepage)</li>
-                        <li>${skipped} total skipped / blocked</li>
-                    </ul>
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="pushReplace">
+                    <div id="pushSummary"></div>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" id="pushReplace"
+                               onchange="renderPushSummary()">
                         <label class="form-check-label" for="pushReplace">Overwrite existing redirects (replace_existing)</label>
                     </div>
-                    ${st.submittable ? '' : '<div class="alert alert-warning mt-2 mb-0">Nothing submittable in this selection.</div>'}`;
+                    <div id="pushSummaryWarn"></div>`;
                 footer.innerHTML = `
                     <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button id="pushConfirmBtn" class="btn btn-danger" ${st.submittable ? '' : 'disabled'} onclick="confirmPushToRedirect('${label}')">Push ${st.submittable || 0} to production</button>`;
+                    <button id="pushConfirmBtn" class="btn btn-danger" onclick="confirmPushToRedirect('${label}')"></button>`;
+                renderPushSummary();
             } catch (e) {
                 body.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(e.message)}</div>`;
                 footer.innerHTML = `<button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>`;

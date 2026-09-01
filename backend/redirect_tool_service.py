@@ -62,6 +62,27 @@ LOOKUP_RETRY_STATUS = {502, 503, 504}
 LOOKUP_BACKOFF_BASE = 0.5  # seconds; exponential between attempts: 0.5, 1, 2, ...
 LIST_PAGE_SIZE = 50
 
+# The list endpoint (/api/redirects?urlContains=…) is a different animal from
+# the resolver. The resolver is an indexed key lookup (~100ms); urlContains is
+# a substring scan, and its cost is inverted — a term that MATCHES fills the
+# page early and returns fast, while a term that matches NOTHING scans the whole
+# ~820k-row table: measured 2.4-15s, frequently bouncing 503/504. Preflight asks
+# exactly the no-match question twice per row (is `old` a toUrl? is `final_new`?)
+# and for a batch of brand-new redirects the answer is "no" every time. Running
+# 24 of those scans in parallel takes the API down.
+#
+# That is what blocked the 2026-09-01 canonicals push: all 68 rows were clean,
+# but 67 came back "preflight error: Read timed out" purely because these two
+# non-decisive lookups timed out. So: a per-attempt budget that fits a real scan
+# (15s covers the slow end without pinning a worker for a minute), at most one
+# retry (retrying a table scan only adds load to an already-slow API), and a
+# hard cap on how many scans run at once. See also `_incoming_or_degraded`,
+# which keeps a failure here from disqualifying the row.
+LIST_TIMEOUT = 15
+LIST_RETRIES = 1
+LIST_CONCURRENCY = 6
+_LIST_SEMAPHORE = threading.BoundedSemaphore(LIST_CONCURRENCY)
+
 # When a preflight batch exceeds this row count, switch from per-row HTTP
 # lookups to a one-shot prefetch of the entire redirect table. The full
 # table is ~820k rows / ~150MB JSON / ~200MB RAM as a Python dict — heavy,
@@ -334,18 +355,24 @@ def _has_multivalue_facet(url: str) -> bool:
 # Redirect API client
 # ---------------------------------------------------------------------------
 
-def _get_with_retry(url: str, params: dict) -> requests.Response:
+def _get_with_retry(url: str, params: dict, timeout: int = LOOKUP_TIMEOUT,
+                    retries: int = LOOKUP_RETRIES) -> requests.Response:
     """GET a read-only lookup with a tight timeout, retrying TRANSIENT upstream
     failures — read timeout, connection error, or a 502/503/504 overload — with
     exponential backoff. A 4xx (or any other HTTPError) is meaningful and
     propagates immediately; only a slow-or-overloaded-but-alive upstream is
     worth another attempt. This keeps a flaky/loaded redirect API from turning
     transient blips into skipped rows (the run #30/#31 class of 'preflight
-    error: 503 / Read timed out')."""
+    error: 503 / Read timed out').
+
+    `timeout`/`retries` are overridable because the two read endpoints have
+    opposite cost profiles: the resolver is an indexed lookup (tight budget,
+    retry freely), the urlContains list is a table scan (needs a longer budget,
+    and retrying it only piles more load on an already-slow API)."""
     last_exc: Exception | None = None
-    for attempt in range(LOOKUP_RETRIES + 1):
+    for attempt in range(retries + 1):
         try:
-            r = _HTTP.get(url, params=params, timeout=LOOKUP_TIMEOUT)
+            r = _HTTP.get(url, params=params, timeout=timeout)
             r.raise_for_status()
             return r
         except requests.exceptions.HTTPError as exc:
@@ -355,10 +382,10 @@ def _get_with_retry(url: str, params: dict) -> requests.Response:
             last_exc = exc
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
             last_exc = exc
-        if attempt < LOOKUP_RETRIES:
+        if attempt < retries:
             time.sleep(LOOKUP_BACKOFF_BASE * (2 ** attempt))
             logger.debug("lookup transient failure (attempt %s/%s), retrying %s: %s",
-                         attempt + 1, LOOKUP_RETRIES + 1, url, last_exc)
+                         attempt + 1, retries + 1, url, last_exc)
     raise last_exc  # type: ignore[misc]
 
 
@@ -425,14 +452,20 @@ def check_url_incoming(path: str, max_pages: int = 2,
     matches: list[dict] = []
     for page in range(max_pages):
         try:
-            r = _get_with_retry(
-                f"{REDIRECT_API}/api/redirects",
-                params={
-                    "limit": LIST_PAGE_SIZE,
-                    "offset": page * LIST_PAGE_SIZE,
-                    "urlContains": search,
-                },
-            )
+            # Semaphore, not the worker pool, governs how many table scans are
+            # in flight — 24 concurrent no-match scans is what makes the API
+            # start returning 503/504 in the first place.
+            with _LIST_SEMAPHORE:
+                r = _get_with_retry(
+                    f"{REDIRECT_API}/api/redirects",
+                    params={
+                        "limit": LIST_PAGE_SIZE,
+                        "offset": page * LIST_PAGE_SIZE,
+                        "urlContains": search,
+                    },
+                    timeout=LIST_TIMEOUT,
+                    retries=LIST_RETRIES,
+                )
             data = r.json().get("data", [])
         except Exception as exc:
             logger.warning("incoming list call failed: %s", exc)
@@ -583,6 +616,30 @@ def preflight_rows(
             _incoming_cache.setdefault(key, result)
             return _incoming_cache[key]
 
+    def _incoming_or_degraded(url: str, item: dict, stats: dict) -> list[dict]:
+        """`_cached_incoming` that DEGRADES instead of raising.
+
+        Neither incoming lookup decides whether a row may be submitted: the
+        `old`-side answer is display-only ("these rules will now chain"), and
+        the `final_new`-side answer only auto-upgrades the row's country to
+        dodge a country-scoped duplicate-key bounce. But both go through the
+        urlContains table scan, which is the slowest and flakiest call in the
+        preflight — so letting them raise threw away rows that were perfectly
+        clean (2026-09-01: 67 of 68 canonicals, every one submittable).
+        Record the degradation and let the row through; the worst case is a POST
+        that bounces at submit time, which is visible and non-destructive.
+
+        The strict `_cached_fromurl` calls above keep raising — those DO decide
+        submittability, and misreading one as "no existing rule" is the run-#21
+        silent-failure class we must not reintroduce."""
+        try:
+            return _cached_incoming(url)
+        except Exception as exc:
+            logger.warning("incoming lookup degraded for %s: %s", url, exc)
+            item["incoming_check_failed"] = str(exc)[:200]
+            stats["incoming_degraded"] = 1
+            return []
+
     # Per-row pipeline: pure local normalization, then up to 3 API calls
     # (fromUrl-check on old, fromUrl-check on new, incoming-list on old).
     # Returns the processed `item` plus a small stats dict so the caller
@@ -609,7 +666,7 @@ def preflight_rows(
             "skip_reason": None,
             "flatten_from": None,
         }
-        stats = {"flattened": 0, "skipped_home": 0}
+        stats = {"flattened": 0, "skipped_home": 0, "incoming_degraded": 0}
 
         if not old or not new:
             item["skip_reason"] = "missing URL"
@@ -699,7 +756,7 @@ def preflight_rows(
             item["skip_reason"] = "self-redirect"
             return item, stats
 
-        incoming = _cached_incoming(old)
+        incoming = _incoming_or_degraded(old, item, stats)
         if incoming:
             item["incoming_rules"] = [
                 {
@@ -723,7 +780,7 @@ def preflight_rows(
         # in the table, auto-upgrade the row's country to match — the
         # user-facing semantics ("redirect X to Y") are preserved, only
         # the API-quirk country field changes.
-        incoming_to_new = _cached_incoming(item["final_new"])
+        incoming_to_new = _incoming_or_degraded(item["final_new"], item, stats)
         if incoming_to_new:
             # Pick the upgrade country DETERMINISTICALLY: prefer a combined
             # 'nl, be' rule (the API's canonical form), then lowest id. Reading
@@ -752,6 +809,7 @@ def preflight_rows(
     processed: list[dict | None] = [None] * len(rows)
     flattened = 0
     skipped_home = 0
+    incoming_degraded = 0
     completed = 0
     counter_lock = threading.Lock()
 
@@ -784,11 +842,12 @@ def preflight_rows(
                     "skip_reason": f"preflight error: {exc}",
                     "flatten_from": None,
                 }
-                stats = {"flattened": 0, "skipped_home": 0}
+                stats = {"flattened": 0, "skipped_home": 0, "incoming_degraded": 0}
             with counter_lock:
                 processed[idx] = item
                 flattened += stats["flattened"]
                 skipped_home += stats["skipped_home"]
+                incoming_degraded += stats.get("incoming_degraded", 0)
                 completed += 1
             _bump_task()
 
@@ -832,6 +891,18 @@ def preflight_rows(
             p["skip_reason"] = "target = batch source"
             p["chains_into_index"] = submittable_froms[k]
 
+    # Reason breakdown, so the UI can say WHY rows were dropped instead of only
+    # how many. Transient failures are grouped under one key — the per-row
+    # `skip_reason` keeps the exception text, but as a tally each distinct
+    # timeout message would otherwise be its own line.
+    skip_reasons: dict[str, int] = {}
+    for p in processed:
+        reason = p.get("skip_reason")
+        if not reason:
+            continue
+        key = "preflight error" if reason.startswith("preflight error") else reason
+        skip_reasons[key] = skip_reasons.get(key, 0) + 1
+
     return {
         "processed": processed,
         "stats": {
@@ -839,6 +910,8 @@ def preflight_rows(
             "flattened": flattened,
             "skipped_home": skipped_home,
             "submittable": sum(1 for p in processed if not p["skip_reason"]),
+            "skip_reasons": skip_reasons,
+            "incoming_degraded": incoming_degraded,
         },
     }
 
@@ -1463,6 +1536,15 @@ def start_submit(processed: list[dict], label: str, input_method: str,
             and p.get("existing_target")
             and p.get("skip_reason") == SKIP_REASON_EXISTING
         )
+    # Effective skip breakdown (i.e. after the replace-existing toggle), stored
+    # with the run so the history shows why rows never reached the API.
+    effective_skips: dict[str, int] = {}
+    for p in processed:
+        if _will_submit(p):
+            continue
+        reason = p.get("skip_reason") or "unknown"
+        key = "preflight error" if reason.startswith("preflight error") else reason
+        effective_skips[key] = effective_skips.get(key, 0) + 1
     preflight = {
         "stats": {
             "total": total,
@@ -1472,6 +1554,7 @@ def start_submit(processed: list[dict], label: str, input_method: str,
                 if p.get("skip_reason") == "homepage (blocked)"
             ),
             "submittable": sum(1 for p in processed if _will_submit(p)),
+            "skip_reasons": effective_skips,
         }
     }
 
