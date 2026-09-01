@@ -8,6 +8,37 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### Bing-crawlbudget: vier ingrepen buiten de tool om (logged 2026-09-01)
+
+Uit de Bing-audit (LEARNINGS 2026-09-01). Bing crawlt 0,69% van onze URL-set per maand tegen 24% voor
+Googlebot, en Bing-organisch staat daardoor al 20 maanden stil op ~10.300 visits/mnd — bij een OPB die
+10% boven Google ligt. Deze vier raken niet de dashboard-code maar de site/CDN, dus ze staan hier en
+niet in TASKS.
+
+1. **Expliciete `User-agent: bingbot`-groep in robots.txt**, met dezelfde disallow-lijst als `*` en
+   **géén** crawl-delay (een crawl-delay in robots.txt overrúled Crawl Control in BWT). Doel: de 26%
+   van bingbots budget die naar `/data/graphql` gaat terugwinnen — 43.178 hits/14d tegen 35 voor
+   Googlebot, op een pad dat onder `*` al op `Disallow` staat. Kost vijf minuten. Blijft het na twee
+   weken staan in `pa.bothits_*`, dan is het render-time XHR en is een edge-regel voor geverifieerde
+   bingbot-IP's de volgende stap. Veilig omdat de HTML server-side gerenderd is (58× `itemprop="name"`
+   op een C-url) — Bing verliest dus niets als die calls wegvallen. Wél eerst testen.
+2. **Echte `lastmod` per URL in de sitemaps.** Nu dragen alle 50.000 URL's in een bestand hetzelfde
+   generatiemoment, en bestanden worden ook aangeraakt als er niets veranderde. Bij 1,26 mln URL's op
+   een crawlbudget van 400k hits/maand is dat het enige prioriteringssignaal dat we hebben, en het
+   staat op ruis. Grootste structurele hefboom van de vier, en helpt Google net zo goed. Dev-werk,
+   halve tot hele dag.
+3. **Opruimen**: `Crawl-Delay: 20` bij `msnbot`/`Slurp`/`Yahoo! Slurp` eruit (remt bingbot niet, wel
+   Yahoo), en de stale `/sitemapxml/nl/current/sitemap-index.xml` weg — die geeft 200, staat niet in
+   robots.txt, en al zijn children wijzen naar `http://sitemap.pbeslwsoktin.net`.
+4. **Brotli aanzetten** (nu alleen gzip). Bingbot krijgt C-urls in 526 ms en R-urls in 758 ms, tegen
+   344/533 ms voor Googlebot.
+
+Wat het waard is: van 0,64% naar 3% van ons Google-organische volume is ~48.500 visits en circa
+€53.000 per jaar extra bij gelijke OPB; op 5% ~€98.000. Onder Bing's marktaandeel in Nederland, en
+ruim onder zijn desktopaandeel — 82% van onze Bing-organische visits is desktop.
+
+Blokkerend voor het meten: geen toegang tot Bing Webmaster Tools (staat als open punt in TASKS).
+
 ### SEO titles: de description-template herhaalt de frase, en 84.881 gepushte blueprints renderen daardoor een halve zin (logged 2026-08-27)
 
 `build_blueprint()` zet de facetfrase twee keer in de description — `Zoek je <frase>? … Shop
