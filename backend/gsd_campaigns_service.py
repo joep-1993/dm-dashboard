@@ -9,6 +9,7 @@ import os
 import re
 import time
 import logging
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Any
 
@@ -526,25 +527,35 @@ def _get_redshift_connection():
 
 
 def mc_upsert_plan(rows: List[tuple], state: Optional[Dict[tuple, tuple]] = None) -> Dict[str, list]:
-    """Split incoming rows into {insert, update, unchanged} against the table's state.
+    """Split incoming rows into {insert, update, repair, unchanged} against the table's state.
 
     ``pa.mc_ids_efficy`` is a STATE table (Joep, 2026-08-05): one row per
     (shop_id, domain) holding that shop's current Merchant Center id.
-      * key absent            -> INSERT
-      * key present, new mc   -> UPDATE the mc id AND the date
-      * key present, same mc  -> NOTHING. Not re-inserted, and the date is left alone,
-                                 so the stored date stays the original creation date.
+      * key absent                        -> INSERT
+      * key present, new mc               -> UPDATE the mc id AND the date
+      * key present, same mc, ONE row     -> NOTHING. Not re-inserted, and the date is left
+                                             alone, so the stored date stays the original
+                                             creation date.
+      * key present, same mc, >1 row      -> REPAIR: rewrite the key to a single row, keeping
+                                             the stored (earliest) date. The value is already
+                                             right, the row COUNT is not.
 
-    That last rule is why the table had 63 surplus rows: the old code was a bare INSERT,
+    That third rule is why the table had 63 surplus rows: the old code was a bare INSERT,
     so every run where get-or-create reported "created" appended another row —
     Cameranu.nl was logged 7 times, 4 of them on one day. Measured against the
     authoritative creation-date log (pa.jvs_gsd_campaign_created), the EARLIEST logged
     date matched in 39 of 49 duplicated groups and the latest in **zero**, which is
     exactly what "insert once, never touch again" produces.
 
+    The fourth (``repair``) rule exists because "do nothing" is the wrong answer for a key
+    that ALREADY holds duplicates: it made the table's own write path unable to heal damage
+    it could see (2026-09-01, three keys duplicated by two overlapping runs — Farmaline.be
+    and Casebump.nl twice with the same mc id, so no UPDATE would ever be planned and the
+    surplus row was permanent until someone deleted it by hand).
+
     Pass ``state`` to plan without touching Redshift (used by the reconcile dry run).
     """
-    plan: Dict[str, list] = {"insert": [], "update": [], "unchanged": []}
+    plan: Dict[str, list] = {"insert": [], "update": [], "repair": [], "unchanged": []}
     if not rows:
         return plan
     if state is None:
@@ -558,11 +569,16 @@ def mc_upsert_plan(rows: List[tuple], state: Optional[Dict[tuple, tuple]] = None
         staged[(int(shop_id), str(domain).upper())] = (shop_name, int(shop_id), int(mc),
                                                        str(domain).upper(), date)
     for key, row in staged.items():
-        cur_mc = state.get(key, (None,))[0]
+        cur_mc, cur_date, _cur_name, n_rows = state.get(key) or (None, None, None, 0)
         if cur_mc is None:
             plan["insert"].append(row)
         elif int(cur_mc) == row[2]:
-            plan["unchanged"].append(row)
+            if (n_rows or 1) > 1:
+                # Same value, wrong row count. Keep the stored date so collapsing the
+                # duplicates does not restamp the shop's creation date with today's.
+                plan["repair"].append((row[0], row[1], row[2], row[3], cur_date or row[4]))
+            else:
+                plan["unchanged"].append(row)
         else:
             plan["update"].append(row)
     return plan
@@ -614,6 +630,68 @@ def current_mc_state(shop_ids: List[int]) -> Dict[tuple, tuple]:
     return out
 
 
+# Cross-process mutex for the pa.mc_ids_efficy read-then-write. Redshift has no unique
+# constraint and no row id, so the table's one-row-per-key invariant can only be held by
+# the writer — and a read-then-write is only safe if no second writer slips in between.
+# Arbitrary constant ("mcid" in hex), only has to be unique among this DB's advisory locks.
+MC_IDS_LOCK_KEY = 0x6D636964
+MC_IDS_LOCK_TIMEOUT_MS = 900_000     # 15 min: longer than a slow push, short of hanging a run
+
+
+@contextmanager
+def _mc_ids_write_lock():
+    """Serialise pa.mc_ids_efficy writers across processes. Yields True when held.
+
+    Two GSD runs overlapped on 2026-09-01 and duplicated three keys. Each read the state on
+    its own connection, each saw the key as absent, each inserted. The window was wide open
+    because the write itself was slow — one transaction that day spanned 22 minutes
+    (09:27:04 -> 09:49:18) doing a DELETE + INSERT per key, and a concurrent reader can only
+    ever see COMMITTED rows, so for those 22 minutes the table looked empty for those keys.
+
+    The lock lives in the shared PostgreSQL DB (Redshift has no advisory locks). It is
+    transaction-scoped, so it is released by the commit/rollback below AND by the connection
+    dying — a crashed run cannot leave it held. Best-effort by design: if PostgreSQL is
+    unreachable the push still proceeds unlocked, because the delete-before-insert below is
+    what actually guarantees the invariant. The lock only stops two writers from both
+    doing that work and one of them wasting a Redshift transaction.
+    """
+    conn = None
+    locked = False
+    # Only the ACQUISITION is guarded. Wrapping the yield too would feed any exception
+    # raised by the caller's body into this except clause, and a second yield from a
+    # @contextmanager generator turns it into "generator didn't stop after throw()" —
+    # i.e. the real Redshift error would be replaced by a meaningless one.
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute("SET LOCAL lock_timeout = %s", (MC_IDS_LOCK_TIMEOUT_MS,))
+            cur.execute("SELECT pg_advisory_xact_lock(%s)", (MC_IDS_LOCK_KEY,))
+        locked = True
+    except Exception as ex:
+        logger.warning("pa.mc_ids_efficy write lock unavailable (%s) — writing unlocked; "
+                       "the delete-before-insert still holds the invariant", ex)
+        if conn is not None:
+            _release_pg(conn)
+            conn = None
+    try:
+        yield locked
+    finally:
+        if conn is not None:
+            _release_pg(conn)
+
+
+def _release_pg(conn) -> None:
+    """Roll back (releasing any xact-scoped advisory lock) and return to the pool."""
+    try:
+        conn.rollback()
+    except Exception:
+        pass
+    try:
+        return_db_connection(conn)
+    except Exception:
+        pass
+
+
 def push_mc_ids_to_redshift(rows: List[tuple]) -> Dict[str, Any]:
     """
     Keep pa.mc_ids_efficy in step with the Merchant Center ids GSD created.
@@ -622,66 +700,91 @@ def push_mc_ids_to_redshift(rows: List[tuple]) -> Dict[str, Any]:
     ``domain`` holds the country (NL/BE/DE) and ``date`` is YYYYMMDD.
 
     Upsert on (shop_id, domain) — see mc_upsert_plan for the rule and why. A same-mc-id
-    push is a no-op, so re-running a day cannot grow the table any more.
+    push against a single-row key is a no-op, so re-running a day cannot grow the table.
+
+    THE WRITE CANNOT CREATE A DUPLICATE. Every key it touches is DELETEd first and then
+    inserted exactly once, in one transaction — inserts included, not just updates. That
+    matters because "insert" is a belief about the table taken from an earlier read, and
+    that belief is exactly what was wrong on 2026-09-01: two overlapping runs each read
+    "key absent", each ran a bare INSERT, and three keys ended up with two rows
+    (Farmaline.be 643423 BE, Casebump.nl 652006 NL, Vergewallet.nl 666787 NL). Deleting the
+    key regardless of what the plan believed makes the write idempotent and self-healing
+    instead of trusting a read that may be stale, racing, or plain wrong.
+
+    It is also now TWO statements instead of two per key. The old per-key DELETE+INSERT loop
+    was what made the race window minutes wide (see _mc_ids_write_lock).
 
     Best-effort: exceptions are caught and returned in the result dict so a Redshift
     hiccup never fails the GSD run.
     """
-    result: Dict[str, Any] = {"inserted": 0, "updated": 0, "unchanged": 0, "error": None}
+    result: Dict[str, Any] = {"inserted": 0, "updated": 0, "repaired": 0, "unchanged": 0,
+                              "duplicates_remaining": 0, "locked": None, "error": None}
     if not rows:
         return result
+    write_rows: List[tuple] = []
     try:
-        conn = _get_redshift_connection()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS pa.mc_ids_efficy (
-                        shop_name TEXT,
-                        shop_id BIGINT,
-                        mc_created BIGINT,
-                        domain TEXT,
-                        date VARCHAR(255)
-                    );
-                    """
-                )
-                conn.commit()
-            plan = mc_upsert_plan(rows)
-            result["unchanged"] = len(plan["unchanged"])
-            with conn.cursor() as cur:
-                # An UPDATE is a delete-then-insert of that key, so a key that still
-                # carries legacy duplicates collapses to one row instead of leaving
-                # stale siblings behind next to the new value.
-                for shop_name, shop_id, mc, domain, date in plan["update"]:
+        with _mc_ids_write_lock() as locked:
+            result["locked"] = locked
+            conn = _get_redshift_connection()
+            try:
+                with conn.cursor() as cur:
                     cur.execute(
-                        "DELETE FROM pa.mc_ids_efficy WHERE shop_id = %s AND UPPER(domain) = %s",
-                        (shop_id, domain),
-                    )
-                    cur.execute(
-                        """INSERT INTO pa.mc_ids_efficy
-                               (shop_name, shop_id, mc_created, domain, date)
-                           VALUES (%s, %s, %s, %s, %s)""",
-                        (shop_name, shop_id, mc, domain, date),
-                    )
-                    result["updated"] += 1
-                if plan["insert"]:
-                    execute_values(
-                        cur,
                         """
-                        INSERT INTO pa.mc_ids_efficy
-                            (shop_name, shop_id, mc_created, domain, date)
-                        VALUES %s
-                        """,
-                        plan["insert"],
+                        CREATE TABLE IF NOT EXISTS pa.mc_ids_efficy (
+                            shop_name TEXT,
+                            shop_id BIGINT,
+                            mc_created BIGINT,
+                            domain TEXT,
+                            date VARCHAR(255)
+                        );
+                        """
                     )
+                    conn.commit()
+                plan = mc_upsert_plan(rows)
+                result["unchanged"] = len(plan["unchanged"])
+                write_rows = plan["insert"] + plan["update"] + plan["repair"]
+                if write_rows:
+                    # One key per row (mc_upsert_plan staged by key), so the delete list and
+                    # the insert list are the same set of keys — one row out, one row in.
+                    keys = tuple(f"{r[1]}|{r[3]}" for r in write_rows)
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "DELETE FROM pa.mc_ids_efficy "
+                            "WHERE (shop_id || '|' || UPPER(domain)) IN %s",
+                            (keys,),
+                        )
+                        execute_values(
+                            cur,
+                            """
+                            INSERT INTO pa.mc_ids_efficy
+                                (shop_name, shop_id, mc_created, domain, date)
+                            VALUES %s
+                            """,
+                            write_rows,
+                        )
+                        conn.commit()
                     result["inserted"] = len(plan["insert"])
-                conn.commit()
-            logger.info(
-                "pa.mc_ids_efficy: %d inserted, %d updated, %d unchanged (of %d pushed)",
-                result["inserted"], result["updated"], result["unchanged"], len(rows),
-            )
-        finally:
-            conn.close()
+                    result["updated"] = len(plan["update"])
+                    result["repaired"] = len(plan["repair"])
+            finally:
+                conn.close()
+            # Tripwire, inside the lock: re-read the keys we just wrote and assert the
+            # invariant. A silent duplicate is what cost two dedup rounds (2026-08-05,
+            # 2026-09-01); one SELECT makes the next regression loud instead of invisible.
+            if write_rows:
+                after = current_mc_state([r[1] for r in write_rows])
+                written = {(r[1], r[3]) for r in write_rows}
+                dupes = {k: v[3] for k, v in after.items() if k in written and (v[3] or 1) > 1}
+                result["duplicates_remaining"] = len(dupes)
+                if dupes:
+                    logger.error("pa.mc_ids_efficy INVARIANT BROKEN after write — keys still "
+                                 "holding >1 row: %s", dupes)
+        logger.info(
+            "pa.mc_ids_efficy: %d inserted, %d updated, %d repaired, %d unchanged "
+            "(of %d pushed, lock=%s)",
+            result["inserted"], result["updated"], result["repaired"], result["unchanged"],
+            len(rows), result["locked"],
+        )
     except Exception as ex:
         logger.error("Failed to push MC ids to pa.mc_ids_efficy: %s", ex)
         result["error"] = str(ex)
@@ -4610,7 +4713,8 @@ def reconcile_run_logs(days: int = 7, dry_run: bool = False) -> Dict[str, Any]:
     summary: Dict[str, Any] = {
         "days": days, "dry_run": dry_run, "shops_seen": 0,
         "created_dates": {"missing": 0, "inserted": 0},
-        "mc_ids": {"missing": 0, "inserted": 0, "updated": 0, "unchanged": 0},
+        "mc_ids": {"missing": 0, "duplicated": 0, "inserted": 0, "updated": 0,
+                   "repaired": 0, "unchanged": 0},
         "sheet": {"missing": 0, "logged": 0},
         "errors": [],
     }
@@ -4655,6 +4759,11 @@ def reconcile_run_logs(days: int = 7, dry_run: bool = False) -> Dict[str, Any]:
         state = current_mc_state([r[1] for r in rows])
         plan = mc_upsert_plan(rows, state)
         summary["mc_ids"]["missing"] = len(plan["insert"]) + len(plan["update"])
+        # Keys whose VALUE is already right but that hold more than one row. Counted apart
+        # from "missing" because nothing is absent — the write has to collapse them, and if
+        # reconcile did not trigger on this the table could never heal itself.
+        summary["mc_ids"]["duplicated"] = len(plan["repair"])
+        summary["mc_ids"]["to_repair"] = plan["repair"]
         summary["mc_ids"]["to_insert"] = plan["insert"]
         summary["mc_ids"]["to_update"] = [
             # what it would change FROM, so a dry run is reviewable rather than trusted
@@ -4663,11 +4772,12 @@ def reconcile_run_logs(days: int = 7, dry_run: bool = False) -> Dict[str, Any]:
             for (n, s, mc, d, dt) in plan["update"]
         ]
         summary["mc_ids"]["unchanged"] = len(plan["unchanged"])
-        summary["mc_ids"]["rows"] = plan["insert"] + plan["update"]
-        if summary["mc_ids"]["missing"] and not dry_run:
+        summary["mc_ids"]["rows"] = plan["insert"] + plan["update"] + plan["repair"]
+        if (summary["mc_ids"]["missing"] or summary["mc_ids"]["duplicated"]) and not dry_run:
             res = push_mc_ids_to_redshift(rows)
             summary["mc_ids"]["updated"] = res.get("updated", 0)
             summary["mc_ids"]["inserted"] = res.get("inserted", 0)
+            summary["mc_ids"]["repaired"] = res.get("repaired", 0)
             if res.get("error"):
                 summary["errors"].append({"step": "mc_ids", "error": str(res["error"])[:300]})
     except Exception as ex:
@@ -4703,10 +4813,11 @@ def reconcile_run_logs(days: int = 7, dry_run: bool = False) -> Dict[str, Any]:
 
     logger.info(
         "Reconcile (%d days, dry_run=%s): %d shop/country combos — dates %d/%d, "
-        "mc ids %d/%d, sheet %d/%d",
+        "mc ids %d/%d (+%d/%d duplicated keys collapsed), sheet %d/%d",
         days, dry_run, summary["shops_seen"],
         summary["created_dates"]["inserted"], summary["created_dates"]["missing"],
         summary["mc_ids"]["inserted"], summary["mc_ids"]["missing"],
+        summary["mc_ids"]["repaired"], summary["mc_ids"]["duplicated"],
         summary["sheet"]["logged"], summary["sheet"]["missing"],
     )
     return summary
