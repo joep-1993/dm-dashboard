@@ -1,0 +1,98 @@
+{
+ "slug": "2026-09-01_bestof-airfryers",
+ "label": "Airfryers",
+ "created_at": "2026-09-01",
+ "category": {
+  "category_id": 9005486,
+  "name": "Airfryers",
+  "path": [
+   "Huishoudelijk",
+   "Koken",
+   "Airfryers"
+  ],
+  "main_category": 12000,
+  "category": "huishoudelijke_apparatuur_19968037_23583843"
+ },
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "airfryer",
+   "volume": 90500,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "philips airfryer",
+   "volume": 27100,
+   "kind": "brand",
+   "params": {
+    "query": "philips airfryer"
+   }
+  },
+  {
+   "term": "kip airfryer",
+   "volume": 9900,
+   "kind": "facet:bereidingsprogramma",
+   "params": {
+    "query": "kip airfryer"
+   }
+  },
+  {
+   "term": "beste airfryer",
+   "volume": 5400,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "dubbele airfryer",
+   "volume": 5400,
+   "kind": "facet:type_airfryer",
+   "params": {
+    "query": "dubbele airfryer"
+   }
+  },
+  {
+   "term": "tefal airfryer",
+   "volume": 2900,
+   "kind": "brand",
+   "params": {
+    "query": "tefal airfryer"
+   }
+  },
+  {
+   "term": "airfryer aanbieding",
+   "volume": 2400,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "airfryer kopen",
+   "volume": 1900,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "princess airfryer",
+   "volume": 1900,
+   "kind": "brand",
+   "params": {
+    "query": "princess airfryer"
+   }
+  },
+  {
+   "term": "airfryer oven",
+   "volume": 1300,
+   "kind": "facet:type_airfryer",
+   "params": {
+    "query": "airfryer oven"
+   }
+  }
+ ]
+}

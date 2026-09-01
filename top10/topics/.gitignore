@@ -1,0 +1,4 @@
+# Gegenereerde data hoort niet in git: reviews zijn groot, prijzen verouderen
+# per dag en alles is opnieuw te draaien. De topic-configuratie zelf wél.
+*/data/
+!*/topic.json
