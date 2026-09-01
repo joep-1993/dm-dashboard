@@ -3,6 +3,62 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-01 (6) — Twee GSD-runs tegelijk: de oorzaak achter de errors, de dubbele MC-accounts en de halve listing-trees
+
+Joeps vraag: elf errorregels uit een run (`DUPLICATE_CAMPAIGN_NAME`, "request conflicted with existing
+data", "listing group … already exists") plus twee MC ids voor Bouwlampkoning.nl NL — wat gaat hier mis
+en fiks het. Antwoord: één oorzaak, twee runs die tegelijk door dezelfde changelijst van 18 shops liepen.
+Les in LEARNINGS (zelfde datum, "Vier klachten, één oorzaak"). Commit `99d6e1d`.
+
+Gedaan:
+
+- [x] **Aangetoond met `pa.jvs_gsd_campaign_created`**: twee batches van 6 shops, 21 seconden na elkaar
+      (10:37:01 en 10:37:22), uit één lijst van 18. Die tabel wordt één keer per run geschreven, dus dat
+      is twee runs. `get_redshift_shop_changes` gaf 18 rijen zonder dubbele (shop_id, kolom) — de fan-out
+      zat niet in de query — en de errortabel telt precies op tot de helft die de andere run pakte.
+- [x] **Alle vier de symptomen herleid tot die overlap** (naamconflict, CONCURRENT_MODIFICATION,
+      listing-tree-botsing, dubbele MC-accounts), dus één fix in plaats van vier.
+- [x] **Run-lock**: `run_gsd_script` pakt een session-scoped `pg_try_advisory_lock` in de gedeelde
+      PostgreSQL, dus ook tussen twee machines (:8003 en win-htz-006:3003). Eigen connectie met
+      `autocommit`, zodat een run van 20 minuten geen transactie openhoudt op de n8n-DB; GUC's worden
+      met `RESET` teruggezet zodat de pool niks meekrijgt.
+- [x] **`POST /api/gsd-campaigns/run` geeft 409** met host, pid en starttijd van de houder (uit
+      `pg_locks` join `pg_stat_activity`). De frontend toont dat als waarschuwing en schrijft géén
+      activity-entry — er is immers niets gebeurd.
+- [x] **`_get_or_create_mc_account` is één kritieke sectie**: lock per (parent, shopnaam) plus een
+      **hercheck ná** het pakken van de lock. Die hercheck is de ontbrekende helft, want `accounts.list`
+      is eventually consistent.
+- [x] **Twee vangnetten**, beide getoetst op de werkelijkheid en niet op een foutcode: een mislukte
+      create kijkt of de campagne er tóch is en adopteert die dan (fout bewaard als `create_conflict`);
+      een mislukte listing-tree wordt hercontroleerd met `_tree_targets_label`.
+- [x] **De twee weesaccounts verwijderd**: Bouwlampkoning.nl `5847763163` en Vergewallet.nl
+      `5847763988`. Allebei leeg (geen products), campagnes hangen aan `5847763067` resp. `5847225352`.
+      `get_mc_id` geeft voor beide shops weer precies één account.
+- [x] **Sweep over alle sub-accounts van de drie parents**: exact twee verse dubbele namen, niet vier —
+      Hondenvoerdirect NL en Speelgoedvoorvolwassenen hebben één MC id (die kregen twee *campagnesets*).
+      De 105 NL / 89 BE andere dubbelen zijn een oude migratie.
+- [x] **Pre-existing 500 gefikst**: `/campaigns?search=` viel om op `'NoneType' object has no attribute
+      'lower'`. `c.get("shop_name", "")` vangt geen aanwezige `None`, en `_parse_campaign_name` zet dat
+      veld op None bij een naam zonder `[shop:...]`-token — één zo'n campagne sloopte élke zoekopdracht.
+      Nu 10 campagnes per shop, kloppend met GAQL.
+- [x] **Getest**: lock vastgehouden tijdens de run / vrijgegeven erna / ook na een exception, twee
+      processen tegelijk (tweede geweigerd), geen gelekte `application_name`/`lock_timeout`/advisory
+      locks, de vier MC-scenario's (race, nieuw, bestaand, kapotte lookup), beide vangnetten in beide
+      richtingen, en end-to-end tegen de live backend: lock vast → `POST /run` = 409, niets gemuteerd.
+- [x] **Backend op :8003 herstart** (`fuser -k 8003/tcp` + relaunch, geen `--reload`). Daarmee is en
+      passant ook `a8bac25` van sessie 5 live.
+
+Open:
+
+- [ ] **Prod win-htz-006:3003 draait nog op de oude code.** Daar kwamen de runs van vandaag vandaan, dus
+      daar helpt de lock pas na een pull + herstart. :8003 is bij.
+- [ ] **Nog geen tripwire op "twee runs hebben gedraaid".** De lock voorkomt het vooruit, maar er is geen
+      alarm dat achteraf twee `recorded_at`-batches in `pa.jvs_gsd_campaign_created` opmerkt — handig
+      voor de dagen vóór deze fix en voor het geval de lock ooit best-effort wegvalt.
+- [ ] **De activity-entry komt nog uit de browser.** Een run zonder tabblad laat geen spoor; de backend
+      zou die regel zelf moeten schrijven. Buiten de opdracht gelaten, maar het is de reden dat vandaag
+      één entry voor twee runs stond.
+
 ### 2026-09-01 (5) — Dubbelen in pa.mc_ids_efficy: geverifieerd, opgeruimd, en de write is nu duplicaat-proof
 
 Joeps vraag: zitten er dubbele records in `pa.mc_ids_efficy` (zelfde `shop_name`/`shop_id`/`domain`,
@@ -42,14 +98,12 @@ Gedaan:
 
 Open:
 
-- [ ] **:8003 draait nog op de oude code.** De server is om 12:38 herstart (sessie 4), mijn commit is
-      later. `--reload` staat uit, dus tot een kill+relaunch schrijft de live server nog met de oude
-      functie. De data is wél goed.
-- [ ] **`_get_or_create_mc_account` maakt dubbele MC sub-accounts aan** — `get_mc_id()` zoekt op
-      shopnaam en een net aangemaakt account is nog niet zichtbaar in de lijst. Weesaccounts van 01-09:
-      Vergewallet NL `5847763988`, Bouwlampkoning `5847763163`, plus Hondenvoerdirect NL en
-      Speelgoedvoorvolwassenen die elk twee ids kregen. **Joep fikst dit zelf**, staat hier voor de
-      context.
+- [x] ~~**:8003 draait nog op de oude code.**~~ Herstart in sessie 6, dus deze fix is live op :8003.
+      Prod win-htz-006:3003 nog niet.
+- [x] ~~**`_get_or_create_mc_account` maakt dubbele MC sub-accounts aan**~~ — gefikst in sessie 6
+      (lock per (parent, shopnaam) + hercheck ín de lock) en de twee weesaccounts zijn verwijderd.
+      Correctie op de inventarisatie hierboven: het waren er **twee**, niet vier — Hondenvoerdirect NL
+      en Speelgoedvoorvolwassenen hebben één MC id en kregen twee *campagnesets*.
 - [ ] **Drie stale waarden** (Kamera-express 182 NL, Hbm-machines 207860 NL, Welhof.com|BE 651763 BE)
       staan er nog. Geen dubbelen, dus buiten de opdracht gelaten; `reconcile_run_logs` corrigeert die
       zodra hij die shops in zijn venster ziet, want hij leest de merchant_id uit de live campagnes.

@@ -1,6 +1,98 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Vier klachten, één oorzaak: twee runs die tegelijk door dezelfde changelijst lopen (2026-09-01, GSD Campaigns)
+
+Joep kwam met elf errorregels uit een run (`DUPLICATE_CAMPAIGN_NAME`, "The request conflicted with
+existing data", "Listing group cannot be added … already exists") plus twee MC sub-accounts voor
+Bouwlampkoning.nl. Dat leest als drie of vier losse bugs. Het is er één.
+
+### Hoe je twee gelijktijdige runs aantoont
+
+`pa.jvs_gsd_campaign_created` wordt **één keer per run** geschreven, aan het eind. Staan er twee
+batches met een verschillende `recorded_at` binnen een minuut, dan hebben er twee runs gedraaid:
+
+```sql
+SELECT recorded_at, count(*), string_agg(shop_name||' '||country, ', ' ORDER BY shop_name)
+FROM pa.jvs_gsd_campaign_created WHERE recorded_at >= '2026-09-01'
+GROUP BY recorded_at ORDER BY recorded_at
+```
+
+Vandaag: 10:37:01 met 6 shops en 10:37:22 met 6 andere, samen 12 van de 18 shops uit één changelijst.
+Twee runs verdelen die lijst dus onderling, op wie er het eerst is. Twee tegenchecks die het
+dichtzetten: `get_redshift_shop_changes('2026-09-01')` gaf 18 rijen zonder één dubbele
+(shop_id, kolom) — de fan-out zat níet in de LEFT JOINs op `efficy_shops`/`efficy_shop_catman` — en
+de errortabel telt precies op tot de andere helft. Voor Hondenvoerdirect BE errorden `c` en `no_ean`,
+en dat zijn exact de twee die de ándere run aanmaakte; de 30 "created" van de activity-entry van
+10:48:57 plus die 11 errors plus de geadopteerde rest is de volledige lijst.
+
+### Waarom het vier symptomen geeft
+
+Alle vier volgen uit "twee schrijvers, één resource", en dus is het één fix:
+
+- `DUPLICATE_CAMPAIGN_NAME` — run B bouwt een naam die A seconden eerder aanmaakte, ná B's snapshot
+  in `_fetch_shop_campaign_candidates`.
+- `CONCURRENT_MODIFICATION` ("request conflicted with existing data") — letterlijk twee mutates op
+  hetzelfde object.
+- "Listing group … already exists" gevolgd door "… was not found in the ad group" — beide runs bouwen
+  een boom in dezelfde ad group; de eerste krijgt de root, bij de tweede wijzen de kinderen naar een
+  temp-id dat nooit heeft bestaan.
+- Twee MC sub-accounts — `_get_or_create_mc_account` was een check-then-create.
+
+### De globals konden dit nooit tegenhouden, en de Activity Log verbergt het
+
+`_run_progress` en `_run_cancel` zijn **per proces**: ze zien één run terwijl er twee leven, delen één
+voortgangsbalk en `cancel_run()` stopt ze beide. En de Activity Log wordt door de **browser**
+geschreven (`logActivity` in `gsd-campaigns.html`), niet door de backend — dus een run waarvan het
+tabblad dicht of ververst is laat daar géén spoor. Vandaag stond er één "Run Script" voor twee runs,
+en de creaties van 11:14 en 11:26 hadden geen entry. Bij het napluizen zijn de DB-tabellen en het
+Google Ads `change_event` de bron, niet die lijst.
+
+### Een lock die minuten moet leven, hoort niet in een transactie
+
+De fix is `pg_try_advisory_lock` in de gedeelde PostgreSQL (niet in het proces: de twee botsende runs
+kunnen twee backends zijn, WSL :8003 en prod win-htz-006:3003). Drie dingen die ik onderweg fout deed
+of moest bijstellen:
+
+- **Session-scoped, niet transaction-scoped.** `pg_advisory_xact_lock` (zoals de mc-ids-write gebruikt,
+  terecht, want die is kort) zou hier een transactie 20+ minuten open houden op een DB die we met n8n
+  delen — dat blokkeert VACUUM-opruiming zolang het duurt. Dus `autocommit=True` op een eigen
+  connectie, en expliciet unlocken.
+- **`conn.autocommit = True` faalt op een pool-connectie met een open transactie**: psycopg2 geeft
+  `set_session cannot be used inside a transaction`. Eerst `rollback()`, dan autocommit. Dit kwam
+  alleen boven doordat de test hem twee keer achter elkaar draaide.
+- **Session-GUC's lekken terug in de pool.** `SET application_name` (voor "wie houdt de lock vast")
+  en vooral `SET lock_timeout` blijven op de connectie staan als die terug is; een gelekte
+  lock_timeout laat een ongerelateerde query later falen. Dus `RESET` in de finally.
+
+De houder is te achterhalen via `pg_locks` join `pg_stat_activity` op `application_name`, wat een
+409-melding oplevert met host, pid en starttijd in plaats van "HTTP 500".
+
+### `accounts.list` van de Content API is eventually consistent
+
+Dit is waarom een lock alléén niet genoeg is en er ook een hercheck ín de lock moet: een net
+aangemaakt sub-account staat nog niet in de listing. Andersom net zo hard — na `accounts.delete` van
+twee weesaccounts bleven die minutenlang in `accounts.list` staan terwijl `accounts.get` al
+`auth/account_access_denied` gaf. Die `get` (401 "user cannot access account", terwijl een behouden
+account met dezelfde credentials gewoon antwoordt) is dus de betrouwbare check, niet de lijst.
+
+### Twee weesaccounts, niet vier
+
+Een sweep over alle sub-accounts van de drie parents (1447 NL, 992 BE, DE) op dubbele namen met
+`max(id) >= 5_840_000_000`: alleen `bouwlampkoning.nl` (5847763067 + 5847763163) en `vergewallet.nl`
+(5847225352 + 5847763988). Hondenvoerdirect NL en Speelgoedvoorvolwassenen — in TASKS van sessie 5
+genoemd als "elk twee ids" — hebben er één; die kregen wél twee campagnesets, en die verwarring is
+begrijpelijk maar het zijn twee verschillende dingen. De 105 (NL) en 89 (BE) andere dubbele namen
+zijn een oude migratie (`6xx`/`7xx` naast `56xx`, verschillende `websiteUrl`), geen verse schade.
+
+### `dict.get(key, "")` vangt geen aanwezige None
+
+Pre-existing, kwam boven bij een gezondheidscheck: `/api/gsd-campaigns/campaigns?search=` gaf 500 met
+`'NoneType' object has no attribute 'lower'`. De filter deed `c.get("shop_name", "").lower()`, maar
+de default vuurt alleen bij een **ontbrekende** key — en `_parse_campaign_name` zet `shop_name` op
+`None` bij elke campagnenaam zonder `[shop:...]`-token. Eén zo'n campagne in het account sloopt élke
+zoekopdracht, niet alleen die op die shop. `(c.get(x) or "")` is hier de vorm.
+
 ## Een INSERT is een aanname over de tabel, en die aanname kan verouderd zijn (2026-09-01, dubbelen in pa.mc_ids_efficy)
 
 Joeps vraag: zitten er dubbele records in `pa.mc_ids_efficy` (zelfde `shop_name`/`shop_id`/`domain`,
