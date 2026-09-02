@@ -92,19 +92,23 @@ _yaml_path = Path(__file__).parent / "data" / "shop_campaigns_sa360.yaml"
 
 def _write_yaml(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        textwrap.dedent(
-            f"""\
-            developer_token: "{os.environ.get('GOOGLE_DEVELOPER_TOKEN', '')}"
-            client_id: "{os.environ.get('GOOGLE_CLIENT_ID', '')}"
-            client_secret: "{os.environ.get('GOOGLE_CLIENT_SECRET', '')}"
-            refresh_token: "{os.environ.get('GOOGLE_REFRESH_TOKEN', '')}"
-            use_proto_plus: True
-            login_customer_id: "{SA360_LOGIN_CUSTOMER_ID}"
-            """
-        ),
-        encoding="utf-8",
+    body = textwrap.dedent(
+        f"""\
+        developer_token: "{os.environ.get('GOOGLE_DEVELOPER_TOKEN', '')}"
+        client_id: "{os.environ.get('GOOGLE_CLIENT_ID', '')}"
+        client_secret: "{os.environ.get('GOOGLE_CLIENT_SECRET', '')}"
+        refresh_token: "{os.environ.get('GOOGLE_REFRESH_TOKEN', '')}"
+        use_proto_plus: True
+        login_customer_id: "{SA360_LOGIN_CUSTOMER_ID}"
+        """
     )
+    # Vier secrets op een vast pad. path.write_text() alleen maakt het met de
+    # standaard umask aan (0644, leesbaar voor elk lokaal account); de
+    # service-account-JSON ernaast staat wel op 600. Eerst 0600, dan pas vullen.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(body)
+    os.chmod(path, 0o600)
 
 
 def _service():
