@@ -3,6 +3,34 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-02 (1) — SEO Stats: categorienamen in de Performance standup op één regel
+
+Joeps vraag: zorg dat de categorienamen in de standup-tabel niet afgekapt worden en op één regel
+blijven. Commit `a9aad71`.
+
+Gedaan:
+
+- [x] **Oorzaak**: de twee standup-tabellen droegen `fixed-cols` = `table-layout: fixed` +
+      `white-space: normal` op `.text-col`, dus namen als "Wasmachines en wasdrogers combinatie"
+      braken over twee regels. Dat was ooit bewust, tegen springende kolommen bij de Δ/Δ%-toggle.
+- [x] **Gewisseld naar de andere strategie uit UI_BLUEPRINT** (content widths + horizontale scroll):
+      `fixed-cols` van beide tabellen af — ze erven daarmee weer de `white-space: nowrap` van
+      `.perf-table` — plus `.standup-list { overflow-x: auto; }`. Nowrap kán niet samen met
+      `table-layout: fixed`: de tekst bloedt dan over de volgende kolom in plaats van de kolom te
+      verbreden.
+- [x] **Anti-jitter blijft**: Δ en Δ% houden hun inline `width` van 110px/80px, en die respecteert de
+      auto-layout ook. Alleen de tekstkolommen bewegen nog mee met de inhoud.
+- [x] **Skeleton meegenomen** (`standupSkeletonTable`), anders springt de kolombreedte alsnog op het
+      moment dat de data landt.
+- [x] **Getest** op een statische mock met dezelfde CSS + Bootstrap, gerenderd via Windows Chrome
+      `--headless=new --screenshot`: op 1400px passen realistische namen op één regel, op 1100px met
+      een extreem lange naam blijft de naam heel en verschijnt de scrollbalk onder die ene tabel.
+
+Nog te doen:
+
+- [ ] Op de live :8003 bekijken. De backend draaide deze sessie niet in WSL, dus alleen op de mock
+      gecontroleerd. Hard refresh (Ctrl+Shift+R) nodig, anders pak je de gecachte HTML.
+
 ### 2026-09-01 (6) — Twee GSD-runs tegelijk: de oorzaak achter de errors, de dubbele MC-accounts en de halve listing-trees
 
 Joeps vraag: elf errorregels uit een run (`DUPLICATE_CAMPAIGN_NAME`, "request conflicted with existing

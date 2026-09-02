@@ -116,6 +116,20 @@ other tool uses the grey default. New tools follow the grey default.
     value in full. If a hover control (e.g. an edit pencil) must stay reachable while
     scrolled, put it in a **right-pinned sticky column** (`position:sticky; right:0` + a
     solid background).
+  - **Een kolom met namen erin kiest strategie B.** Joep, 2026-09-02, over de Performance
+    standup in SEO Stats: categorienamen mogen niet afgekapt worden en niet over twee regels
+    breken. Die tabellen stonden op strategie A met *wrap*, dus "Wasmachines en wasdrogers
+    combinatie" werd twee regels. Wisselen betekent `fixed-cols` eraf (de tabellen erven dan
+    de `white-space: nowrap` van `.perf-table` terug) plus `overflow-x:auto` op de wrapper —
+    hier `.standup-list`. Ellipsis was geen optie: dat is óók afkappen.
+    Twee dingen om mee te nemen bij zo'n wissel:
+    - Je kunt niet halverwege stoppen: `nowrap` **met** `table-layout:fixed` verbreedt de kolom
+      niet maar laat de tekst over de buurkolom heen bloeden (zie de bullet hierboven).
+    - De anti-jitter van strategie A hoef je niet helemaal op te geven. Houd de inline `width`
+      op de **numerieke** kolommen (in de standup Δ = 110px, Δ% = 80px) — auto-layout
+      respecteert die als voorkeursbreedte, dus alleen de tekstkolommen bewegen nog mee.
+      Doe het ook in de **skeletontabel**, anders springt de breedte alsnog op het moment dat
+      de data landt.
 - **Filter box + action buttons go in a `.filter-row` above the table**, not in the
   card header — one `d-flex gap-2 align-items-center mb-3` row with the filter input
   on the left and the action buttons pushed right (`ms-auto` on the first right item),
