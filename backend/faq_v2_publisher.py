@@ -54,6 +54,7 @@ import os
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from backend.content_publisher import _post_with_retry
 from backend.database import get_db_connection, return_db_connection
@@ -77,6 +78,11 @@ FAQ_API_KEYS = {
 BATCH_SIZE = 2000
 # Rows pulled per server-side cursor fetch. 1.7M records will not fit in memory.
 CURSOR_ITERSIZE = 2000
+# Concurrency for the replace=True DELETE phase. One DELETE per URL at ~0.45s
+# each is ~3h over the ~23k URLs a weekly run touches, which overran the daily
+# automation's publish timeout; they are independent url-scoped calls, so they
+# fan out.
+DELETE_WORKERS = 20
 
 _tasks = {}
 _task_lock = threading.Lock()
@@ -252,6 +258,27 @@ def _delete_url(url, env):
     return 200 <= r.status_code < 300, r.status_code
 
 
+def _delete_urls_parallel(urls, env):
+    """DELETE a whole batch of URLs concurrently.
+
+    Returns [(url, error_str), ...] for the calls that raised — same reporting
+    contract as the sequential version it replaces: a non-2xx DELETE is not a
+    failure here either, because the POST that follows still upserts the current
+    questions.
+    """
+    if not urls:
+        return []
+    failures = []
+    with ThreadPoolExecutor(max_workers=DELETE_WORKERS) as pool:
+        futures = {pool.submit(_delete_url, u, env): u for u in urls}
+        for fut in as_completed(futures):
+            try:
+                fut.result()
+            except Exception as e:
+                failures.append((futures[fut], str(e)))
+    return failures
+
+
 def _stamp_state(rows, env):
     """Record (url_id, md5, n) as successfully pushed to `env`. Own connection +
     commit: state must survive even if a later batch dies."""
@@ -325,13 +352,21 @@ def publish_faq_v2(env="production", limit=None, replace=True, mode="new", task_
         cur.itersize = CURSOR_ITERSIZE
 
         batch, batch_state, batch_results = [], [], []
+        batch_urls_to_delete = []
         pushed = failed = urls_done = urls_failed = 0
         skipped = []
 
         def flush():
-            nonlocal batch, batch_state, pushed, failed, urls_failed
+            nonlocal batch, batch_state, batch_urls_to_delete
+            nonlocal pushed, failed, urls_failed
             if not batch:
                 return
+            # Replace happens per batch rather than per URL, but still strictly
+            # before this batch's POST, so every URL is delete-then-post exactly
+            # as before — only the waiting is now shared.
+            for u, err in _delete_urls_parallel(batch_urls_to_delete, env):
+                if len(skipped) < 50:
+                    skipped.append({"url": u, "reason": f"delete failed: {err}"})
             ok, code, text = _post_batch(batch, env)
             batch_results.append({"count": len(batch), "urls": len(batch_state), "ok": ok,
                                   "status_code": code, "response": "" if ok else text})
@@ -341,7 +376,7 @@ def publish_faq_v2(env="production", limit=None, replace=True, mode="new", task_
             else:
                 failed += len(batch)
                 urls_failed += len(batch_state)
-            batch, batch_state = [], []
+            batch, batch_state, batch_urls_to_delete = [], [], []
             _set_progress(task_id, records_pushed=pushed, failed=failed,
                           batches=len(batch_results), urls_done=urls_done)
 
@@ -360,11 +395,7 @@ def publish_faq_v2(env="production", limit=None, replace=True, mode="new", task_
             if batch and len(batch) + len(recs) > BATCH_SIZE:
                 flush()
             if replace:
-                try:
-                    _delete_url(url, env)
-                except Exception as e:
-                    if len(skipped) < 50:
-                        skipped.append({"url": url, "reason": f"delete failed: {e}"})
+                batch_urls_to_delete.append(url)
             batch.extend(recs)
             batch_state.append((url_id, md5, len(recs)))
             urls_done += 1
@@ -374,7 +405,7 @@ def publish_faq_v2(env="production", limit=None, replace=True, mode="new", task_
             # so the next "new" run pushes them — hence urls_done is rolled back
             # to what was actually published, not what was read.
             urls_done -= len(batch_state)
-            batch, batch_state = [], []
+            batch, batch_state, batch_urls_to_delete = [], [], []
             _set_progress(task_id, phase="cancelled", urls_done=urls_done)
         else:
             flush()
