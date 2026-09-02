@@ -172,6 +172,26 @@ ook het rapportagegedrag, en is een run die anders rapporteert niet meer te verg
 vorige. Non-2xx blijft geen failure omdat de POST erna de huidige vragen alsnog upsert; de enige
 zichtbare verandering is dat `skipped` nu op completion-volgorde staat in plaats van URL-volgorde.
 
+## `git add <mijn bestanden>` commit ook wat een ándere sessie al gestaged had (2026-09-02)
+
+Twee Claude-sessies werken in deze repo tegelijk. Ik stageerde netjes twee bestanden met
+`git add backend/seo_titles_service.py frontend/seo-titles.html` — en de commit bevatte er drie.
+Er stond al een hernoeming van een testbestand in de **index**, gestaged door de andere sessie, en
+`git commit` neemt de hele index mee, niet alleen wat jij er net in zette.
+
+`git status --short` liet het zien: `RM  test_v65_....py -> test_v67_....py`. De **eerste kolom is
+de index**, en `R` daar betekent "staat al klaar om gecommit te worden". Ik las alleen de tweede
+kolom (de working tree) en zag ` M` bij mijn eigen bestanden.
+
+**How to apply:** in een repo waar iemand anders parallel werkt, is `git status --short` vóór het
+committen niet genoeg — check of de eerste kolom leeg is voor alles wat niet van jou is, of
+gebruik `git commit -- <pathspec>` in plaats van `git add` + `git commit`, want die eerste vorm
+commit uitsluitend de genoemde paden en negeert de rest van de index. Dat laatste is meteen ook de
+oplossing voor cc1/, dat gitignored is maar getrackt.
+
+Niet teruggedraaid deze keer: de hernoeming was inhoudelijk leeg en precies wat de andere sessie
+wilde, dus een revert zou dat werk breken. Wel gemeld.
+
 ## Wat een audit van acht tools opleverde: de code sprak drie keer zijn eigen documentatie tegen (2026-09-02)
 
 Acht dashboard-tools die nooit een audit hadden gehad (GSD Tag Toppers, Healthscore, SEO Priority,

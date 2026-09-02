@@ -134,6 +134,28 @@ tegen een limiet van 2 uur.
       dezelfde vorm als de valse-groen-paden uit fase 1. Overweeg `raise_for_status()` op 429 zodra
       er één opduikt.
 
+### 2026-09-02 (5) — SEO Titles: de Publish-knop zag een bewerking nooit (ST-M5)
+
+- [x] **`update_blueprint()` zet de status terug op `'built'`** (`4cdb5bd`). Hij schreef title,
+      h1_title en description weg maar liet de status staan, terwijl `publish_built()` uitsluitend
+      `status='built'` selecteert — en na de re-push van vandaag stonden álle 86.124 rijen op
+      `pushed`. Het potloodje in de preview-tabel gaf dus `{"updated": 1}` terug en er gebeurde
+      niets. De create-kant (`upsert_blueprint_built`) deed het al goed.
+- [x] **`pushed_at` blijft expres staan** — dat is "wanneer stond deze tekst voor het laatst live",
+      en samen met `status='built'` leest de rij als "gepusht op X, daarna bewerkt".
+- [x] **Frontend:** de update-tak werkte alleen de lokale rij bij; die ververst nu ook de tellers,
+      zet de status op de rij, en toont een banner dat er nog een Publish nodig is.
+- [x] **Gate end-to-end** op cat 9002870, het record dat sinds 27-08 als openstaand punt stond:
+      POST /update → `{"updated":1,"status":"built","needs_publish":true}`, DB op `built`, teller 1;
+      POST /publish → 1 gepusht / 0 fouten; `get_store_record()` bevestigt de volle frase in de
+      tweede helft. Daarmee is dat record ook meteen opgelost. Eindstand 86.124 op `pushed`.
+- [x] Backend herstart (pid 147417) zodat de fix live staat.
+
+**Let op bij het committen:** mijn commit `4cdb5bd` bevat ook een hernoeming van
+`backend/rurl_optimizer_v2/tests/test_v65_faceted_cross_maincat.py` naar
+`test_v67_shared_tail_and_bands.py` (nul inhoudelijke wijziging). Die stond al gestaged in de
+index door een parallelle sessie. Niet teruggedraaid, want dat zou dat werk breken.
+
 ### 2026-09-02 (4) — SEO Titles: bullet omgezet en 836 titels geregenereerd, allebei live
 
 Vervolg op de audit. Twee re-pushes naar `/page-titles`, allebei met een gate vooraf en een
@@ -165,9 +187,8 @@ bewust voor alle 836, zodat store en generator weer gelijklopen. Les: meet het v
 
 - [ ] **De legacy-templates in `pa.page_titles_existing`** dragen dezelfde entity 8.791 keer.
       Andere tabel, andere beslissing — niet aangeraakt.
-- [ ] **Cat 9002870 / `productlijn_koffiepads~s_boon~s_smaak`** heeft nu het juiste teken, maar
-      houdt nog `!!sub_category!!` op de tweede plek in plaats van de volle frase (handmatige
-      ingreep van 27-08, inmiddels achterhaald).
+- [x] **Cat 9002870 / `productlijn_koffiepads~s_boon~s_smaak`** — rechtgetrokken op 2026-09-02
+      als gate voor de ST-M5-fix; de tweede helft draagt weer de volle frase.
 - [ ] **ST-M5 blijft staan** en is hier bevestigd: `publish_built` kijkt alleen naar
       `status='built'`, en `update_blueprint` zet die status niet terug. Een bewerking via de UI
       bereikt de site dus nooit. Ik omzeilde dat door de status in de bulk-UPDATE zelf te zetten.

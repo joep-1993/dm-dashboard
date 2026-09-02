@@ -187,7 +187,7 @@ elke sessie, `_SETTING_CARRY_FIELDS` dekt de swagger exact, en `delete_run` laat
 | ST-M2 | MED | `:431` | **Nieuw gevonden:** `&#10062;` staat als letterlijke tekst in de template; de site escapet bij het injecteren in de meta-tag, dus Google leest `&#10062;` als tekst. 86.123 van 86.124 descriptions, 0 titles | CODE KLAAR, NIET GEPUSHT |
 | ST-M3 | MED | `:407` + `:1149` | Blueprints worden gesleuteld op een gesorteerde key terwijl de store letterlijk en volgordegevoelig matcht: 1.467 van 51.443 gepushte rijen (~3,0k SEO-visits/jaar) kunnen nooit resolven | OPEN |
 | ST-M4 | MED | `:992` | De 3-pogingenlus rond `/page-titles` dekt alleen transportfouten — de `return` is onvoorwaardelijk, dus een 502 laat 5.000 rijen op `failed` staan. `_record_exists` doet het wél goed | OPEN |
-| ST-M5 | MED | `:1009` | `update_blueprint` zet de status niet terug op `built`, en `publish_built` selecteert alleen `built` — een bewerking aan een gepushte blueprint bereikt de site nooit. Alle 86.124 rijen staan op `pushed` | OPEN |
+| ST-M5 | MED | `:1009` | `update_blueprint` zet de status niet terug op `built`, en `publish_built` selecteert alleen `built` — een bewerking aan een gepushte blueprint bereikt de site nooit. Alle 86.124 rijen staan op `pushed` | GEDAAN (`4cdb5bd`) |
 | ST-M6 | MED | `:854` + `:360` | Eén run gebruikt twee dependency-snapshots: `_run` laadt `deps` voor `impossible_reason`, `facet_phrase` valt terug op de TTL-cache | OPEN |
 | ST-M7 | MED | `:388` | Alleen `geschikte_leeftijd` wordt hard na de noun gezet; andere voorzetselfacetten hangen aan de regeltabel, waardoor "Houten Tweepersoons Met matras Bedden" ontstaat. `ai_titles_service` heeft hier wél een regex voor | OPEN |
 | ST-M8 | MED | `:924` + `:955` | Eén commit en één round-trip per record | DEELS (de lookup is gebatcht) |
@@ -302,8 +302,7 @@ staat en nergens anders geagendeerd is:
 
 1. **Ruim zestig MED's en de LOW-categorie hierboven.** Geen van deze is in een fase beland.
    De zwaarste kandidaten voor een volgende ronde, op basis van wat ze kunnen kosten:
-   ST-M5 (een bewerking aan een gepushte blueprint bereikt de site nooit — alle 86.124 rijen
-   staan op `pushed`), ST-M3 (1.467 records met een key die nooit kan resolven), SP-M1 (het
+   ~~ST-M5~~ (opgelost op 2026-09-02, `4cdb5bd`), ST-M3 (1.467 records met een key die nooit kan resolven), SP-M1 (het
    logboek zegt het tegenovergestelde van wat er in productie staat), FW-M4 (een DB-storing
    wedgt Facet Watch tot een herstart), GB-M3 (SQL-injectie via een querystring) en GB-M2
    (botsende run-id's zodra de historie vol is).
