@@ -57,10 +57,18 @@ verschillen, nu ook als comment bij beide `_unit_op`'s:
   een verplicht keyword, dus daar kunnen alleen custom-attribuut-subdivisions gebouwd worden.
 * Tag Toppers guardt `if parent_resource:`, DMA Exclusions wijst hem onvoorwaardelijk toe.
 
-Dat laatste is mogelijk een echte bug in DMA Exclusions: op regel 962 komt `parent_resource` uit
-`live_leaf["parent"]`, en `_read_tree` slaat dat op als `... or None`. Een ad group met één enkele
-root-UNIT — een bestaande vorm — geeft dan `None` aan `_subdiv_op`. **Niet nagegaan of dat
-bereikbaar is**; DMA Exclusions viel buiten de scope van vandaag.
+Over dat derde punt stond hier eerst dat het "mogelijk een echte bug" in DMA Exclusions was.
+**Nagelopen op 2026-09-02: niet bereikbaar.** Alle drie de leaf-selectors (`_leaf_for_category`,
+`_leaf_for_aplus`, `_bestsellers_subdiv`) eisen `dim == "custom_attr"`, en `_read_tree` zet `dim`
+alleen als de node een case value heeft. In Google Ads heeft uitsluitend de root géén case value,
+dus een leaf die `subdivide_and_exclude` bereikt heeft er altijd een — en daarmee een parent.
+Hetzelfde voor het revert-pad, dat werkt op de bij apply aangemaakte subdivision.
+
+Het verschil is dus geen bug maar een verschil in taak: gsd_tag_toppers bouwt zelf bomen inclusief
+root en heeft de guard nodig, dma_exclusions verbouwt alleen bestaande takken en mag een lege parent
+juist NIET stil accepteren. De invariant hing wel af van drie selectors elders in het bestand en
+staat nu expliciet afgedwongen op beide schrijfpaden, met een leesbare melding in plaats van een
+proto-fout op een None-toewijzing.
 
 **2. De Healthscore categorie/maincat-tweelingen.** ~400 regels bijna-identieke SQL-generatie
 (`_refresh_cat_month` / `_refresh_maincat_month`, `build_category_caps` / `build_maincat_caps`,

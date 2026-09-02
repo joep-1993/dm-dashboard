@@ -887,8 +887,11 @@ class _Temp:
 #      custom_attr, brand, product_type); daar alleen item_id + custom_attr inline.
 #   2. _subdiv_op: hier is de case value optioneel (spec=None mag); daar is
 #      custom_attr een VERPLICHT keyword, dus alleen custom-attribuut-subdivisions.
-#   3. parent_resource: hier `if parent_resource:`, daar onvoorwaardelijk toegewezen —
-#      een ad group met één enkele root-UNIT (parent None) gedraagt zich dus anders.
+#   3. parent_resource: daar `if parent_resource:`, hier onvoorwaardelijk toegewezen.
+#      Dat is GEEN bug maar een verschil in taak: gsd_tag_toppers maakt zelf bomen aan
+#      (inclusief root), deze module verbouwt alleen bestaande takken en krijgt zijn
+#      leaves van selectors die dim == "custom_attr" eisen — en alleen de root heeft
+#      geen case value. De aanroepers dwingen die invariant nu expliciet af.
 # Samenvoegen betekent daarom kiezen per verschil, niet verplaatsen. Dat vraagt een
 # OLD-vs-NEW-harness met een nagebouwde client; de simulator waar de audit naar
 # verwees bestaat niet in de repo (was scratchpad-werk van 2026-07-02).
@@ -971,6 +974,18 @@ def _apply_one_target(client, customer_id, item_id, target) -> dict:
             if live_leaf is None:
                 raise RuntimeError("leaf node disappeared before apply")
             parent_resource = live_leaf["parent"]
+            # Invariant: elke leaf die hier komt is geselecteerd door
+            # _leaf_for_category / _leaf_for_aplus, en die eisen allebei
+            # dim == "custom_attr". In Google Ads heeft alleen de ROOT geen case
+            # value, dus een node mét case value heeft altijd een parent. Deze
+            # module maakt zelf nooit een root aan (anders dan gsd_tag_toppers,
+            # dat daarom `if parent_resource:` guardt) — een lege parent is hier
+            # dus altijd een fout, en zonder deze check zou hij verderop als een
+            # onbegrijpelijke proto-fout naar boven komen.
+            if not parent_resource:
+                raise RuntimeError(
+                    f"leaf {leaf['resource']} heeft geen parent — een root-node kan "
+                    f"niet gesubdivideerd worden; controleer de leaf-selectie")
             # The biddable OTHERS unit needs a bid. Use the LIVE leaf's own bid (not
             # the possibly-stale snapshot); if it inherits (0), fall back to the ad
             # group's default CPC so a manual-CPC ad group doesn't reject the new
@@ -1169,6 +1184,14 @@ def enable(record_id: int) -> Dict[str, Any]:
                         ca = t.get("leaf_custom_attr") or {
                             "index": t["leaf"]["index"], "value": t["leaf"]["value"] or ""}
                         bid = t.get("original_bid") or _ad_group_cpc(client, customer_id, ad_group_id) or None
+                        # Zelfde invariant als bij apply: deze subdivision is daar
+                        # aangemaakt op de plek van een leaf mét case value, dus hij
+                        # heeft een parent. Falen met een leesbare melding in plaats
+                        # van met een proto-fout op een None-toewijzing.
+                        if not subdiv["parent"]:
+                            raise RuntimeError(
+                                f"subdivision {subdiv['resource']} heeft geen parent — "
+                                f"kan de oorspronkelijke leaf niet terugzetten")
                         unit_op, _ = _unit_op(client, customer_id, ad_group_id, temp, subdiv["parent"],
                                               custom_attr=ca, negative=False, bid=bid)
                         ops.append(unit_op)

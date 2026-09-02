@@ -749,8 +749,11 @@ def _spec_from_legacy(item_id_value, custom_attr):
 #      custom_attr, brand, product_type); daar alleen item_id + custom_attr inline.
 #   2. _subdiv_op: hier is de case value optioneel (spec=None mag); daar is
 #      custom_attr een VERPLICHT keyword, dus alleen custom-attribuut-subdivisions.
-#   3. parent_resource: hier `if parent_resource:`, daar onvoorwaardelijk toegewezen —
-#      een ad group met één enkele root-UNIT (parent None) gedraagt zich dus anders.
+#   3. parent_resource: hier `if parent_resource:`, daar onvoorwaardelijk toegewezen.
+#      Dat is GEEN bug maar een verschil in taak: deze module maakt zelf bomen aan
+#      (inclusief de root, zie _ensure_tag_toppers_tree), dma_exclusions verbouwt
+#      alleen bestaande takken en krijgt zijn leaves van selectors die
+#      dim == "custom_attr" eisen — en alleen de root heeft geen case value.
 # Samenvoegen betekent daarom kiezen per verschil, niet verplaatsen. Dat vraagt een
 # OLD-vs-NEW-harness met een nagebouwde client; de simulator waar de audit naar
 # verwees bestaat niet in de repo (was scratchpad-werk van 2026-07-02).
