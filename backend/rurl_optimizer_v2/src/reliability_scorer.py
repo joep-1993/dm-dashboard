@@ -551,6 +551,46 @@ COUNT_PENALTY_BANDS = (
 # measures how much a dom_share can be TRUSTED (share 1.0 over 116 products is
 # noise that routes motorhelm -> bare Videocamera's), not how full a page is.
 FACETED_COUNT_PENALTY_BANDS = ()
+# V67 (Joeps besluit, 2026-09-02): a destination that drops ONLY a size or
+# colour word from the query is a REVIEW case, not a reject — tier C, not D.
+#
+# The coverage bands cannot see the difference on their own: "grote wasknijpers"
+# -> bare Wasknijpers reads 50% covered exactly like "kokers voor posters" ->
+# Schilderijen & posters, and the deepened bare penalty put both in tier D. But
+# the first is the right category with a filter the page cannot apply, and the
+# second sends someone looking for tubes to a page selling posters. The
+# distinction is WHICH word went unrepresented, so the caller passes the
+# unrepresented tokens and this floor decides.
+#
+# Measures ('20 liter', '150') need no floor: _tokens_not_represented already
+# keeps them out of the denominator (c853b1e), so a query dropping only a
+# measure reads as fully covered.
+#
+# Deliberately NOT in this set: materials ('houten', 'plastic', 'metalen',
+# 'rubberen') and shapes ('rond', 'ovaal', 'vierkant'). A material is product
+# intent — the V64 cap comment leans on exactly that, wanting 'houten' to be
+# seen in "Hout" — and a shape is neither a maat nor a kleur. Extend the set if
+# that judgement changes; the floor mechanism does not need to.
+SIZE_WORDS = frozenset({
+    'groot', 'grote', 'klein', 'kleine', 'middelgroot', 'middelgrote', 'middel',
+    'mini', 'midi', 'maxi', 'mega', 'micro', 'macro', 'large', 'medium', 'small',
+    'xs', 'xl', 'xxl', 'xxxl', 'lang', 'lange', 'kort', 'korte', 'breed',
+    'brede', 'smal', 'smalle', 'hoog', 'hoge', 'laag', 'lage', 'dik', 'dikke',
+    'dun', 'dunne', 'plat', 'platte',
+})
+COLOUR_WORDS = frozenset({
+    'beige', 'blauw', 'blauwe', 'bruin', 'bruine', 'creme', 'crème', 'geel',
+    'gele', 'goud', 'gouden', 'grijs', 'grijze', 'groen', 'groene', 'oranje',
+    'paars', 'paarse', 'rood', 'rode', 'roze', 'wit', 'witte', 'zilver',
+    'zilveren', 'zwart', 'zwarte',
+})
+ADJ_ONLY_FLOOR = 50  # the bottom of tier C
+
+
+def _is_size_or_colour(token: str) -> bool:
+    return (token or '').lower().strip() in SIZE_WORDS | COLOUR_WORDS
+
+
 # Below this AND-match count a high dom_share is not trustworthy enough to earn
 # its dominance bonus (the bonus is zeroed; the count penalty still applies).
 DOMINANCE_MIN_COUNT = 300
@@ -575,6 +615,7 @@ def score_search_derived(
     match_type: Optional[str] = None,
     include_coverage: bool = True,
     target_is_faceted: bool = False,
+    unrepresented: Optional[list] = None,
 ) -> int:
     """V45: adjust a score by query coverage and category product-count
     dominance. See the band tables above.
@@ -638,7 +679,27 @@ def score_search_derived(
     # score's business.
     if not target_is_faceted:
         score += _band(dom_count, COUNT_PENALTY_BANDS)
-    return max(0, min(100, int(round(score))))
+    score = max(0, min(100, int(round(score))))
+    # V67: the size/colour floor. Applied last, so it lifts a row the bands sank
+    # below tier C and never lowers one — and to faceted targets too, otherwise
+    # a faceted row could end up UNDER its own bare sibling, which the milder
+    # faceted coverage penalty exists to prevent.
+    #
+    # `base >= ADJ_ONLY_FLOOR` is the guard that keeps this from MANUFACTURING a
+    # tier C. The floor restores what the bands took away from a row whose branch
+    # already claimed at least review-worthiness; it cannot promote a row the
+    # branch itself scored below that. The A/B needed it: 'voor lange oren' ->
+    # Noren came out of an UNVERIFIED cross-maincat jump (base 45), landed at 26,
+    # and the floor lifted it to 50 because its only unrepresented token was
+    # 'lange' — while the token that DID count as represented was the containment
+    # bridge mistaking 'oren' for the tail of 'Noren'. That is the documented
+    # weakness of the >= 4-char bridge (see h1_overlap_parts), and the answer
+    # there is the same as here: let the branch's own evidence decide whether the
+    # row deserves the benefit of the doubt.
+    if (unrepresented and base >= ADJ_ONLY_FLOOR and score < ADJ_ONLY_FLOOR
+            and all(_is_size_or_colour(w) for w in unrepresented)):
+        score = ADJ_ONLY_FLOOR
+    return score
 
 
 def get_reliability_tier(score: int) -> str:

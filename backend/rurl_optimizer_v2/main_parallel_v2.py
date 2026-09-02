@@ -1649,8 +1649,23 @@ def _covered_after_vowel_collapse(token, target_text, matcher):
         for tt in target_toks)
 
 
+def _keyword_words(keyword):
+    """V67: the query's countable tokens.
+
+    Hoisted out of process_url_v2 so `_finalize_redirect` can derive them itself
+    when a caller does not pass them. Without that, an early return that forgot
+    `keyword_words` would silently disable the two coverage steps of the tail —
+    the same class of bug the shared tail exists to prevent, one level down.
+
+    V30: numeric tokens count too, so "vijverfolie 6 x 8" is not read as 100%
+    covered by a destination that represents neither dimension.
+    """
+    return [w.lower() for w in (keyword or '').split()
+            if len(w) >= 2 or re.match(r'^\d+$', w)]
+
+
 def _v55_lift(keyword, score, cat_name, facet_value_names, reason):
-    """V65: apply the V55 H1-overlap lift and hand back the fields it changes.
+    """V66: apply the V55 H1-overlap lift and hand back the fields it changes.
 
     ONE implementation for every finals site. The lift used to live only in the
     shared finals block at the end of process_url_v2, so any branch that RETURNS
@@ -1679,19 +1694,216 @@ def _v55_lift(keyword, score, cat_name, facet_value_names, reason):
     return score, _tier(score), reason, overlap, query_coverage
 
 
-def _cross_maincat_rung(verified, agreed, facet_covers, name_score, dom_share):
-    """V65: the cross-maincat fallback's score ladder as a pure function, so the
-    rungs are pinnable in tests instead of only observable through a full run.
+def _finalize_redirect(row, ctx):
+    """V67: the cascade's shared tail, as ONE callable.
 
-    See the comments at the call site for what each rung claims.
+    Four steps used to sit inline at the end of process_url_v2, which meant that
+    every branch RETURNING on the spot silently skipped all four. V66 fixed that
+    for the H1 lift alone, at one return site; this makes the whole tail callable
+    so a new return site cannot walk off with half of it. The steps in ORDER,
+    because the order carries meaning:
+
+      1. V55 H1-overlap lift — judges the ANSWER (does the destination page name
+         what the searcher named?) instead of the branch that found it.
+      2. V61 fragment pruning — drop /c/ pieces that do not exist on the
+         destination page. BEFORE the coverage tests below, so a dead fragment
+         cannot make a row read as better covered than it is.
+      3. V62 restore-retest — withdraw the V31 guard's flat 60 when the
+         destination still leaves most of the query unrepresented. MUST precede
+         the cap: it can RAISE the score back to the scorer's own number, and the
+         cap is then still the last word on it.
+      4. V64 low-coverage cap — a destination that accounts for a quarter of the
+         query or less is not a moderate-confidence answer, whoever scored it.
+
+    Deliberately NOT included: the V61 last resort (`build_category_only`), which
+    only fires when there is NO redirect and needs the builder plus the raw
+    cascade result. It runs immediately BEFORE this call at the tail, so the
+    redirect it invents now also gets the lift and the prune it used to miss.
+
+    Step 3 self-guards on `ctx['v62_restored']`, which no early return can have
+    set: the clean-category short-circuits return long before the V31 guard runs,
+    and a cross-maincat jump replaces the very category the guard vouched for —
+    which the step tests for.
+
+    `row` is the mutable slice of the result dict, `ctx` the read-only cascade
+    state. Returns `row` with the fields the tail changed (plus reliability_tier,
+    h1_overlap and h1_query_coverage, which it owns).
     """
-    if verified and (name_score or 0) >= 99 and (dom_share or 0) >= 0.9:
-        return 80
-    if verified or facet_covers:
-        return 72
-    if agreed:
-        return 60
-    return 45
+    from src.reliability_scorer import (_keyword_bridges_value as _bridge64,
+                                        _v27_reject_reason as _v27,
+                                        get_reliability_tier as _tier)
+    parsed, keyword = ctx['parsed'], ctx['keyword']
+    kw_words = ctx.get('keyword_words') or _keyword_words(keyword)
+    row.setdefault('reject_reason', '')
+    row['h1_overlap'] = row['h1_query_coverage'] = 0
+    if not row.get('redirect_url'):
+        row['reliability_tier'] = _tier(row['reliability_score'])
+        return row
+
+    # --- 1. V55: symmetric H1 overlap + its lift ---------------------------
+    (row['reliability_score'], row['reliability_tier'], row['reason'],
+     row['h1_overlap'], row['h1_query_coverage']) = _v55_lift(
+        keyword, row['reliability_score'], row.get('redirect_category'),
+        row.get('facet_value_names'), row.get('reason'))
+
+    # --- 2. V61: prune facet pieces the destination page does not have -----
+    # The per-path check in _append_facet_to_subcat_redirect fixed the biggest
+    # producer, but a measurement on the affected population showed 16 dead
+    # fragments left over, spread across four other assembly sites
+    # (subcategory_name_with_probe_facet, subcategory_name, multi,
+    # search_derived_samecat_faceted). Doing it once here covers every path,
+    # including any added later.
+    if '/c/' in row['redirect_url']:
+        _us = ctx['facet_filter'].facet_url_set()
+        if _us:
+            _p = row['redirect_url'].split('beslist.nl', 1)[-1].rstrip('/')
+            _pbase, _pfrag = _p.split('/c/', 1)
+            # The source's own pinned facet is exempt: V41 rebuilds the origin
+            # category page precisely to keep it, and it is valid there by
+            # construction — but only ON that origin page. Carried onto any
+            # other destination the pinned facet is just another fragment that
+            # has to exist there (measured: 5 rows kept a dead `merk~...` purely
+            # because the SOURCE url pinned it).
+            _pinned = ({x for x in (parsed.existing_facet or '').split('~~') if '~' in x}
+                       if _pbase == (parsed.full_category_path or '').rstrip('/')
+                       else set())
+            _keep, _drop = [], []
+            for _piece in _pfrag.split('~~'):
+                if '~' not in _piece:
+                    continue
+                if _piece in _pinned or f"{_pbase}/c/{_piece}" in _us:
+                    _keep.append(_piece)
+                else:
+                    _drop.append(_piece)
+            if _drop:
+                row['redirect_url'] = (f"https://www.beslist.nl{_pbase}/c/"
+                                       + '~~'.join(_keep)) if _keep else \
+                                      f"https://www.beslist.nl{_pbase}/"
+                row['facet_fragment'] = '~~'.join(_keep)
+                row['facet_count'] = len(_keep)
+                if not _keep:
+                    row['facet_names'] = ''
+                    row['facet_value_names'] = ''
+                row['reason'] = ((row.get('reason') or '')
+                                 + f"; [V61] dropped {', '.join(_drop)} "
+                                   "(not present on the destination page)")
+
+    # --- 3. V62: re-test the V31 guard's restore --------------------------
+    # V62: re-test the V31 guard's restore, now that every append and prune has
+    # had its say. The guard hands out a flat 60 on the strength of "the matcher
+    # found a facet in the URL's own subcategory" alone — it never asks how much
+    # of the QUERY that facet accounts for. "karlsson matrassen vildar hr" ->
+    # Topdekmatrassen /c/type_topdekmatras~'Latex topdekmatrassen' accounts for
+    # one token of four, and not even that one honestly ('matrassen' fuzzy-hit
+    # the tail of the value; 'latex' appears nowhere in the query), yet it
+    # shipped at 60 = tier C, "review nodig", with 2 products behind it. A row
+    # that still leaves the majority of the query unrepresented is not a
+    # moderate-confidence answer; it goes back to the score the scorer gave it.
+    # Only when the destination is still the one the guard vouched for. A later
+    # path (Fix D, V36, RC5) may have replaced the category outright; that url is
+    # not the guard's doing and carries its own score, so re-testing the restore
+    # against it would punish a decision the guard never made. Appended facets
+    # (same category, more /c/ pieces) are exactly what SHOULD be credited.
+    _same_cat = (row['redirect_url'].split('/c/')[0]
+                 == (ctx.get('guard_url') or '').split('/c/')[0])
+    if ctx.get('v62_restored') and _same_cat:
+        _cov_all = _tokens_not_represented(kw_words, '')
+        _cov_left = _tokens_not_represented(kw_words, ' '.join(filter(None, [
+            row.get('redirect_category') or '',
+            row.get('facet_value_names') or '',
+            row['redirect_url'] or '',
+        ])))
+        if _cov_all:
+            _cov62 = (len(_cov_all) - len(_cov_left)) / len(_cov_all)
+            if _cov62 < V62_MIN_RESTORE_COVERAGE:
+                row['reliability_score'] = ctx['fallback_score']
+                row['reliability_tier'] = _tier(row['reliability_score'])
+                row['reason'] = ((row.get('reason') or '')
+                                 + f"; [V62] restore withdrawn — destination accounts "
+                                 + f"for {int(round(100 * _cov62))}% of the query "
+                                 + f"(unrepresented: {', '.join(_cov_left)})")
+                if not row.get('reject_reason'):
+                    row['reject_reason'] = (_v27(
+                        ctx.get('matched_keywords'), ctx.get('unmatched_keywords'),
+                        match_type=row.get('match_type')) or '')
+
+    # --- 4. V64: cap a destination that accounts for a quarter of the query --
+    # V64: a destination that accounts for a quarter of the query or less is not
+    # a moderate-confidence answer, whoever put the score there. V62 makes
+    # exactly this measurement, but only re-tests rows the V31 guard restored:
+    # "slush puppy siroop framboos" -> Sportvoeding /c/smaak_voeding~'Framboos'
+    # came out of that withdrawal on the scorer's own 60 = tier C, with 'slush',
+    # 'puppy' and 'siroop' unrepresented - all three under V27's 8-character
+    # long-token floor, so nothing else objected either.
+    #
+    # Two deliberate limits. It runs at the very tail, after V61, so it can only
+    # change the NUMBER: the same demotion inside calculate_reliability_score
+    # flips the `reliability_score >= 50` gates mid-cascade and cost two rows
+    # their redirect altogether in the A/B. And it counts real WORDS left
+    # unrepresented, not tokens, because a query's model code and dimensions can
+    # never be represented by a facet - "campingaz gasbus cp 250" -> Gasflessen
+    # /c/merk~Campingaz is at 25% by that arithmetic too, and it is right.
+    #
+    # THREE such words, and de-duplicated. At two the A/B demoted 11
+    # rows out of A/B and about half of them were right all along, undone by the
+    # weak morphology in _present(): 'aggregaat' leaves no trace in
+    # "Aggregaten", 'speelkleed' none in "Speelkleden", 'houten' none in "Hout",
+    # and "antislipmat antislipmat" counted its one missing word twice. Three
+    # words is the level at which the measurement survives that stemmer, and it
+    # is also what the complaint actually describes: a query whose product,
+    # brand AND qualifier are all missing from the page it lands on.
+    # ... and never when the destination CATEGORY names the product the query
+    # asks for. "treinstation bij houten treinbaan" -> Speelgoed treinbanen
+    # /c/materiaal~'Hout' is the one row the A/B demoted out of tier B, and it
+    # was right: _present() cannot see 'treinbaan' in "Treinbanen" or 'houten'
+    # in "Hout", but the bridge test (which stems the Dutch -en plural) can.
+    # Same test V51 and RC6 use, so the three guards agree on what "the page is
+    # about what you asked" means.
+    if row['reliability_score'] > V64_LOW_COVERAGE_CAP:
+        _c64_all = _tokens_not_represented(kw_words, '')
+        _c64_left = _tokens_not_represented(kw_words, ' '.join(filter(None, [
+            row.get('redirect_category') or '', row.get('facet_value_names') or '',
+            row['redirect_url'] or ''])))
+        _c64_words = {w for w in _c64_left if len(w) >= 4 and w.isalpha()}
+        if (_c64_all and len(_c64_words) >= V64_LOW_COVERAGE_MIN_WORDS
+                and not _bridge64(parsed.keyword, row.get('redirect_category') or '')):
+            _c64 = (len(_c64_all) - len(_c64_left)) / len(_c64_all)
+            if _c64 <= V64_LOW_COVERAGE_SHARE:
+                row['reliability_score'] = V64_LOW_COVERAGE_CAP
+                row['reliability_tier'] = _tier(row['reliability_score'])
+                row['reason'] = ((row.get('reason') or '')
+                                 + f"; [V64] capped at {V64_LOW_COVERAGE_CAP} — "
+                                 + f"destination accounts for {int(round(100 * _c64))}% "
+                                 + f"of the query (unrepresented: "
+                                 + f"{', '.join(_c64_left)})")
+    return row
+
+
+def _cross_maincat_base(agreed, name_score):
+    """V67: what the IDENTITY claim alone justifies for a cross-maincat jump,
+    before coverage, dominance and product count have their say.
+
+    The old ladder (80/72/60/45) fused three different questions into one
+    constant: does the query NAME this category, does the Search API AGREE that
+    this is where the query's products live, and how DOMINANT is that category.
+    Fusing them is what made Joeps opbergkast row drop from 72 to 60 while the
+    answer improved — dominance moved and took the whole score with it, and the
+    facet that made the destination right could not be seen at all.
+
+    So the base answers the identity question only, and score_search_derived
+    applies the shared coverage/dominance/count bands on top — the same treatment
+    the other search-derived branches have had since V45. `verified` (share >=
+    0.6) is no longer a rung: the share now speaks through DOMINANCE_BANDS, where
+    it can also be qualified by how many products it rests on. It still decides
+    the match_type and the reason, which is what RC5 reads.
+
+    Anchored on the old constants: an exact name match the search leader agrees
+    with keeps 72, a near-exact one (>= 95, the candidate threshold) sits between
+    the old 60 and 72, and a jump with no search agreement keeps 45.
+    """
+    if not agreed:
+        return 45
+    return 72 if (name_score or 0) >= 99 else 65
 
 
 def _cross_maincat_fallback_fields(url, parsed, categories_df, matcher,
@@ -1759,7 +1971,7 @@ def _cross_maincat_fallback_fields(url, parsed, categories_df, matcher,
     # count that isn't a taxonomy accident (V62_DOM_COUNT_FLOOR) and a near-exact
     # subcat-name match, is not the same thing as an unverified guess. 60 (tier
     # C, "review nodig") instead of 45 (tier D, "onbruikbaar").
-    # V65: a faceted destination that covers the WHOLE query is a different
+    # V66/V67: a faceted destination that covers the WHOLE query is a different
     # claim than bare-category dominance, and the two disagree BY CONSTRUCTION.
     # dom_cat_share asks how dominant the BARE category is over the full query;
     # when the query's qualifier is a facet value rather than a category noun
@@ -1770,29 +1982,48 @@ def _cross_maincat_fallback_fields(url, parsed, categories_df, matcher,
     # RIGHT facet lowers the number that grades it, and the row sank from 72 to
     # 60 (Joeps observatie, 2026-09-02) while the answer got strictly better.
     #
-    # The remedy is to also credit what the destination COVERS: when the
-    # appended facet makes the destination H1 represent every query token, the
-    # page answers the whole query. Gated on `_agreed`, so V64's rule stands
-    # unchanged — the query must name the destination CATEGORY and the search
-    # leader must agree with it. Without that gate a facet value echoing a
-    # single token would be enough again ('fietsen berging' -> Hogedrukreinigers
-    # /c/t_hdrukrein~'Fietsen'), which is exactly what V64 closed. The fragment
-    # itself is already liveness-checked in _append_facet_to_subcat_redirect, so
-    # this cannot vouch for a /c/ URL that does not exist.
+    # The remedy is to credit what the destination COVERS. V66 did that with a
+    # rung of its own; V67 replaced the rung with the shared bands, so coverage,
+    # dominance and product count each speak once and the constant only carries
+    # the identity claim (see _cross_maincat_base). V64's rule survives inside
+    # that base: without search agreement on the category the base stays 45, so
+    # a facet value echoing a single token cannot buy tier C on coverage alone
+    # ('fietsen berging' -> Hogedrukreinigers /c/t_hdrukrein~'Fietsen'). And the
+    # fragment is already liveness-checked in _append_facet_to_subcat_redirect,
+    # so coverage can never be earned by a /c/ URL that does not exist.
+    from src.reliability_scorer import score_search_derived as _score_sd
     _agreed = (and_mode and slug_agrees
                and (pv.get('dom_cat_count') or 0) >= V62_DOM_COUNT_FLOOR
                and (fb_m.get('score', 0) or 0) >= 95)
-    _facet_cov = 0
-    if res.facet_fragment and _agreed:
-        from src.reliability_scorer import (H1_OVERLAP_RECALL_FLOOR as _RECALL,
-                                            h1_overlap_parts as _hop)
-        _facet_cov = _hop(parsed.keyword, fb_m.get('matched_category', ''),
-                          res.facet_value_names or '')[1]
-        _facet_covers = _facet_cov >= _RECALL
-    else:
-        _facet_covers = False
-    score = _cross_maincat_rung(verified, _agreed, _facet_covers,
-                                fb_m.get('score', 0), pv.get('dom_cat_share'))
+    # V67: coverage of the FINAL destination — the category plus whatever facet
+    # the append just added. Measured the way V62 and V64 measure it, through
+    # _tokens_not_represented, so the three guards that judge these rows share
+    # one denominator. The first cut used the H1 recall (which the V55 lift is
+    # gated on) and the A/B caught it: that metric drops commercial filler but
+    # not MEASURES, so '20', 'liter' and '150' counted as tokens a facet had to
+    # represent, and 'bloempotten 20 liter' -> Bloempotten fell from 80 to 38 at
+    # a nominal 33% coverage. It is 100% covered: een maat is geen inhoudswoord
+    # (c853b1e). 'printer en computer tafel' -> Printers reads 33% under BOTH
+    # metrics — three content words, one represented — and that demotion stands.
+    #
+    # This is what lets a faceted destination beat the bare one without a rung
+    # of its own: 'opbergkast voor balkon' covers 100% through ruimte~'Balkon'
+    # (+8), where the bare category covers 50% and, being unable to filter the
+    # token it dropped, also takes the deepened bare penalty (-16).
+    _cov_words = _keyword_words(parsed.keyword)
+    _cov_all = _tokens_not_represented(_cov_words, '')
+    _cov_left = _tokens_not_represented(_cov_words, ' '.join(filter(None, [
+        fb_m.get('matched_category', ''), res.facet_value_names or '',
+        res.redirect_url or ''])))
+    _facet_cov = (round(100.0 * (len(_cov_all) - len(_cov_left)) / len(_cov_all))
+                  if _cov_all else 100)
+    score = _score_sd(_cross_maincat_base(_agreed, fb_m.get('score', 0)),
+                      match_coverage=_facet_cov,
+                      dom_share=pv.get('dom_cat_share'),
+                      dom_count=pv.get('dom_cat_count'),
+                      match_type='cross_maincat_fallback',
+                      target_is_faceted=bool(res.facet_fragment),
+                      unrepresented=_cov_left)
     sub_id = extract_subcategory_id_from_url(res.redirect_url)
     dropped = getattr(parsed, 'existing_facet', '') or ''
     reason = (
@@ -1805,7 +2036,7 @@ def _cross_maincat_fallback_fields(url, parsed, categories_df, matcher,
            (f", search-agreed: AND-leader IS this category "
             f"({int(100 * (pv.get('dom_cat_share') or 0))}% share, "
             f"{pv.get('dom_cat_count') or 0} products)" if _agreed
-            # V65: say WHICH evidence fell short. "no search evidence" also
+            # V66: say WHICH evidence fell short. "no search evidence" also
             # covered the case where the evidence was present and merely below
             # the 0.6 bar, which reads as a probe failure and hides the real
             # reason a score moved between two runs.
@@ -1815,9 +2046,13 @@ def _cross_maincat_fallback_fields(url, parsed, categories_df, matcher,
                   f"{pv.get('dom_cat_count') or 0} products)"
                   if and_mode and pv.get('dom_cat_share') is not None
                   else ", unverified (no search evidence)")))
-        + (f"; destination covers the whole query: facet {res.facet_fragment} "
-           f"({res.facet_value_names!r}) carries the remaining token(s), "
-           f"query coverage {_facet_cov}%" if _facet_covers else '')
+        # V67: coverage is now part of the score on every row, so it belongs in
+        # every reason — it is the number that separates a destination which
+        # answers the whole query from one that dropped a token, and the
+        # reviewer cannot see it anywhere else.
+        + f"; query coverage {_facet_cov}%"
+        + (f" (facet {res.facet_fragment} {res.facet_value_names!r} carries the "
+           f"remaining token(s))" if res.facet_fragment and _facet_cov >= 90 else '')
         + (f"; dropped original facet '{dropped}'" if dropped else '')
         + ((res.reason and f"; {res.reason}") or ''))
     return {
@@ -1964,32 +2199,39 @@ def process_url_v2(args):
         _ef27 = getattr(parsed, 'existing_facet', '') or ''
         _base27 = f"https://www.beslist.nl{parsed.full_category_path}"
         clean_url = f"{_base27}/c/{_ef27}" if _ef27 else f"{_base27}/"
+        # V62: was 60 (tier C, "needs review"). The destination here is the
+        # R-URL itself minus the /r/<keyword>/ segment — same category, same
+        # existing /c/ facet, nothing added and nothing dropped. There is no
+        # match to be wrong about, so there is nothing for a reviewer to check:
+        # a stopwords-only query on a category page IS that category page. Tier A.
+        # V67: through the shared tail like every other shipped redirect. Every
+        # step is a no-op here by construction — the lift needs query tokens a
+        # stopwords-only query does not have, the prune exempts the origin page's
+        # own pinned facet, and the coverage tests skip stopwords so their
+        # denominator is empty — but the invariant "a redirect we ship went
+        # through the tail" is worth more than the four saved calls.
+        _fin27 = _finalize_redirect({
+            'redirect_url': clean_url,
+            'redirect_category': (category_lookup.get(parsed.subcategory_id, '')
+                                  if parsed.subcategory_id else (parsed.main_category or '')),
+            'reliability_score': 99,
+            'match_type': 'stopwords_only_clean_category',
+            'facet_fragment': _ef27,
+            'facet_names': _ef27.split('~', 1)[0] if _ef27 else '',
+            'facet_value_names': '',
+            'facet_count': 1 if _ef27 else 0,
+            'reason': 'V27: keyword is stopwords-only — redirected to clean category URL'
+                      + (f" (preserved existing facet '{_ef27}')" if _ef27 else ''),
+        }, {'keyword': parsed.keyword, 'parsed': parsed, 'facet_filter': facet_filter})
         return {
             'original_url': url,
             'main_category': parsed.main_category or '',
             'original_category': category_lookup.get(parsed.subcategory_id, '') if parsed.subcategory_id else '',
             'keyword': parsed.keyword,
-            'redirect_url': clean_url,
-            'redirect_category': category_lookup.get(parsed.subcategory_id, '') if parsed.subcategory_id else (parsed.main_category or ''),
             'is_cross_category': False,
-            'facet_fragment': _ef27,
-            'facet_names': _ef27.split('~', 1)[0] if _ef27 else '',
-            'facet_value_names': '',
-            'facet_count': 1 if _ef27 else 0,
+            **_fin27,
             'match_score': 0,
-            'match_type': 'stopwords_only_clean_category',
-            # V62: was 60 (tier C, "needs review"). The destination here is the
-            # R-URL itself minus the /r/<keyword>/ segment — same category, same
-            # existing /c/ facet, nothing added and nothing dropped. There is no
-            # match to be wrong about, so there is nothing for a reviewer to
-            # check: a stopwords-only query on a category page IS that category
-            # page. Tier A.
-            'reliability_score': 99,
-            'reliability_tier': 'A',
             'h1_similarity': 0,
-            'h1_overlap': 0,
-            'h1_query_coverage': 0,
-            'reject_reason': '',
             'matched_keywords': '',
             'unmatched_keywords': ', '.join(_kw_tokens),
             'match_coverage': 0.0,
@@ -2000,8 +2242,6 @@ def process_url_v2(args):
             'has_dimensions': False,
             'merk_of_shop_missing': '',
             'success': True,
-            'reason': 'V27: keyword is stopwords-only — redirected to clean category URL'
-                      + (f" (preserved existing facet '{_ef27}')" if _ef27 else ''),
         }
 
     # V32: "redundant keyword" short-circuit. When every meaningful keyword
@@ -2027,26 +2267,34 @@ def process_url_v2(args):
             _base = f"https://www.beslist.nl{parsed.full_category_path}"
             _ef = getattr(parsed, 'existing_facet', '') or ''
             _clean_url = f"{_base}/c/{_ef}" if _ef else f"{_base}/"
+            # V67: through the shared tail. Not a no-op here, unlike the
+            # stopwords-only sibling above: the query IS this category's noun, so
+            # the H1 pair is a twin and the V55 lift fires (80 -> 89, still tier
+            # B — the lift's ceiling keeps H1 alone from manufacturing a tier A).
+            # That is the same claim the 80 already made, now stated by the
+            # signal that measures it instead of by a constant.
+            _fin32 = _finalize_redirect({
+                'redirect_url': _clean_url,
+                'redirect_category': _sub_name,
+                'reliability_score': 80,
+                'match_type': 'category_noun_only_clean_category',
+                'facet_fragment': _ef,
+                'facet_names': _ef.split('~', 1)[0] if _ef else '',
+                'facet_value_names': '',
+                'facet_count': 1 if _ef else 0,
+                'reason': (f"V32: keyword '{parsed.keyword}' is just the '{_sub_name}' category "
+                           "noun — kept category"
+                           + (f" + existing facet '{_ef}'" if _ef else " page")),
+            }, {'keyword': parsed.keyword, 'parsed': parsed, 'facet_filter': facet_filter})
             return {
                 'original_url': url,
                 'main_category': parsed.main_category or '',
                 'original_category': _sub_name,
                 'keyword': parsed.keyword,
-                'redirect_url': _clean_url,
-                'redirect_category': _sub_name,
                 'is_cross_category': False,
-                'facet_fragment': _ef,
-                'facet_names': _ef.split('~', 1)[0] if _ef else '',
-                'facet_value_names': '',
-                'facet_count': 1 if _ef else 0,
+                **_fin32,
                 'match_score': 0,
-                'match_type': 'category_noun_only_clean_category',
-                'reliability_score': 80,
-                'reliability_tier': 'B',
                 'h1_similarity': 0,
-                'h1_overlap': 0,
-                'h1_query_coverage': 0,
-                'reject_reason': '',
                 'matched_keywords': '',
                 'unmatched_keywords': ', '.join(_non_stop_non_shop),
                 'match_coverage': 0.0,
@@ -2057,9 +2305,6 @@ def process_url_v2(args):
                 'has_dimensions': False,
                 'merk_of_shop_missing': '',
                 'success': True,
-                'reason': (f"V32: keyword '{parsed.keyword}' is just the '{_sub_name}' category "
-                           "noun — kept category"
-                           + (f" + existing facet '{_ef}'" if _ef else " page")),
             }
 
     # V30: Shop-name short-circuit — if the keyword contains any SHOP_NAME
@@ -2723,8 +2968,7 @@ def process_url_v2(args):
 
     # V12: Calculate keyword coverage FIRST (V21: needed for reliability score)
     # V30: Include numeric tokens (len=1 digits like "6", "8") so "vijverfolie 6 x 8" doesn't get 100% coverage
-    keyword_words = [w.lower() for w in r.keyword.split()
-                     if len(w) >= 2 or re.match(r'^\d+$', w)] if r.keyword else []
+    keyword_words = _keyword_words(r.keyword)
 
     # Find stopwords in original keyword
     stopwords_in_keyword = [w for w in keyword_words if w in STOPWORDS]
@@ -3274,16 +3518,19 @@ def process_url_v2(args):
                     url, parsed, d.get('categories_df'), matcher, facet_filter,
                     builder, category_lookup)
                 if _xfb:
-                    # V65: this return bypasses the shared finals block, so the
-                    # V55 H1 lift never reached these rows — they shipped
-                    # h1_overlap=0 and an unlifted score even when the
-                    # destination H1 named exactly what the searcher typed.
-                    # Apply it here through the shared helper.
-                    (_xscore, _xtier, _xreason,
-                     _xoverlap, _xqcov) = _v55_lift(
-                        r.keyword, _xfb['reliability_score'],
-                        _xfb['redirect_category'], _xfb['facet_value_names'],
-                        _xfb['reason'] + f" (after: {reject_reason})")
+                    # V66/V67: this return bypasses the shared finals block, so
+                    # none of the tail reached these rows — they shipped
+                    # h1_overlap=0, an unlifted score and an unpruned fragment
+                    # even when the destination H1 named exactly what the
+                    # searcher typed. Run the whole tail here instead.
+                    _xfin = _finalize_redirect(dict(
+                        _xfb, reason=_xfb['reason'] + f" (after: {reject_reason})",
+                        reject_reason=''), {
+                        'keyword': r.keyword,
+                        'keyword_words': keyword_words,
+                        'parsed': parsed,
+                        'facet_filter': facet_filter,
+                    })
                     return {
                         'original_url': r.original_url,
                         'main_category': r.main_category,
@@ -3292,18 +3539,19 @@ def process_url_v2(args):
                         'redirect_url': _xfb['redirect_url'],
                         'redirect_category': _xfb['redirect_category'],
                         'is_cross_category': True,
-                        'facet_fragment': _xfb['facet_fragment'],
-                        'facet_names': _xfb['facet_names'],
-                        'facet_value_names': _xfb['facet_value_names'],
-                        'facet_count': _xfb['facet_count'],
+                        'redirect_url': _xfin['redirect_url'],
+                        'facet_fragment': _xfin['facet_fragment'],
+                        'facet_names': _xfin['facet_names'],
+                        'facet_value_names': _xfin['facet_value_names'],
+                        'facet_count': _xfin['facet_count'],
                         'match_score': r.match_score,
                         'match_type': _xfb['match_type'],
-                        'reliability_score': _xscore,
-                        'reliability_tier': _xtier,
+                        'reliability_score': _xfin['reliability_score'],
+                        'reliability_tier': _xfin['reliability_tier'],
                         'h1_similarity': 0,
-                        'h1_overlap': _xoverlap,
-                        'h1_query_coverage': _xqcov,
-                        'reject_reason': '',
+                        'h1_overlap': _xfin['h1_overlap'],
+                        'h1_query_coverage': _xfin['h1_query_coverage'],
+                        'reject_reason': _xfin['reject_reason'],
                         'flag_for_review': '',
                         'search_derived_total': search_derived_total,
                         'search_derived_dom_cat': search_derived_dom_cat,
@@ -3319,7 +3567,7 @@ def process_url_v2(args):
                         'has_dimensions': has_dims,
                         'merk_of_shop_missing': getattr(r, 'merk_of_shop_missing', ''),
                         'success': True,
-                        'reason': _xreason,
+                        'reason': _xfin['reason'],
                     }
                 # V62: before shipping nothing, try the V50 relaxation. This
                 # branch returns on the spot, so the relaxation at the end of the
@@ -4347,7 +4595,6 @@ def process_url_v2(args):
     if final_redirect_url and final_match_type in _V45_DOM_SCORED_TYPES:
         from src.reliability_scorer import (score_search_derived as _score_sd,
                                             calculate_reliability_score as _calc_rel)
-        from src.validation_rules import GENERIC_ADJECTIVES as _GEN_ADJ
         # match_coverage + matched/unmatched were computed BEFORE the search-
         # derived facet append, so a token the appended facet covers (the size
         # "Groot" for "grote", the brand "Bang & Olufsen") reads as unmatched and
@@ -4413,6 +4660,12 @@ def process_url_v2(args):
             match_type=final_match_type,
             include_coverage=(final_match_type in _V45_COVERAGE_FLAT_TYPES),
             target_is_faceted=bool(final_redirect_url and '/c/' in final_redirect_url),
+            # V67 (Joeps besluit): the size/colour floor, from the same list, for
+            # the branches that already scored through these bands. The rule is
+            # about WHICH word a destination dropped, not about which route found
+            # it, so scoping it to the cross-maincat branch alone would have left
+            # the neighbouring branches judging 'grote wasknijpers' the old way.
+            unrepresented=_v45_unmatched,
         )
         final_tier = get_reliability_tier(final_score)
         # surface the corrected coverage in the output so the column matches the
@@ -4644,104 +4897,6 @@ def process_url_v2(args):
             facet_value_names=out_facet_value_names,
         )
 
-    # V55: symmetric H1 overlap + its lift. Judges the ANSWER (does the
-    # destination page name what the searcher named?) instead of the branch that
-    # found it, which is what makes it worth adding: the cascade reaches one
-    # target down several routes whose flat constants disagree about it.
-    # Lift-only and capped — see apply_h1_overlap_lift. V65: through the shared
-    # _v55_lift helper, so the early-returning branches get the same treatment.
-    h1_overlap, h1_query_coverage = (0, 0)
-    if final_redirect_url:
-        (final_score, final_tier, final_reason,
-         h1_overlap, h1_query_coverage) = _v55_lift(
-            r.keyword, final_score, final_redirect_cat_name,
-            out_facet_value_names, final_reason)
-
-    # V61: prune facet pieces that do not exist on the destination page. The
-    # per-path check in _append_facet_to_subcat_redirect fixed the biggest
-    # producer, but a measurement on the affected population showed 16 dead
-    # fragments left over, spread across four other assembly sites
-    # (subcategory_name_with_probe_facet, subcategory_name, multi,
-    # search_derived_samecat_faceted). Doing it once here covers every path,
-    # including any added later. The origin category page is skipped: V41
-    # rebuilds it precisely to keep the source's own facet, which is valid there
-    # by construction.
-    if final_redirect_url and '/c/' in final_redirect_url:
-        _us = facet_filter.facet_url_set()
-        if _us:
-            # The source's own pinned facet is exempt: V41 rebuilds the origin
-            # category page precisely to keep it, and it is valid there by
-            # construction. Everything else has to be in the catalogue. Exempting
-            # the whole origin page instead was too coarse — it let a probe-added
-            # merk~107176 survive on a page that has no such facet.
-            _p = final_redirect_url.split('beslist.nl', 1)[-1].rstrip('/')
-            _pbase, _pfrag = _p.split('/c/', 1)
-            # ...and only ON that origin page. Carried onto any other
-            # destination the pinned facet is just another fragment that has to
-            # exist there — measured: 5 rows kept a dead `merk~...` purely
-            # because the SOURCE url pinned it.
-            _pinned = ({x for x in (parsed.existing_facet or '').split('~~') if '~' in x}
-                       if _pbase == (parsed.full_category_path or '').rstrip('/')
-                       else set())
-            _keep, _drop = [], []
-            for _piece in _pfrag.split('~~'):
-                if '~' not in _piece:
-                    continue
-                if _piece in _pinned or f"{_pbase}/c/{_piece}" in _us:
-                    _keep.append(_piece)
-                else:
-                    _drop.append(_piece)
-            if _drop:
-                final_redirect_url = (f"https://www.beslist.nl{_pbase}/c/"
-                                      + '~~'.join(_keep)) if _keep else \
-                                     f"https://www.beslist.nl{_pbase}/"
-                out_facet_fragment = '~~'.join(_keep)
-                out_facet_count = len(_keep)
-                if not _keep:
-                    out_facet_names = ''
-                    out_facet_value_names = ''
-                final_reason = ((final_reason or '')
-                                + f"; [V61] dropped {', '.join(_drop)} "
-                                  "(not present on the destination page)")
-
-    # V62: re-test the V31 guard's restore, now that every append and prune has
-    # had its say. The guard hands out a flat 60 on the strength of "the matcher
-    # found a facet in the URL's own subcategory" alone — it never asks how much
-    # of the QUERY that facet accounts for. "karlsson matrassen vildar hr" ->
-    # Topdekmatrassen /c/type_topdekmatras~'Latex topdekmatrassen' accounts for
-    # one token of four, and not even that one honestly ('matrassen' fuzzy-hit
-    # the tail of the value; 'latex' appears nowhere in the query), yet it
-    # shipped at 60 = tier C, "review nodig", with 2 products behind it. A row
-    # that still leaves the majority of the query unrepresented is not a
-    # moderate-confidence answer; it goes back to the score the scorer gave it.
-    # Only when the destination is still the one the guard vouched for. A later
-    # path (Fix D, V36, RC5) may have replaced the category outright; that url is
-    # not the guard's doing and carries its own score, so re-testing the restore
-    # against it would punish a decision the guard never made. Appended facets
-    # (same category, more /c/ pieces) are exactly what SHOULD be credited.
-    _v62_same_cat = (final_redirect_url or '').split('/c/')[0] == (
-        (r.redirect_url or '').split('/c/')[0])
-    if _v62_restored and final_redirect_url and _v62_same_cat:
-        _cov_all = _tokens_not_represented(keyword_words, '')
-        _cov_left = _tokens_not_represented(keyword_words, ' '.join(filter(None, [
-            final_redirect_cat_name or '',
-            out_facet_value_names or '',
-            final_redirect_url or '',
-        ])))
-        if _cov_all:
-            _cov62 = (len(_cov_all) - len(_cov_left)) / len(_cov_all)
-            if _cov62 < V62_MIN_RESTORE_COVERAGE:
-                final_score = reliability_score
-                final_tier = get_reliability_tier(final_score)
-                final_reason = ((final_reason or '')
-                                + f"; [V62] restore withdrawn — destination accounts "
-                                + f"for {int(round(100 * _cov62))}% of the query "
-                                + f"(unrepresented: {', '.join(_cov_left)})")
-                if not reject_reason:
-                    reject_reason = (_v27_reject_reason(
-                        matched_keywords, unmatched_keywords,
-                        match_type=final_match_type) or '')
-
     # V61 last resort. A builder REJECTION is truthy (RedirectResult has no
     # __bool__), so `if not result` above never fired for one and the row shipped
     # with no redirect at all — 352 rows in rurl_processed sit at
@@ -4766,55 +4921,44 @@ def process_url_v2(args):
             final_reason = ((final_reason or _last.reason or '')
                             + (f" (cascade rejection: {_rej})" if _rej else ''))
 
-    # V64: a destination that accounts for a quarter of the query or less is not
-    # a moderate-confidence answer, whoever put the score there. V62 makes
-    # exactly this measurement, but only re-tests rows the V31 guard restored:
-    # "slush puppy siroop framboos" -> Sportvoeding /c/smaak_voeding~'Framboos'
-    # came out of that withdrawal on the scorer's own 60 = tier C, with 'slush',
-    # 'puppy' and 'siroop' unrepresented - all three under V27's 8-character
-    # long-token floor, so nothing else objected either.
-    #
-    # Two deliberate limits. It runs at the very tail, after V61, so it can only
-    # change the NUMBER: the same demotion inside calculate_reliability_score
-    # flips the `reliability_score >= 50` gates mid-cascade and cost two rows
-    # their redirect altogether in the A/B. And it counts real WORDS left
-    # unrepresented, not tokens, because a query's model code and dimensions can
-    # never be represented by a facet - "campingaz gasbus cp 250" -> Gasflessen
-    # /c/merk~Campingaz is at 25% by that arithmetic too, and it is right.
-    #
-    # THREE such words, and de-duplicated. At two the A/B demoted 11
-    # rows out of A/B and about half of them were right all along, undone by the
-    # weak morphology in _present(): 'aggregaat' leaves no trace in
-    # "Aggregaten", 'speelkleed' none in "Speelkleden", 'houten' none in "Hout",
-    # and "antislipmat antislipmat" counted its one missing word twice. Three
-    # words is the level at which the measurement survives that stemmer, and it
-    # is also what the complaint actually describes: a query whose product,
-    # brand AND qualifier are all missing from the page it lands on.
-    # ... and never when the destination CATEGORY names the product the query
-    # asks for. "treinstation bij houten treinbaan" -> Speelgoed treinbanen
-    # /c/materiaal~'Hout' is the one row the A/B demoted out of tier B, and it
-    # was right: _present() cannot see 'treinbaan' in "Treinbanen" or 'houten'
-    # in "Hout", but the bridge test (which stems the Dutch -en plural) can.
-    # Same test V51 and RC6 use, so the three guards agree on what "the page is
-    # about what you asked" means.
-    if final_redirect_url and final_score > V64_LOW_COVERAGE_CAP:
-        from src.reliability_scorer import _keyword_bridges_value as _bridge64
-        _c64_all = _tokens_not_represented(keyword_words, '')
-        _c64_left = _tokens_not_represented(keyword_words, ' '.join(filter(None, [
-            final_redirect_cat_name or '', out_facet_value_names or '',
-            final_redirect_url or ''])))
-        _c64_words = {w for w in _c64_left if len(w) >= 4 and w.isalpha()}
-        if (_c64_all and len(_c64_words) >= V64_LOW_COVERAGE_MIN_WORDS
-                and not _bridge64(parsed.keyword, final_redirect_cat_name or '')):
-            _c64 = (len(_c64_all) - len(_c64_left)) / len(_c64_all)
-            if _c64 <= V64_LOW_COVERAGE_SHARE:
-                final_score = V64_LOW_COVERAGE_CAP
-                final_tier = get_reliability_tier(final_score)
-                final_reason = ((final_reason or '')
-                                + f"; [V64] capped at {V64_LOW_COVERAGE_CAP} — "
-                                + f"destination accounts for {int(round(100 * _c64))}% "
-                                + f"of the query (unrepresented: "
-                                + f"{', '.join(_c64_left)})")
+    # V67: the cascade's shared tail — V55 lift, V61 prune, V62 restore-retest,
+    # V64 cap — in one call, so a branch that RETURNS halfway can run exactly the
+    # same four steps instead of silently shipping without them. The last resort
+    # above stays out (it needs the builder and only fires when there is no
+    # redirect) and now runs BEFORE the call, so the category page it invents
+    # also gets the lift and the prune it used to miss.
+    _fin = _finalize_redirect({
+        'redirect_url': final_redirect_url,
+        'redirect_category': final_redirect_cat_name,
+        'reliability_score': final_score,
+        'reason': final_reason,
+        'reject_reason': reject_reason,
+        'match_type': final_match_type,
+        'facet_fragment': out_facet_fragment,
+        'facet_names': out_facet_names,
+        'facet_value_names': out_facet_value_names,
+        'facet_count': out_facet_count,
+    }, {
+        'keyword': r.keyword,
+        'keyword_words': keyword_words,
+        'parsed': parsed,
+        'facet_filter': facet_filter,
+        'v62_restored': _v62_restored,
+        'guard_url': r.redirect_url,
+        'fallback_score': reliability_score,
+        'matched_keywords': matched_keywords,
+        'unmatched_keywords': unmatched_keywords,
+    })
+    final_redirect_url = _fin['redirect_url']
+    final_score = _fin['reliability_score']
+    final_tier = _fin['reliability_tier']
+    final_reason = _fin['reason']
+    reject_reason = _fin['reject_reason']
+    out_facet_fragment = _fin['facet_fragment']
+    out_facet_names = _fin['facet_names']
+    out_facet_value_names = _fin['facet_value_names']
+    out_facet_count = _fin['facet_count']
+    h1_overlap, h1_query_coverage = _fin['h1_overlap'], _fin['h1_query_coverage']
 
     return {
         'original_url': r.original_url,
