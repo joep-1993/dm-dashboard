@@ -8,6 +8,10 @@ from backend.database import get_redshift_connection, return_redshift_connection
 
 logger = logging.getLogger(__name__)
 
+# Maximaal aantal rijen dat de UI terugkrijgt. Er wordt er één extra opgehaald om
+# te kunnen zien of er is afgekapt.
+LIMIT = 5000
+
 
 def search_gsd(
     shop_names: Optional[List[str]] = None,
@@ -39,6 +43,26 @@ def search_gsd(
 
             shop_filter = "AND (" + " OR ".join(conditions) + ")"
 
+            # TWEETRAPS. De latest_list-CTE hieronder draait
+            # ROW_NUMBER() OVER (PARTITION BY shop_id ...) over bt.shop_list, en dat
+            # zijn ~87,8 miljoen rijen. Het shopfilter stond alleen in de buitenste
+            # WHERE op alias `a` en is niet door de LEFT JOIN heen te duwen, dus het
+            # window draaide altijd over de hele tabel: gemeten 156 s voor 9 rijen.
+            # Eerst de shop_ids resolven uit de kleine attributentabel en die dan in
+            # BEIDE CTE's binden brengt dat terug naar ~1 s.
+            cur.execute(f"""
+                SELECT DISTINCT shop_id
+                FROM beslistbi.bt.shop_main_attributes_by_day
+                WHERE date = CURRENT_DATE - 1
+                  AND deleted_ind = 0
+                  {shop_filter.replace('a.', '')}
+            """, params)
+            matched_ids = [r["shop_id"] for r in cur.fetchall()]
+            if not matched_ids:
+                return {"status": "success", "results": [], "total": 0,
+                        "returned": 0, "truncated": False}
+            id_list = ",".join(str(int(i)) for i in matched_ids)
+
             query = f"""
                 WITH yesterday_attrs AS (
                     SELECT shop_id,
@@ -56,6 +80,7 @@ def search_gsd(
                     FROM beslistbi.bt.shop_main_attributes_by_day
                     WHERE date = CURRENT_DATE - 1
                       AND deleted_ind = 0
+                      AND shop_id IN ({id_list})
                 ),
                 latest_list AS (
                     SELECT shop_id,
@@ -70,6 +95,8 @@ def search_gsd(
                     FROM beslistbi.bt.shop_list
                     WHERE deleted_ind = 0
                       AND dim_date_key <= CAST(TO_CHAR(CURRENT_DATE - 1, 'YYYYMMDD') AS BIGINT)
+                      -- Zonder deze regel draait het window over alle ~87,8M rijen.
+                      AND shop_id IN ({id_list})
                 )
                 SELECT a.shop_id,
                        a.shop_name,
@@ -84,12 +111,11 @@ def search_gsd(
                 FROM yesterday_attrs a
                 LEFT JOIN latest_list l
                        ON l.shop_id = a.shop_id AND l.rn = 1
-                WHERE 1=1 {shop_filter}
                 ORDER BY a.shop_name
-                LIMIT 5000
+                LIMIT {LIMIT + 1}
             """
 
-            cur.execute(query, params)
+            cur.execute(query)
             rows = cur.fetchall()
 
             results = [
@@ -108,7 +134,16 @@ def search_gsd(
                 for row in rows
             ]
 
-            return {"status": "success", "results": results, "total": len(results)}
+            truncated = len(results) > LIMIT
+            if truncated:
+                # LIMIT 5000 kapte stil af en rapporteerde die 5000 als `total`, dus
+                # een brede zoekterm gaf een willekeurig alfabetisch voorloopje dat
+                # als "alles" las — en keyword_redirect_service kiest daar zijn
+                # beste match uit.
+                results = results[:LIMIT]
+            return {"status": "success", "results": results,
+                    "total": len(matched_ids), "returned": len(results),
+                    "truncated": truncated}
     except Exception as e:
         logger.error(f"Error searching GSD: {e}")
         return {"status": "error", "error": str(e), "results": [], "total": 0}
