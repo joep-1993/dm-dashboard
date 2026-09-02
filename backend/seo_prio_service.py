@@ -27,13 +27,17 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import requests
 
+from backend import taxv2_client as taxv2
 from backend.database import (
     get_db_connection, return_db_connection,
     get_redshift_connection, return_redshift_connection,
 )
 
-TAXV2_BASE = "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl"
-TAXV2_HEADERS = {"X-User-Name": "SEO_JOEP", "Accept": "application/json"}
+# Gedeelde client, zie backend/taxv2_client.py: één base-URL, één headerset en
+# retry op 502/503/504. De retry geldt alleen voor GET — een PUT opnieuw sturen is
+# hier niet veilig, want de API kent geen idempotency-key.
+TAXV2_BASE = taxv2.BASE
+TAXV2_HEADERS = taxv2.headers()
 
 # In-process state for active runs: run_id -> dict with progress fields
 _RUNS: Dict[str, Dict] = {}
@@ -46,6 +50,8 @@ DEFAULT_THRESHOLDS = {
     "on_min_abs_visits": 50,       # absolute visit floor before flipping ON
     "off_max_visits_pct": 2.0,
     "off_max_revenue_pct": 2.0,
+    "off_min_abs_visits": 25,      # onder dit volume is "weinig aandeel" ruis, geen signaal
+    "off_min_cat_visits": 250,     # en een categorie zelf moet genoeg volume hebben
 }
 
 
@@ -214,8 +220,7 @@ class TaxonomyClient:
     """Cached lookups against taxv2. One instance per run."""
 
     def __init__(self):
-        self._session = requests.Session()
-        self._session.headers.update(TAXV2_HEADERS)
+        self._session = taxv2.session()
         # cat_id -> {slug -> {id, name}}  (linked facets)
         self._cat_facets: Dict[str, Dict[str, Dict]] = {}
         # cat_id -> {facet_id -> seoPriority(bool|None)}  (explicit settings)
@@ -367,6 +372,7 @@ def _set_status(run_id: str, **fields):
         run = _RUNS.setdefault(run_id, {})
         run.update(fields)
     # Persist to DB best-effort
+    conn = cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -383,10 +389,20 @@ def _set_status(run_id: str, **fields):
                 params,
             )
             conn.commit()
-        cur.close()
-        return_db_connection(conn)
     except Exception as e:
         print(f"[SEO_PRIO] status persist failed: {e}")
+    finally:
+        # MOET een finally zijn. Deze functie vuurt elke 1000 geparste rijen en elke
+        # 200 combo's; stond de release binnen de try, dan lekte elke mislukte UPDATE
+        # een verbinding uit de ThreadedConnectionPool(maxconn=60) die ALLE
+        # dashboardtools delen — één slechte run legde :8003 plat tot een herstart.
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            return_db_connection(conn)
 
 
 def start_run(params: Dict) -> str:
@@ -731,9 +747,18 @@ def _decide(row: Dict, t: Dict, cur_raw: Optional[bool]) -> Tuple[str, str, str]
     """
     cur_on = cur_raw is True
     visits_pct = row["pct_visits_in_cat"]
-    revenue_pct = row["pct_revenue_in_cat"]
+    revenue_pct = row["pct_revenue_in_cat"]   # None = categorie had geen omzet in het venster
     visits = row["total_visits"]
     url_count = row["url_count"]
+    cat_visits = row.get("cat_total_visits") or 0
+
+    # Een categorie zonder omzet in het venster geeft geen omzetsignaal, niet een
+    # omzetsignaal van nul. Dan is er niets te beslissen — laat staan wat er staat.
+    if revenue_pct is None:
+        keep_val = "1" if cur_on else ("0" if cur_raw is False else "inherit")
+        return (keep_val, "keep",
+                f"{visits_pct:.2f}% visits; categorie had geen omzet in het venster, "
+                f"dus geen omzetaandeel te bepalen — niet geflipt.")
 
     # Should it be ON?
     qualifies_on = (
@@ -741,9 +766,13 @@ def _decide(row: Dict, t: Dict, cur_raw: Optional[bool]) -> Tuple[str, str, str]
         and revenue_pct >= t["on_min_revenue_pct"]
         and visits >= t["on_min_abs_visits"]
     )
+    # Spiegel van de ON-kant: zonder absolute vloer stelde 1 visit in een categorie
+    # van 60 al voor om productie-seoPriority uit te zetten.
     qualifies_off = (
         visits_pct < t["off_max_visits_pct"]
         and revenue_pct < t["off_max_revenue_pct"]
+        and visits >= t.get("off_min_abs_visits", 0)
+        and cat_visits >= t.get("off_min_cat_visits", 0)
     )
 
     if qualifies_on and not cur_on:
@@ -755,7 +784,7 @@ def _decide(row: Dict, t: Dict, cur_raw: Optional[bool]) -> Tuple[str, str, str]
     if qualifies_off and cur_on:
         return ("0", "turn_off",
                 f"only {visits_pct:.2f}% visits / {revenue_pct:.2f}% revenue "
-                f"in category, currently ON.")
+                f"in category ({visits:,} visits of {cat_visits:,}), currently ON.")
     # Keep
     keep_val = "1" if cur_on else ("0" if cur_raw is False else "inherit")
     return (keep_val, "keep",
@@ -879,7 +908,13 @@ def _run_pipeline(run_id: str, params: Dict) -> None:
             v_total = ct["visits"] or 0
             r_total = ct["revenue"] or 0.0
             pct_v = (a["visits"] / v_total * 100.0) if v_total else 0.0
-            pct_r = (a["revenue"] / r_total * 100.0) if r_total else 0.0
+            # None, niet 0.0. Bij r_total == 0 is het aandeel ONBEPAALD, en 0.0
+            # invullen liet het omzetbeen van qualifies_off altijd slagen: elk
+            # facet dat ON stond en onder de visits-drempel zat kreeg turn_off
+            # voorgesteld met "0.00% revenue in category" als bewijs — een
+            # artefact van een lege noemer. Andersom kon qualifies_on daar nooit
+            # vuren. _decide() behandelt None nu apart.
+            pct_r = (a["revenue"] / r_total * 100.0) if r_total else None
 
             row = {
                 "main_cat_name": a["main_cat_name"],
@@ -894,7 +929,11 @@ def _run_pipeline(run_id: str, params: Dict) -> None:
                 "total_revenue": round(a["revenue"], 4),
                 "url_count": a["url_count"],
                 "pct_visits_in_cat": round(pct_v, 4),
-                "pct_revenue_in_cat": round(pct_r, 4),
+                # None blijft None: de kolom is NULLable en de frontend's fmtPct()
+                # rendert null al als lege cel. Een lege cel is eerlijker dan 0,00%.
+                "pct_revenue_in_cat": (None if pct_r is None else round(pct_r, 4)),
+                # Alleen voor _decide()'s absolute vloer; niet gepersisteerd.
+                "cat_total_visits": v_total,
                 "current_seo_prio": (
                     "ON" if cur_prio is True else
                     "OFF" if cur_prio is False else
@@ -1227,7 +1266,14 @@ def apply_to_taxonomy(run_id: str, selections: List[Dict], dry_run: bool = False
             for chunk in pool.map(lambda kv: _do_category(*kv), list(by_cat.items())):
                 results.extend(chunk)
 
-    _persist_apply_results(run_id, results, dry_run)
+    # De taxonomie is op dit punt al gewijzigd. Kan het logboek niet weg, dan is dat
+    # een zichtbaar probleem — geen reden om de uitkomst te verzwijgen, maar ook geen
+    # reden om "alles ok" te melden.
+    audit_log_error = None
+    try:
+        _persist_apply_results(run_id, results, dry_run)
+    except Exception as e:  # noqa: BLE001
+        audit_log_error = str(e)
 
     counts = {"applied": 0, "failed": 0, "skipped": 0, "dry_run_rows": 0}
     for r in results:
@@ -1239,7 +1285,11 @@ def apply_to_taxonomy(run_id: str, selections: List[Dict], dry_run: bool = False
             counts["dry_run_rows"] += 1
         else:
             counts["skipped"] += 1
-    return {**counts, "dry_run": dry_run, "results": results}
+    out = {**counts, "dry_run": dry_run, "results": results}
+    if audit_log_error:
+        out["audit_log_failed"] = True
+        out["audit_log_error"] = audit_log_error
+    return out
 
 
 def _stub(row: Dict) -> Dict:
@@ -1299,8 +1349,13 @@ def _persist_apply_results(run_id: str, results: List[Dict], dry_run: bool) -> N
                 )
         conn.commit()
     except Exception as e:
+        # De rollback gooit ZOWEL de pa.seo_prio_apply_log-inserts als de
+        # applied_status-stempels weg, terwijl de PUT's naar taxv2 al gebeurd zijn.
+        # Dat mag geen stille print blijven: de aanroeper meldt anders "N applied"
+        # terwijl het logboek dat de run expres moet overleven leeg is.
         conn.rollback()
         print(f"[SEO_PRIO] could not persist apply results: {e}")
+        raise
     finally:
         cur.close()
         return_db_connection(conn)
