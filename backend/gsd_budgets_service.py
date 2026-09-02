@@ -62,6 +62,9 @@ SA360_PAGE_SIZE = 10_000
 
 EXCLUSIONS_SPREADSHEET_ID = "1y7kZmo9O7KO4uaG9wwq_wOtovsDMas07TAFDb0cyGAE"
 EXCLUSIONS_TABLE = "pa.gsd_shop_exclusions_joep"
+# Kolomkop in de sheet waar de shop-id's in staan, lowercase omdat Redshift
+# quoted identifiers naar lowercase vouwt. De hoofdquery filtert hierop.
+EXCLUSIONS_SHOP_ID_COLUMN = "shop id"
 MISSED_SHOPS_TABLE = "pa.jvs_gsd_missed_shops"
 
 # Anything the two scripts branch on by country lives here. Everything else is
@@ -87,6 +90,14 @@ MARGIN_HARD_DROP = -25        # marge < -25 → verlagen-25 (and top-25 list for
 MARGIN_SOFT_DROP_HIGH = -5    # -25 < marge < -5 → verlagen-20
 MARGIN_POSITIVE_FLOOR = 0     # marge > 0 branches into rev_click analysis
 REV_CLICK_THRESHOLD = 1.38
+# Kostenvenster in dagen, moet gelijk zijn aan het omzetvenster (7 dagen).
+# Stond effectief op 1: het omzetbeen filterde op `>= today-7`, het kosten-subselect
+# op `>= today-1` (gisteren PLUS de deelspend van vandaag), en `marge = omzet - kosten`
+# werd daarna getoetst aan absolute eurodrempels. Gemeten over NL op 2026-09-02:
+# 7.217 euro kosten tegen 47.482 met een gelijk venster, waardoor `verlagen-25`
+# 0 shops raakte in plaats van 16 en `marge > 0` 533 in plaats van 364.
+# Op 1 zetten herstelt het oude gedrag exact.
+COST_WINDOW_DAYS = 7
 LINKAGE_THRESHOLD = 0.5
 TRANSACTIONS_THRESHOLD = 7
 DELTA_UPPER = -15             # delta > -15 → verhogen-20
@@ -258,7 +269,24 @@ def _sheets_service_account_file() -> str:
     return str(p)
 
 
+_ads_client: Optional[GoogleAdsClient] = None
+_ads_lock = threading.Lock()
+
+
 def _get_client() -> GoogleAdsClient:
+    """Eén client per proces. Werd hiervoor opnieuw gebouwd in
+    get_campaigns_for_shop() én in adjust_campaign_budget(), dus tot ~2 clients en
+    3 nieuwe gRPC-kanalen per handelende campagne — bij ~679 NL-shops loopt dat op.
+    SA360 hiernaast was al gememoïseerd; dit trekt het gelijk."""
+    global _ads_client
+    with _ads_lock:
+        if _ads_client is not None:
+            return _ads_client
+        _ads_client = _build_client()
+        return _ads_client
+
+
+def _build_client() -> GoogleAdsClient:
     config = {
         "developer_token": os.environ.get("GOOGLE_DEVELOPER_TOKEN", ""),
         "refresh_token": os.environ.get("GOOGLE_REFRESH_TOKEN", ""),
@@ -291,7 +319,13 @@ def _write_sa360_yaml(path: Path, login_customer_id: str) -> None:
         """
     )
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml, encoding="utf-8")
+    # Dit bestand bevat developer token, client id, client secret en refresh token.
+    # path.write_text() alleen maakt het met de standaard umask aan, oftewel 0644 —
+    # leesbaar voor elk lokaal account. Eerst met 0600 aanmaken, dan pas vullen.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(yaml)
+    os.chmod(path, 0o600)
 
 
 def _ensure_sa360_client(customer_id: str) -> SearchAds360Client:
@@ -370,37 +404,150 @@ def _is_budget_constrained(campaign_name: str, country: str, cache: Dict[str, Di
     return 1 if "BUDGET_CONSTRAINED" in value.upper() else 0
 
 
-def sync_shop_exclusions() -> int:
-    """Mirror the exclusions Google Sheet into Redshift.
+def _exclusions_table_parts() -> Tuple[str, str]:
+    schema, _, table = EXCLUSIONS_TABLE.partition(".")
+    return schema, table
 
-    The sheet is the user-maintained source of truth; the Redshift table is
-    referenced by the main performance query's NOT IN sub-select. Always
-    truncate-and-reinsert to match the source script's behaviour. Returns
-    the row count that was written.
+
+def get_shop_exclusion_ids() -> List[str]:
+    """De shop-id's die NU in de spiegeltabel staan — dat is wat de hoofdquery
+    daadwerkelijk uitsluit. Read-only."""
+    conn = get_redshift_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f'SELECT DISTINCT "{EXCLUSIONS_SHOP_ID_COLUMN}" AS shop_id FROM {EXCLUSIONS_TABLE} '
+            f'WHERE "{EXCLUSIONS_SHOP_ID_COLUMN}" <> \'\''
+        )
+        ids = [str(r["shop_id"]).strip() for r in cur.fetchall()]
+        cur.close()
+        return ids
+    finally:
+        return_redshift_connection(conn)
+
+
+def read_shop_exclusions_sheet() -> Dict[str, Any]:
+    """Lees de uitsluitingen-sheet en normaliseer hem. Raakt niets — dit is de
+    lees-helft die dry run ook mag gebruiken.
+
+    Returns {"headers", "records", "shop_ids", "sheet_rows", "skipped",
+    "dropped_columns"}. Raakt de sheet onbruikbaar, dan een RuntimeError met een
+    tekst die letterlijk in de UI-waarschuwing terechtkomt.
     """
     client = _gspread_client()
     sheet = client.open_by_key(EXCLUSIONS_SPREADSHEET_ID).sheet1
     data = sheet.get_all_values()
     if not data or len(data) < 2:
-        logger.warning("Exclusions sheet returned no data; skipping sync.")
-        return 0
+        raise RuntimeError("de sheet gaf geen rijen terug (leeg of alleen een header)")
 
-    headers = data[0]
-    records = [row for row in data[1:] if any((cell or "").strip() for cell in row)]
+    # De sheet heeft een notitiekolom zonder kolomkop. Die lege header werd
+    # letterlijk `"" VARCHAR(1000)` in de DDL, en Redshift weigert dat
+    # ("zero-length delimited identifier"). Daardoor sloeg de hele sync stuk en
+    # bleef de tabel hangen op de laatste geslaagde stand — met 8 van de 16
+    # shops erin, zonder dat de UI dat liet zien. Kolommen zonder kop laten we
+    # vallen; we lezen toch alleen de shop-id-kolom terug.
+    header_row = data[0]
+    keep = [i for i, col in enumerate(header_row) if (col or "").strip()]
+    dropped_columns = len(header_row) - len(keep)
+    headers = [header_row[i].strip() for i in keep]
+    if not headers:
+        raise RuntimeError("geen enkele kolom in de sheet heeft een kolomkop")
+
+    lowered = [h.lower() for h in headers]
+    # Redshift vouwt quoted identifiers naar lowercase, dus twee koppen die
+    # alleen in hoofdletters verschillen geven een dubbele kolomnaam.
+    dupes = sorted({h for h in lowered if lowered.count(h) > 1})
+    if dupes:
+        raise RuntimeError(f"dubbele kolomkop(pen) in de sheet: {', '.join(dupes)}")
+    if EXCLUSIONS_SHOP_ID_COLUMN not in lowered:
+        raise RuntimeError(
+            f"kolom '{EXCLUSIONS_SHOP_ID_COLUMN}' ontbreekt in de sheet (gevonden: {', '.join(headers)})"
+        )
+    shop_id_idx = lowered.index(EXCLUSIONS_SHOP_ID_COLUMN)
+
+    records: List[Tuple[str, ...]] = []
+    skipped: List[str] = []
+    for sheet_row_no, raw in enumerate(data[1:], start=2):
+        cells = [(raw[i] if i < len(raw) else "").strip() for i in keep]
+        if not any(cells):
+            continue
+        shop_id = cells[shop_id_idx]
+        if not shop_id.isdigit():
+            # Eén niet-numerieke waarde sloopt de NOT IN-subselect van de
+            # hoofdquery: Redshift cast die varchar naar het int-type van
+            # outclick_shop_id en faalt op de hele run. Rij overslaan en melden.
+            skipped.append(f"rij {sheet_row_no} (shop id {repr(shop_id) if shop_id else 'leeg'})")
+            continue
+        records.append(tuple(cells))
+
+    if not records:
+        raise RuntimeError("geen enkele rij had een geldig numeriek shop id")
+
+    return {
+        "headers": headers,
+        "records": records,
+        "shop_ids": [r[shop_id_idx] for r in records],
+        "sheet_rows": len(data) - 1,
+        "skipped": skipped,
+        "dropped_columns": dropped_columns,
+    }
+
+
+def sync_shop_exclusions() -> Dict[str, Any]:
+    """Mirror the exclusions Google Sheet into Redshift.
+
+    The sheet is the user-maintained source of truth; the Redshift table is
+    referenced by the main performance query's NOT IN sub-select. Always
+    truncate-and-reinsert to match the source script's behaviour.
+
+    Schrijft, dus alleen op een live run — dry run gebruikt
+    `read_shop_exclusions_sheet()` + `get_shop_exclusion_ids()` om te vergelijken
+    zonder iets aan te raken (strict-dry-run, zie cc1/LEARNINGS 2026-04-21).
+
+    Returns de sheet-uitlezing plus {"rows", "rebuilt"}.
+    """
+    sheet = read_shop_exclusions_sheet()
+    headers = sheet["headers"]
+    lowered = [h.lower() for h in headers]
+    records = sheet["records"]
 
     conn = get_redshift_connection()
     try:
         cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = %s AND table_name = %s
+            ORDER BY ordinal_position
+            """,
+            _exclusions_table_parts(),
+        )
+        existing = [r["column_name"] for r in cur.fetchall()]
+
+        rebuilt = False
+        if existing and existing != lowered:
+            # CREATE TABLE IF NOT EXISTS voegt niets toe aan een tabel die al
+            # bestaat, dus na een kolomwijziging in de sheet liep de INSERT stuk
+            # op een onbekende kolom. Opnieuw opbouwen mag: de sheet is de bron
+            # van waarheid, de tabel is puur een spiegel.
+            logger.info(
+                f"Exclusions sheet columns changed ({existing} -> {lowered}); rebuilding {EXCLUSIONS_TABLE}"
+            )
+            cur.execute(f"DROP TABLE {EXCLUSIONS_TABLE};")
+            existing = []
+            rebuilt = True
+
         column_defs = ",\n  ".join([f'"{col}" VARCHAR(1000)' for col in headers])
-        cur.execute(f'CREATE TABLE IF NOT EXISTS {EXCLUSIONS_TABLE} (\n  {column_defs}\n);')
+        if not existing:
+            cur.execute(f'CREATE TABLE {EXCLUSIONS_TABLE} (\n  {column_defs}\n);')
         cur.execute(f"DELETE FROM {EXCLUSIONS_TABLE};")
-        if records:
-            insert_cols = ", ".join([f'"{col}"' for col in headers])
-            insert_sql = f"INSERT INTO {EXCLUSIONS_TABLE} ({insert_cols}) VALUES %s"
-            execute_values(cur, insert_sql, [tuple(row) for row in records])
+        insert_cols = ", ".join([f'"{col}"' for col in headers])
+        insert_sql = f"INSERT INTO {EXCLUSIONS_TABLE} ({insert_cols}) VALUES %s"
+        execute_values(cur, insert_sql, records)
         conn.commit()
         cur.close()
-        return len(records)
+        return {**sheet, "rows": len(records), "rebuilt": rebuilt}
     finally:
         return_redshift_connection(conn)
 
@@ -419,13 +566,16 @@ def get_redshift_shop_data(
     """Return 7-day shop-level performance for the given country.
 
     Mirrors `getRedShiftData` in the source scripts: last-7-day omzet,
-    last-day cost, transactions, linkage (uuid-linked clicks / total clicks),
-    and rev/click. Excludes shops listed in `EXCLUSIONS_TABLE`.
+    kosten over HETZELFDE venster (zie COST_WINDOW_DAYS — het bronscript nam hier
+    één dag, wat een marge opleverde die 7 dagen omzet tegen ~1 dag kosten afzette),
+    transactions, linkage (uuid-linked clicks / total clicks), and rev/click.
+    Excludes shops listed in `EXCLUSIONS_TABLE`.
     """
     cfg = _resolve_country(country)
     today_date = datetime.today().date()
-    yesterday_sql = (today_date - timedelta(days=1)).strftime("%Y-%m-%d")
     last_week_sql = (today_date - timedelta(days=7)).strftime("%Y-%m-%d")
+    cost_from_sql = (today_date - timedelta(days=COST_WINDOW_DAYS)).strftime("%Y-%m-%d")
+    cost_to_sql = today_date.strftime("%Y-%m-%d")   # exclusief: vandaag is nog niet af
 
     limit_statement = f"LIMIT {int(limit)}" if limit else ""
 
@@ -455,7 +605,8 @@ def get_redshift_shop_data(
               SUM(cost) AS kosten
             FROM hda.sa360_adgroup
             WHERE
-              date(date) >= '{yesterday_sql}'
+              date(date) >= '{cost_from_sql}'
+              AND date(date) < '{cost_to_sql}'
               AND deleted_ind = 0
               AND account = '{cfg['sa360_account']}'
             GROUP BY shop_id
@@ -472,9 +623,9 @@ def get_redshift_shop_data(
             AND tac.outclick_shop_id IS NOT NULL
             AND tac.domain = {cfg['domain']}
             AND tac.outclick_shop_id NOT IN (
-              SELECT DISTINCT "shop id"
+              SELECT DISTINCT "{EXCLUSIONS_SHOP_ID_COLUMN}"
               FROM {EXCLUSIONS_TABLE}
-              WHERE "shop id" IS NOT NULL
+              WHERE "{EXCLUSIONS_SHOP_ID_COLUMN}" <> ''
             )
             {name_filter}
           GROUP BY tac.outclick_shop_id, tac.shop_name
@@ -505,6 +656,62 @@ def get_redshift_shop_data(
         return result
     finally:
         return_redshift_connection(conn)
+
+
+def get_rev_click_old_map(country: str, shop_ids: List[int],
+                          daterange: str) -> Dict[int, float]:
+    """rev/click van 28 (of 35-28) dagen geleden, voor ALLE shops in één query.
+
+    De per-shop variant hieronder deed één Redshift-roundtrip per shop — en tot twee,
+    want bij een lege 28-daagse uitkomst volgt nog de 35-28-variant. Elke roundtrip
+    pakt een verse poolverbinding waarop get_redshift_connection() ook nog een
+    SELECT 1-probe draait. De scan kost hetzelfde of je nu één shop of alle 679
+    opvraagt, dus doe het in één keer.
+    """
+    if not shop_ids:
+        return {}
+    cfg = _resolve_country(country)
+    today_date = datetime.today().date()
+    old_sql = (today_date - timedelta(days=28)).strftime("%Y-%m-%d")
+    if daterange == "28":
+        date_filter = f"AND date(tac.date) = '{old_sql}'"
+    elif daterange == "35-28":
+        old_sql1 = (today_date - timedelta(days=35)).strftime("%Y-%m-%d")
+        date_filter = f"AND date(tac.date) BETWEEN '{old_sql1}' AND '{old_sql}'"
+    else:
+        raise ValueError(f"Unknown daterange {daterange!r}")
+    ids_sql = ",".join(str(int(s)) for s in shop_ids)
+    query = f"""
+        SELECT tac.outclick_shop_id AS shop_id,
+               ROUND(SUM(tac.revenue_excl)
+                     / NULLIF(COUNT(DISTINCT tac.stats_id_stat), 0), 2) AS rev_click
+        FROM bt.cpa_outclicks_transactional tac
+        WHERE tac.actual_ind = 1
+          AND tac.deleted_ind = 0
+          AND tac.label IN ('cpa', 'cpa_cpc', 't3_fallback',
+                            'affiliate_linked_revenue', 'affiliate_unlinked_click')
+          {date_filter}
+          AND tac.marketing_channel_aff_id_name = 'Google Shopping Direct'
+          AND tac.outclick_shop_id IS NOT NULL
+          AND tac.domain = {cfg['domain']}
+          AND tac.outclick_shop_id IN ({ids_sql})
+        GROUP BY tac.outclick_shop_id
+    """
+    conn = get_redshift_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(query)
+        rows = cur.fetchall()
+        cur.close()
+    finally:
+        return_redshift_connection(conn)
+    out: Dict[int, float] = {}
+    for r in rows:
+        sid = r["shop_id"] if isinstance(r, dict) else r[0]
+        val = r["rev_click"] if isinstance(r, dict) else r[1]
+        if sid is not None and val is not None:
+            out[int(sid)] = float(val)
+    return out
 
 
 def get_rev_click_old(country: str, shop_ids: List[int], daterange: str) -> Optional[float]:
@@ -889,11 +1096,18 @@ def decide_shop_action(
 
 def _should_apply_to_campaign(
     action: str,
-    campaign_marge: float,
+    campaign_marge: Optional[float],
     campaign_name: str,
     is_budget_constrained: int,
 ) -> Tuple[bool, Optional[str]]:
     """Return (apply, skip_reason) for the per-campaign gate."""
+    # None = SA360 gaf geen antwoord. Dat is iets anders dan een marge van nul:
+    # met 0.0 faalde élke poort hieronder, dus een totale SA360-uitval leverde een
+    # volle resultaattabel op met "completed", nul mutaties en overal
+    # skip_reason=campaign_marge_non_negative — niet te onderscheiden van een
+    # echt rustige dag.
+    if campaign_marge is None:
+        return False, "sa360_unavailable"
     if action == "verlagen-25":
         if campaign_marge < 0:
             return True, None
@@ -975,37 +1189,334 @@ def run_gsd_budgets(
     run_id = len(_run_history) + 1
     start_time = datetime.now()
 
-    with _run_lock:
-        logger.info(
-            f"GSD Budgets run #{run_id} start (country={country} dry_run={dry_run} "
-            f"start={start_days_ago} end={end_days_ago} limit={limit_shops})"
-        )
-        _register_active(run_id, country)
-
-        exclusions_synced = 0
-        exclusions_sync_status = "synced"
-        if dry_run:
-            exclusions_sync_status = "skipped_dry_run"
-            logger.info("Dry-run: skipping pa.gsd_shop_exclusions_joep sync; using whatever is currently in the table")
-        else:
-            try:
-                exclusions_synced = sync_shop_exclusions()
-            except Exception as e:
-                logger.warning(f"sync_shop_exclusions failed: {e}")
-                exclusions_sync_status = f"failed: {e}"
-
-        try:
-            limited_cache = preload_budget_constrained_cache_with_retry()
-            limited_cache_status = "loaded"
-        except Exception as e:
-            # Both attempts failed. Abort the entire run — no increases AND
-            # no decreases. A silent fallback to an empty cache here previously
-            # made every verhogen-20 candidate look "not_budget_constrained"
-            # which in turn made it look like the dashboard had nothing to do.
-            logger.error(
-                f"preload_budget_constrained_cache failed twice: {e!r} — aborting run, no mutations performed"
+    try:
+        with _run_lock:
+            logger.info(
+                f"GSD Budgets run #{run_id} start (country={country} dry_run={dry_run} "
+                f"start={start_days_ago} end={end_days_ago} limit={limit_shops})"
             )
-            duration = (datetime.now() - start_time).total_seconds()
+            _register_active(run_id, country)
+
+            # De uitsluitingen komen uit de Google Sheet achter "Add shop
+            # exclusions"; `pa.gsd_shop_exclusions_joep` is niet meer dan de
+            # spiegel die de hoofdquery leest. Een live run schrijft die spiegel
+            # bij; een dry run schrijft NIETS (strict-dry-run, 2026-04-21) en
+            # vergelijkt alleen, zodat de preview toch eerlijk zegt dat hij met
+            # een oudere lijst rekent.
+            exclusions_synced = 0
+            exclusions_sync_status = "synced"
+            exclusions_warning: Optional[str] = None
+            skipped_rows: List[str] = []
+            try:
+                if dry_run:
+                    exclusions_sync_status = "skipped_dry_run"
+                    sheet = read_shop_exclusions_sheet()
+                    skipped_rows = sheet["skipped"]
+                    in_table = set(get_shop_exclusion_ids())
+                    exclusions_synced = len(in_table)
+                    missing = [sid for sid in sheet["shop_ids"] if sid not in in_table]
+                    if missing:
+                        exclusions_sync_status = "stale_dry_run"
+                        exclusions_warning = (
+                            f"Dry run schrijft de uitsluitingen niet weg, dus deze preview rekent met de "
+                            f"{len(in_table)} shop-id's in {EXCLUSIONS_TABLE}. In de sheet staan er "
+                            f"{len(sheet['shop_ids'])}: shop {', '.join(missing)} "
+                            f"{'ontbreekt' if len(missing) == 1 else 'ontbreken'} nog in de tabel en "
+                            f"{'wordt' if len(missing) == 1 else 'worden'} hieronder dus wél meegenomen. "
+                            f"Een live run synchroniseert de lijst."
+                        )
+                else:
+                    sync = sync_shop_exclusions()
+                    skipped_rows = sync["skipped"]
+                    exclusions_synced = sync["rows"]
+                    logger.info(
+                        f"Exclusions synced: {exclusions_synced} shop(s) uit {sync['sheet_rows']} sheetrijen "
+                        f"(rebuilt={sync['rebuilt']}, kolommen zonder kop overgeslagen={sync['dropped_columns']})"
+                    )
+                if skipped_rows:
+                    # Overgeslagen rijen zijn shops die de gebruiker dacht uit te
+                    # sluiten en die het toch niet zijn. Dat weegt zwaarder dan de
+                    # staleness-melding hierboven, dus die overschrijven we.
+                    exclusions_sync_status = (
+                        "skipped_dry_run_with_warnings" if dry_run else "synced_with_warnings"
+                    )
+                    exclusions_warning = (
+                        f"{len(skipped_rows)} rij(en) in de uitsluitingen-sheet zijn overgeslagen omdat "
+                        f"het shop id niet numeriek is: {', '.join(skipped_rows)}. Die shops worden NIET "
+                        f"uitgesloten."
+                    )
+                    logger.warning(exclusions_warning)
+            except Exception as e:
+                # Niet fataal: de run gaat door op wat er nog in de tabel staat.
+                # Dat is de veilige kant op (hooguit te veel uitgesloten), maar de
+                # lijst kan verouderd zijn, dus dit moet zichtbaar zijn in de UI.
+                logger.warning(f"exclusions sheet failed: {e}")
+                exclusions_sync_status = f"failed: {e}"
+                try:
+                    stale = len(get_shop_exclusion_ids())
+                except Exception:
+                    stale = None
+                exclusions_synced = stale or 0
+                exclusions_warning = (
+                    f"Uitsluitingen konden niet uit de spreadsheet worden gehaald: {e}. "
+                    f"Deze run gebruikt de {stale if stale is not None else 'onbekend aantal'} "
+                    f"shop-id's die nog in {EXCLUSIONS_TABLE} staan — die lijst kan verouderd zijn, "
+                    f"dus shops die je recent aan de sheet hebt toegevoegd worden mogelijk wél aangepast."
+                )
+
+            try:
+                limited_cache = preload_budget_constrained_cache_with_retry()
+                limited_cache_status = "loaded"
+            except Exception as e:
+                # Both attempts failed. Abort the entire run — no increases AND
+                # no decreases. A silent fallback to an empty cache here previously
+                # made every verhogen-20 candidate look "not_budget_constrained"
+                # which in turn made it look like the dashboard had nothing to do.
+                logger.error(
+                    f"preload_budget_constrained_cache failed twice: {e!r} — aborting run, no mutations performed"
+                )
+                duration = (datetime.now() - start_time).total_seconds()
+                run_result = {
+                    "run_id": run_id,
+                    "country": country,
+                    "dry_run": dry_run,
+                    "start_days_ago": start_days_ago,
+                    "end_days_ago": end_days_ago,
+                    "date_range": {
+                        "start": (datetime.now() - timedelta(days=start_days_ago)).strftime("%Y-%m-%d"),
+                        "end": (datetime.now() - timedelta(days=end_days_ago)).strftime("%Y-%m-%d"),
+                    },
+                    "limit_shops": limit_shops,
+                    "shop_names_filter": shop_names,
+                    "shop_names_excluded": shop_names_excluded,
+                    "skip_missed_upload": skip_missed_upload,
+                    "timestamp": start_time.isoformat(),
+                    "duration_seconds": round(duration, 1),
+                    "exclusions_synced": exclusions_synced,
+                    "exclusions_sync_status": exclusions_sync_status,
+                    "exclusions_warning": exclusions_warning,
+                    "summary": {
+                        "verlagen-25": 0, "verlagen-20": 0, "c-verlagen-20": 0,
+                        "verhogen-20": 0, "no_action": 0, "missed": 0,
+                        "budget_changed": 0, "shops_over_loss_25": 0,
+                    },
+                    "shops_evaluated": 0,
+                    "results": [],
+                    "over_loss_25": [],
+                    "missed_shops": [],
+                    "missed_shops_uploaded": 0,
+                    "missed_upload_status": "skipped",
+                    "budget_constrained_load_status": f"failed: {e}",
+                    "status": "aborted",
+                    "error": (
+                        f"Failed to load BUDGET_CONSTRAINED Google Sheet (after 1 retry): {e}. "
+                        "Aborted before any budget mutations to avoid suppressing all "
+                        "verhogen-20 actions. Re-run after the Sheets API recovers."
+                    ),
+                }
+                _history_prepend(run_result)
+                return run_result
+
+            shop_rows = get_redshift_shop_data(
+                country=country,
+                shop_names=shop_names,
+                excluded=shop_names_excluded,
+                limit=limit_shops,
+            )
+
+            today_str = datetime.today().strftime("%d-%m-%Y")
+            results: List[Dict[str, Any]] = []
+            over_loss_25: List[Dict[str, Any]] = []
+            missed_shops: List[str] = []
+            missed_dates: List[str] = []
+            summary_counts = {
+                "verlagen-25": 0,
+                "verlagen-20": 0,
+                "c-verlagen-20": 0,
+                "verhogen-20": 0,
+                "no_action": 0,
+                "missed": 0,
+                "budget_changed": 0,
+                "shops_over_loss_25": 0,
+            }
+
+            was_cancelled = False
+            sa360_failures = 0
+            # Eén scan voor alle shops in plaats van 1-2 roundtrips per shop.
+            _all_ids = [int(r["shop_id"]) for r in shop_rows if r.get("shop_id") is not None]
+            try:
+                rc_old_28 = get_rev_click_old_map(country, _all_ids, "28")
+                rc_old_35 = get_rev_click_old_map(country, _all_ids, "35-28")
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"rev_click_old prefetch failed: {e}")
+                rc_old_28, rc_old_35 = {}, {}
+            for margin_data in shop_rows:
+                if _is_cancelled(run_id):
+                    was_cancelled = True
+                    break
+                shop_name = margin_data.get("shop_name")
+                shop_id = margin_data.get("shop_id")
+                marge = margin_data.get("marge")
+                try:
+                    marge_f = float(marge) if marge is not None else None
+                except (TypeError, ValueError):
+                    marge_f = None
+                rev_click = margin_data.get("rev_click")
+                try:
+                    rev_click_f = float(rev_click) if rev_click is not None else None
+                except (TypeError, ValueError):
+                    rev_click_f = None
+                linkage = margin_data.get("linkage")
+                try:
+                    linkage_f = float(linkage) if linkage is not None else 0.0
+                except (TypeError, ValueError):
+                    linkage_f = 0.0
+                transactions = int(margin_data.get("transactions") or 0)
+
+                rev_click_old: Optional[float] = None
+                rev_click_delta: Optional[float] = None
+
+                # Collect top-25 (NL-only display; data always available)
+                if marge_f is not None and marge_f < MARGIN_HARD_DROP:
+                    over_loss_25.append({
+                        "shop_name": shop_name,
+                        "shop_id": shop_id,
+                        "marge": round(marge_f, 2),
+                    })
+
+                # In the rev_click-> delta branch, the source script fetches the 4-week
+                # baseline *before* calling decide_shop_action. We mirror that order so
+                # decide_shop_action gets a real delta, not None.
+                if (
+                    marge_f is not None
+                    and marge_f > MARGIN_POSITIVE_FLOOR
+                    and linkage_f > LINKAGE_THRESHOLD
+                    and transactions >= TRANSACTIONS_THRESHOLD
+                    and rev_click_f is not None
+                    and rev_click_f > REV_CLICK_THRESHOLD
+                ):
+                    try:
+                        # Zelfde volgorde en zelfde terugval als hiervoor, maar uit de
+                        # voorgeladen maps in plaats van per shop een query.
+                        rev_click_old = rc_old_28.get(int(shop_id))
+                        if not rev_click_old:
+                            rev_click_old = rc_old_35.get(int(shop_id))
+                        rev_click_delta = get_rev_click_delta(rev_click_f, rev_click_old)
+                    except Exception as e:
+                        logger.warning(f"rev_click_old lookup failed for {shop_name}: {e}")
+
+                action, skip_reason = decide_shop_action(
+                    marge=marge_f,
+                    rev_click=rev_click_f,
+                    rev_click_delta=rev_click_delta,
+                    linkage=linkage_f,
+                    transactions=transactions,
+                )
+
+                shop_record = {
+                    "shop_name": shop_name,
+                    "shop_id": shop_id,
+                    "marge": round(marge_f, 2) if marge_f is not None else None,
+                    "rev_click": round(rev_click_f, 2) if rev_click_f is not None else None,
+                    "rev_click_old": round(rev_click_old, 2) if rev_click_old is not None else None,
+                    "rev_click_delta": round(rev_click_delta, 2) if rev_click_delta is not None else None,
+                    "linkage": round(linkage_f, 4),
+                    "transactions": transactions,
+                    "action": action,
+                    "skip_reason": skip_reason,
+                    "campaigns": [],
+                }
+
+                if skip_reason == "missed":
+                    missed_shops.append(shop_name)
+                    missed_dates.append(today_str)
+                    summary_counts["missed"] += 1
+
+                if marge_f is not None and marge_f < MARGIN_HARD_DROP:
+                    summary_counts["shops_over_loss_25"] += 1
+
+                if action is None:
+                    summary_counts["no_action"] += 1
+                    results.append(shop_record)
+                    continue
+
+                summary_counts[action] = summary_counts.get(action, 0) + 1
+
+                campaign_resource_names, campaign_names = get_campaigns_for_shop(
+                    country, shop_name, shop_id
+                )
+
+                for campaign_resource_name, campaign_name in zip(campaign_resource_names, campaign_names):
+                    if _is_cancelled(run_id):
+                        was_cancelled = True
+                        break
+                    try:
+                        campaign_marge = get_total_marge_sa360(
+                            country,
+                            campaign_name,
+                            start_days_ago=start_days_ago,
+                            end_days_ago=end_days_ago,
+                        )
+                    except Exception as e:
+                        # None, niet 0.0 — zie _should_apply_to_campaign. Een storing
+                        # moet zichtbaar zijn in het resultaat, niet wegvallen als
+                        # "marge was niet negatief".
+                        logger.warning(f"SA360 marge failed for {campaign_name}: {e}")
+                        campaign_marge = None
+                        sa360_failures += 1
+
+                    constrained = _is_budget_constrained(campaign_name, country, limited_cache)
+                    apply, per_cg_skip = _should_apply_to_campaign(
+                        action, campaign_marge, campaign_name, constrained
+                    )
+
+                    campaign_record = {
+                        "campaign_name": campaign_name,
+                        "campaign_resource_name": campaign_resource_name,
+                        "campaign_marge": campaign_marge,
+                        "is_budget_constrained": bool(constrained),
+                        "applied": False,
+                        "budget_old": None,
+                        "budget_new": None,
+                        "mutation_status": None,
+                        "skip_reason": per_cg_skip,
+                    }
+
+                    if apply:
+                        pct = BUDGET_PCT_BY_ACTION[action]
+                        mutation = adjust_campaign_budget(
+                            country, campaign_resource_name, pct, dry_run=dry_run
+                        )
+                        campaign_record["mutation_status"] = mutation.get("status")
+                        campaign_record["budget_old"] = mutation.get("current_eur")
+                        campaign_record["budget_new"] = mutation.get("new_eur")
+                        if mutation.get("status") in ("success", "dry_run"):
+                            campaign_record["applied"] = True
+                            summary_counts["budget_changed"] += 1
+
+                    shop_record["campaigns"].append(campaign_record)
+
+                results.append(shop_record)
+                if was_cancelled:
+                    break
+
+            missed_uploaded = 0
+            missed_upload_status = "skipped"
+            if missed_shops and not skip_missed_upload and not dry_run:
+                try:
+                    missed_uploaded = upload_missed_shops(country, missed_shops, missed_dates)
+                    missed_upload_status = "uploaded"
+                except Exception as e:
+                    logger.warning(f"upload_missed_shops failed: {e}")
+                    missed_upload_status = f"error: {e}"
+            elif dry_run:
+                missed_upload_status = "skipped_dry_run"
+            elif skip_missed_upload:
+                missed_upload_status = "skipped_by_flag"
+
+            end_time = datetime.now()
+            duration = (end_time - start_time).total_seconds()
+
             run_result = {
                 "run_id": run_id,
                 "country": country,
@@ -1024,254 +1535,47 @@ def run_gsd_budgets(
                 "duration_seconds": round(duration, 1),
                 "exclusions_synced": exclusions_synced,
                 "exclusions_sync_status": exclusions_sync_status,
-                "summary": {
-                    "verlagen-25": 0, "verlagen-20": 0, "c-verlagen-20": 0,
-                    "verhogen-20": 0, "no_action": 0, "missed": 0,
-                    "budget_changed": 0, "shops_over_loss_25": 0,
-                },
-                "shops_evaluated": 0,
-                "results": [],
-                "over_loss_25": [],
-                "missed_shops": [],
-                "missed_shops_uploaded": 0,
-                "missed_upload_status": "skipped",
-                "budget_constrained_load_status": f"failed: {e}",
-                "status": "aborted",
-                "error": (
-                    f"Failed to load BUDGET_CONSTRAINED Google Sheet (after 1 retry): {e}. "
-                    "Aborted before any budget mutations to avoid suppressing all "
-                    "verhogen-20 actions. Re-run after the Sheets API recovers."
+                "exclusions_warning": exclusions_warning,
+                "budget_constrained_load_status": limited_cache_status,
+                "summary": summary_counts,
+                "shops_evaluated": len(shop_rows),
+                "results": results,
+                "over_loss_25": over_loss_25,
+                "missed_shops": missed_shops,
+                "missed_shops_uploaded": missed_uploaded,
+                "missed_upload_status": missed_upload_status,
+                "sa360_failures": sa360_failures,
+                "status": (
+                    "cancelled" if was_cancelled
+                    else "completed_with_errors" if sa360_failures
+                    else "completed"
                 ),
             }
-            _history_prepend(run_result)
-            _unregister_active(run_id)
-            return run_result
-
-        shop_rows = get_redshift_shop_data(
-            country=country,
-            shop_names=shop_names,
-            excluded=shop_names_excluded,
-            limit=limit_shops,
-        )
-
-        today_str = datetime.today().strftime("%d-%m-%Y")
-        results: List[Dict[str, Any]] = []
-        over_loss_25: List[Dict[str, Any]] = []
-        missed_shops: List[str] = []
-        missed_dates: List[str] = []
-        summary_counts = {
-            "verlagen-25": 0,
-            "verlagen-20": 0,
-            "c-verlagen-20": 0,
-            "verhogen-20": 0,
-            "no_action": 0,
-            "missed": 0,
-            "budget_changed": 0,
-            "shops_over_loss_25": 0,
-        }
-
-        was_cancelled = False
-        for margin_data in shop_rows:
-            if _is_cancelled(run_id):
-                was_cancelled = True
-                break
-            shop_name = margin_data.get("shop_name")
-            shop_id = margin_data.get("shop_id")
-            marge = margin_data.get("marge")
-            try:
-                marge_f = float(marge) if marge is not None else None
-            except (TypeError, ValueError):
-                marge_f = None
-            rev_click = margin_data.get("rev_click")
-            try:
-                rev_click_f = float(rev_click) if rev_click is not None else None
-            except (TypeError, ValueError):
-                rev_click_f = None
-            linkage = margin_data.get("linkage")
-            try:
-                linkage_f = float(linkage) if linkage is not None else 0.0
-            except (TypeError, ValueError):
-                linkage_f = 0.0
-            transactions = int(margin_data.get("transactions") or 0)
-
-            rev_click_old: Optional[float] = None
-            rev_click_delta: Optional[float] = None
-
-            # Collect top-25 (NL-only display; data always available)
-            if marge_f is not None and marge_f < MARGIN_HARD_DROP:
-                over_loss_25.append({
-                    "shop_name": shop_name,
-                    "shop_id": shop_id,
-                    "marge": round(marge_f, 2),
-                })
-
-            # In the rev_click-> delta branch, the source script fetches the 4-week
-            # baseline *before* calling decide_shop_action. We mirror that order so
-            # decide_shop_action gets a real delta, not None.
-            if (
-                marge_f is not None
-                and marge_f > MARGIN_POSITIVE_FLOOR
-                and linkage_f > LINKAGE_THRESHOLD
-                and transactions >= TRANSACTIONS_THRESHOLD
-                and rev_click_f is not None
-                and rev_click_f > REV_CLICK_THRESHOLD
-            ):
-                try:
-                    rev_click_old = get_rev_click_old(country, [int(shop_id)], "28")
-                    if not rev_click_old:
-                        rev_click_old = get_rev_click_old(country, [int(shop_id)], "35-28")
-                    rev_click_delta = get_rev_click_delta(rev_click_f, rev_click_old)
-                except Exception as e:
-                    logger.warning(f"rev_click_old fetch failed for {shop_name}: {e}")
-
-            action, skip_reason = decide_shop_action(
-                marge=marge_f,
-                rev_click=rev_click_f,
-                rev_click_delta=rev_click_delta,
-                linkage=linkage_f,
-                transactions=transactions,
-            )
-
-            shop_record = {
-                "shop_name": shop_name,
-                "shop_id": shop_id,
-                "marge": round(marge_f, 2) if marge_f is not None else None,
-                "rev_click": round(rev_click_f, 2) if rev_click_f is not None else None,
-                "rev_click_old": round(rev_click_old, 2) if rev_click_old is not None else None,
-                "rev_click_delta": round(rev_click_delta, 2) if rev_click_delta is not None else None,
-                "linkage": round(linkage_f, 4),
-                "transactions": transactions,
-                "action": action,
-                "skip_reason": skip_reason,
-                "campaigns": [],
-            }
-
-            if skip_reason == "missed":
-                missed_shops.append(shop_name)
-                missed_dates.append(today_str)
-                summary_counts["missed"] += 1
-
-            if marge_f is not None and marge_f < MARGIN_HARD_DROP:
-                summary_counts["shops_over_loss_25"] += 1
-
-            if action is None:
-                summary_counts["no_action"] += 1
-                results.append(shop_record)
-                continue
-
-            summary_counts[action] = summary_counts.get(action, 0) + 1
-
-            campaign_resource_names, campaign_names = get_campaigns_for_shop(
-                country, shop_name, shop_id
-            )
-
-            for campaign_resource_name, campaign_name in zip(campaign_resource_names, campaign_names):
-                if _is_cancelled(run_id):
-                    was_cancelled = True
-                    break
-                try:
-                    campaign_marge = get_total_marge_sa360(
-                        country,
-                        campaign_name,
-                        start_days_ago=start_days_ago,
-                        end_days_ago=end_days_ago,
-                    )
-                except Exception as e:
-                    logger.warning(f"SA360 marge failed for {campaign_name}: {e}")
-                    campaign_marge = 0.0
-
-                constrained = _is_budget_constrained(campaign_name, country, limited_cache)
-                apply, per_cg_skip = _should_apply_to_campaign(
-                    action, campaign_marge, campaign_name, constrained
+            if sa360_failures and not was_cancelled:
+                run_result["error"] = (
+                    f"SA360 gaf voor {sa360_failures} campagne(s) geen marge terug. Die zijn "
+                    f"overgeslagen met skip_reason=sa360_unavailable — NIET beoordeeld als "
+                    f"'marge niet negatief'. Draai opnieuw als SA360 weer antwoordt."
+                )
+            if was_cancelled:
+                run_result["error"] = (
+                    f"Run #{run_id} cancelled by user after evaluating "
+                    f"{len(results)}/{len(shop_rows)} shops. Mutations completed before "
+                    "cancel are NOT rolled back."
                 )
 
-                campaign_record = {
-                    "campaign_name": campaign_name,
-                    "campaign_resource_name": campaign_resource_name,
-                    "campaign_marge": campaign_marge,
-                    "is_budget_constrained": bool(constrained),
-                    "applied": False,
-                    "budget_old": None,
-                    "budget_new": None,
-                    "mutation_status": None,
-                    "skip_reason": per_cg_skip,
-                }
+            _history_prepend(run_result)
 
-                if apply:
-                    pct = BUDGET_PCT_BY_ACTION[action]
-                    mutation = adjust_campaign_budget(
-                        country, campaign_resource_name, pct, dry_run=dry_run
-                    )
-                    campaign_record["mutation_status"] = mutation.get("status")
-                    campaign_record["budget_old"] = mutation.get("current_eur")
-                    campaign_record["budget_new"] = mutation.get("new_eur")
-                    if mutation.get("status") in ("success", "dry_run"):
-                        campaign_record["applied"] = True
-                        summary_counts["budget_changed"] += 1
-
-                shop_record["campaigns"].append(campaign_record)
-
-            results.append(shop_record)
-            if was_cancelled:
-                break
-
-        missed_uploaded = 0
-        missed_upload_status = "skipped"
-        if missed_shops and not skip_missed_upload and not dry_run:
-            try:
-                missed_uploaded = upload_missed_shops(country, missed_shops, missed_dates)
-                missed_upload_status = "uploaded"
-            except Exception as e:
-                logger.warning(f"upload_missed_shops failed: {e}")
-                missed_upload_status = f"error: {e}"
-        elif dry_run:
-            missed_upload_status = "skipped_dry_run"
-        elif skip_missed_upload:
-            missed_upload_status = "skipped_by_flag"
-
-        end_time = datetime.now()
-        duration = (end_time - start_time).total_seconds()
-
-        run_result = {
-            "run_id": run_id,
-            "country": country,
-            "dry_run": dry_run,
-            "start_days_ago": start_days_ago,
-            "end_days_ago": end_days_ago,
-            "date_range": {
-                "start": (datetime.now() - timedelta(days=start_days_ago)).strftime("%Y-%m-%d"),
-                "end": (datetime.now() - timedelta(days=end_days_ago)).strftime("%Y-%m-%d"),
-            },
-            "limit_shops": limit_shops,
-            "shop_names_filter": shop_names,
-            "shop_names_excluded": shop_names_excluded,
-            "skip_missed_upload": skip_missed_upload,
-            "timestamp": start_time.isoformat(),
-            "duration_seconds": round(duration, 1),
-            "exclusions_synced": exclusions_synced,
-            "exclusions_sync_status": exclusions_sync_status,
-            "budget_constrained_load_status": limited_cache_status,
-            "summary": summary_counts,
-            "shops_evaluated": len(shop_rows),
-            "results": results,
-            "over_loss_25": over_loss_25,
-            "missed_shops": missed_shops,
-            "missed_shops_uploaded": missed_uploaded,
-            "missed_upload_status": missed_upload_status,
-            "status": "cancelled" if was_cancelled else "completed",
-        }
-        if was_cancelled:
-            run_result["error"] = (
-                f"Run #{run_id} cancelled by user after evaluating "
-                f"{len(results)}/{len(shop_rows)} shops. Mutations completed before "
-                "cancel are NOT rolled back."
+            logger.info(
+                f"GSD Budgets run #{run_id} {'cancelled' if was_cancelled else 'done'} "
+                f"in {duration:.1f}s summary={summary_counts}"
             )
-
-        _history_prepend(run_result)
+            return run_result
+    finally:
+        # MOET een finally zijn. Beide oude aanroepen stonden op de happy path, dus
+        # één exceptie in get_redshift_shop_data(), _get_client() of
+        # adjust_campaign_budget() liet de run voorgoed in _active_runs staan:
+        # GET /active bleef een run tonen die allang klaar was, de Cancel-knop
+        # verdween nooit, en cancel_active_runs() bleef een dode id "annuleren".
+        # pop(..., None) is idempotent, dus dubbel afmelden kan geen kwaad.
         _unregister_active(run_id)
-
-        logger.info(
-            f"GSD Budgets run #{run_id} {'cancelled' if was_cancelled else 'done'} "
-            f"in {duration:.1f}s summary={summary_counts}"
-        )
-        return run_result

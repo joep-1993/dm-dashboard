@@ -253,6 +253,7 @@
                         </div>
                         <div class="card-body">
                             <div class="alert alert-danger" id="abortBanner" style="display: none;"></div>
+                            <div class="alert alert-warning" id="exclusionsBanner" style="display: none;"></div>
                             <div class="mb-2" id="resultMeta"></div>
                             <div class="summary-badges" id="summaryBadges"></div>
                             <div id="resultTables"></div>
@@ -505,6 +506,21 @@
             }
         }
 
+        // Kort labeltje voor de meta-regel: hoeveel shops deze run uitsluit, en of
+        // die lijst vers uit de sheet komt. Een dry run schrijft de sheet niet weg,
+        // dus daar kan het getal achterlopen — zie de gele banner erboven.
+        function exclusionsLabel(data) {
+            const status = data.exclusions_sync_status || '';
+            const n = data.exclusions_synced || 0;
+            if (status.startsWith('failed')) {
+                return `<span class="badge lbl lbl-red">${n}, sheet niet gelezen</span>`;
+            }
+            if (status.endsWith('with_warnings') || status === 'stale_dry_run') {
+                return `<span class="badge lbl lbl-amber">${n} (zie waarschuwing)</span>`;
+            }
+            return `${n}`;
+        }
+
         function renderResults(data) {
             document.getElementById('resultsSection').style.display = 'block';
 
@@ -521,6 +537,19 @@
                 abortBanner.style.display = 'none';
             }
 
+            // Uitsluitingen komen uit de Google Sheet achter "Add shop exclusions".
+            // Mislukt dat ophalen, dan draait de run door op de laatst bekende lijst
+            // in Redshift — dus dan moet hier staan dat die verouderd kan zijn.
+            const exclBanner = document.getElementById('exclusionsBanner');
+            if (exclBanner) {
+                if (data && data.exclusions_warning) {
+                    exclBanner.style.display = 'block';
+                    exclBanner.innerHTML = `<strong>Let op — uitsluitingen</strong><br>${escHtml(data.exclusions_warning)}`;
+                } else {
+                    exclBanner.style.display = 'none';
+                }
+            }
+
             const meta = document.getElementById('resultMeta');
             const dr = data.date_range || {};
             const window = (dr.start && dr.end) ? `${dr.start} → ${dr.end}` : 'n/a';
@@ -532,6 +561,7 @@
                     | SA360 window: ${window}
                     | Duration: ${data.duration_seconds}s
                     | Missed upload: ${escHtml(data.missed_upload_status || 'n/a')}
+                    | Uitgesloten shops: ${exclusionsLabel(data)}
                 </small>
             `;
 
