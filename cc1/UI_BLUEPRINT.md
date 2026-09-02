@@ -1476,6 +1476,20 @@ carries through automatically:
   don't recolour. (Canonicals' bulk-select adds a `canon-select` class alongside
   `form-check-input`; that's a local extension, not the shared default.)
 
+### Een label hernoemen krimpt de control ernaast
+
+Auto-Redirects, 2026-09-03. Een `input-group` met een `max-width` verdeelt die breedte over het
+`input-group-text`-label én de control: het label neemt wat het nodig heeft, de rest is voor het
+veld. Bij het vertalen van de Push-kaart werd `Land` → `Country`, en de select ernaast — die op
+`max-width: 155px` stond en met `Land` prima `NL+BE` toonde — kapte af tot `NL+E`. Geen overflow,
+geen foutmelding, gewoon een afgekapte waarde in een select die er verder normaal uitzag.
+
+**Dus: hernoem je een label in een `input-group` met een vaste breedte, meet dan de control opnieuw.**
+Een langere vertaling, een toegevoegd woord of een `*` erbij is genoeg. `select.scrollWidth >
+select.clientWidth` in de probe zegt het in één regel. De maten die in deze app werken voor een
+`input-group-text` + `select`: land/statuscode ≈ 170-185px, een selector met een lange optietekst
+(`≥ 95 · Tier A (380)`) ≈ 265px.
+
 ### Zoekveld boven een tabel
 
 Geen aparte component — plain Bootstrap in de `.filter-row` (zie §Tables). Wat wél

@@ -51,6 +51,19 @@ op skeletonrijen staan. Dat zag eruit als een hangende fetch — ik heb eerst de
 zien. Dezelfde familie als de `git add`-val uit `1afce51`: de bevestiging die je leest gaat over iets
 anders dan de vraag die je stelde.
 
+### 4. (2026-09-03) Een label hernoemen krimpt de control ernaast
+
+Zelfde vorm, een dag later. Bij het vertalen van de kaart werd `Land` → `Country`, en de select
+ernaast toonde `NL+E`. Een `input-group` met `max-width` verdeelt die breedte over het label én de
+control, dus een langer label eet stil van het veld. Geen overflow, geen fout — alleen een waarde
+die er niet helemaal staat. Staat als regel in UI_BLUEPRINT §Form controls.
+
+En de taalkeuze die eronder lag: de kaart is nu helemaal Engels, woord voor woord gelijk aan
+Canonicals en de Redirect Generator (`Preflight complete:` / `ready to submit` / `chain-flattened`),
+want die drie voeden hetzelfde `/api/redirect-tool`-paar en horen hetzelfde te zeggen. **Getallen
+blijven `nl-NL`**: dat is de huisconventie op 44 andere plekken in `frontend/`, óók op pagina's met
+Engelse labels. Het getalformaat volgt de lezer, het label volgt de tool.
+
 ### En de ontwerpkeuzes die het waard zijn om te onthouden
 
 - **De score is de selector, het vinkje is de correctie.** Het histogram gaat over de héle run mee, dus
