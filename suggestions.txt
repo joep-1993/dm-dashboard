@@ -1,3 +1,1 @@
-- In Recent runs alleen de volgende kolommen behouden: Gestart	Soort	Wat	Cats	Voorstel	Live	Nieuw	Weg	Visits weg	Visit cov	Status
 - SA360 biedstrategieën aanpassen/koppelen?
-- Ik ben in Healthscore de Testcats preview aan het draaien, en zie bij de progress bar dit staan: "Redshift: kopteksten ophalen…". Wat wordt bedoeld met kopteksten en waarom worden ze opgehaald?
