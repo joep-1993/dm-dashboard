@@ -107,11 +107,14 @@
         .perf-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .perf-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
         .perf-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
-        /* Standup tables: fixed layout so column widths don't jump when the Δ/Δ%
-           direction toggle swaps in different rows. Numeric columns get an
-           explicit inline width; text columns absorb the rest and wrap. */
-        .perf-table.fixed-cols { table-layout: fixed; }
-        .perf-table.fixed-cols td.text-col, .perf-table.fixed-cols th.text-col { white-space: normal; }
+        /* Standup tables: de categorienamen blijven op één regel (Joep, 2026-09-02:
+           namen mogen niet afgekapt/afgebroken worden). Dat kan niet met
+           table-layout: fixed — dan botst nowrap-tekst over de volgende kolom heen —
+           dus de tabel schaalt mee met zijn inhoud en scrollt horizontaal binnen
+           .standup-list zodra hij breder wordt dan de halve kaart. De numerieke
+           kolommen houden hun inline width, zodat ze niet springen als de Δ/Δ%
+           richtingstoggle andere rijen binnenhaalt. */
+        .standup-list { overflow-x: auto; }
         .pagination-controls { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; margin-top: 0.5rem; border-top: 1px solid #eee; font-size: 0.85rem; }
         .pagination-controls select { font-size: 0.85rem; width: auto; }
         .pagination-controls .page-info { color: #636e72; }
@@ -1903,11 +1906,12 @@
             const which = isVis ? 'visits' : 'revenue';
             const sortCls = 'sortable ' + (up ? 'sort-desc' : 'sort-asc');
             const next = up ? 'down' : 'up';
-            // `w` fixes the numeric column widths (table-layout: fixed) so they
-            // don't jump when the Δ/Δ% direction toggle swaps in different rows.
+            // `w` fixes the numeric column widths so they don't jump when the
+            // Δ/Δ% direction toggle swaps in different rows. De tekstkolommen
+            // groeien met de categorienaam mee (zie .standup-list in de CSS).
             const th = (label, w) => `<th class="${sortCls}" style="width:${w}" onclick="setStandupSort('${which}','${next}')"`
                 + ` title="Click to show ${up ? 'most negative' : 'most positive'} first">${label}</th>`;
-            return `<table class="table table-sm table-hover perf-table standup-table fixed-cols mb-0">
+            return `<table class="table table-sm table-hover perf-table standup-table mb-0">
                 <thead><tr><th class="text-col">Deepest cat</th><th class="text-col">Maincat</th>${th('Δ', '110px')}${th('Δ%', '80px')}</tr></thead>
                 <tbody>${rows}</tbody>
             </table>`;
@@ -2037,7 +2041,7 @@
                                   'SEO CTR Δ', 'SEO OPB Δ', 'SEO Bounce Δ'];
         // 3 rows: both lists slice(0, 3), so the skeleton holds the loaded height.
         function standupSkeletonTable(n = 3) {
-            return `<table class="table table-sm table-hover perf-table standup-table fixed-cols mb-0">
+            return `<table class="table table-sm table-hover perf-table standup-table mb-0">
                 <thead><tr><th class="text-col">Deepest cat</th><th class="text-col">Maincat</th>` +
                 `<th style="width:110px">Δ</th><th style="width:80px">Δ%</th></tr></thead>
                 <tbody>${skeletonRows(4, n)}</tbody>
