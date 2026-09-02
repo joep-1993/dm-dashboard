@@ -3,6 +3,68 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-02 (3) — Audit van de acht nooit-geauditeerde tools, fase 0 t/m 5
+
+Joep vroeg eerst welke dashboard-tools nog nooit een `/audit` hadden gehad, daarna om die te
+draaien (m.u.v. Performance Standup, Shop Campaigns en DM Review), daarna om de fases uit te voeren.
+
+**Scope:** GSD Tag Toppers, Healthscore, SEO Priority, SEO Titles, SEO Rulings, Facet Watch,
+GSD Budgets, GSD Check — 16 bestanden, 12.163 regels, 10 parallelle review-agents.
+31 HIGH-bevindingen, waarvan 21 zelf regel-voor-regel nagelopen. Rapport als artifact:
+https://claude.ai/code/artifact/7e69740b-5ad7-41ec-bac9-341128dc3ce5
+
+**Gedaan (commits `768a1b7`, `0381e23`, `503dd9e`, `24a63ac`, `352b14c`, `90da03e`, `f4bd5d5`,
+`cf0453a`, `3a46da5`; GSD Budgets kwam mee in `03fd95f` uit een parallelle sessie):**
+
+- [x] **Fase 0** — acht behoud-van-gedrag-fixes: client-init binnen de run-lock-try (Tag Toppers),
+      `finally` om de poolverbinding (`_set_status`, lekte tegen de gedeelde pool van 60), read-back
+      los van de push, `category_ids is not None`, unieke snapshotnaam, SA360-yaml op 0600 (twee
+      services + het bestaande bestand), `_unregister_active` in een finally, eerlijke status bij een
+      afgebroken Facet Watch-ingest.
+- [x] **Fase 1** — "mislukt telt als gelukt" systematisch dicht: `raise_for_status()` op de
+      Keywords-push, partial-failure lezen bij de negatives, drie valse-groen-paden in SEO Rulings,
+      SA360-storing als `None` i.p.v. `0.0`, auditlog-fout als `audit_log_failed`.
+- [x] **Fase 2** — met gates: kostenvenster GSD Budgets (gemeten NL 679 shops: `verlagen-25` 0 → 16,
+      `marge>0` 533 → 364), lege omzetnoemer SEO Prio (4 gevallen getoetst), identity-parents +
+      suffixheuristiek SEO Titles (55 slugs → 21/34), bod/MC-id/gemengde boom Tag Toppers (offline
+      boomsimulator: gemengd converts 0 → 1), deterministische `ORDER BY` op drie rankers.
+- [x] **Fase 3** — `_claim_job()` atomair, maincat-cap via INNER JOIN i.p.v. terugval op de
+      klemwaarde 120.000, gezaaide RNG + seed in de run, stabiele CSS-prefix, redirects overslaan,
+      `/api/Categories/{id}.facets` i.p.v. `/api/CategoryFacets` (243 vs 25 facetten, 215 Dependent),
+      Facet Watch: eigen `CategoryId` gebruiken, verse lookup bij aanhecht-events, `lookup_failed`
+      met reparatiestap, boekhouding van weggegooide entityNames.
+- [x] **Fase 4** — vier gemeten wins: Healthscore drop-lijst 10.158 → 1,1 ms (9.147x), Tag Toppers
+      boomplanner 27,9 → 3,7 ms, GSD Check 9,4 → 1,3 s, GSD Budgets rev/click gebatcht.
+- [x] **Fase 5 (deels)** — `backend/taxv2_client.py`: één base-URL, sessie per thread, retry op
+      502/503/504 (alleen GET). Drie services gemigreerd. `engine`-kolom op de captabellen met
+      aparte namen voor de twee maincat-sizings. Retry-predicaat Tag Toppers gelijkgetrokken met
+      GSD Campaigns.
+
+**Open:**
+
+- [ ] **De bullet in de SEO-Titles-description is nog niet gepusht.** `DESC_BULLET` staat nu op `✔️`,
+      maar `&#10062;` is U+274E (rood kruis) en de legacy-templates in `pa.page_titles_existing`
+      gebruiken diezelfde entity 8.791 keer. Een re-push raakt 86.123 rijen. Keuze van het teken +
+      de re-push zijn aan Joep. Gate: één record pushen, live meta-tag lezen, dan pas de rest.
+- [ ] **Eén record wijkt af in de verkeerde richting:** cat 9002870 / `productlijn_koffiepads~s_boon
+      ~s_smaak` kreeg op 27-08 handmatig `!!sub_category!!` op de tweede plek en zegt nu "Shop
+      Koffiepads met korting" waar de andere ~86k de volle frase herhalen. Status `pushed`.
+- [ ] **`Facet Value Dependency` wordt nog niet ingest.** Bestaat wél (2.497 events / 30 dagen) en is
+      volgens `022ac44` het mechanisme waarmee een productlijn-facet aan zijn maincats komt, maar de
+      payload draagt `ChildFacetId`/`ParentFacetId` en geen `FacetId` — `_extract()` moet daarvoor
+      uitgebreid worden. De boekhouding maakt het nu wel zichtbaar.
+- [ ] **Fase 5 rest:** de Healthscore categorie/maincat-tweelingen samenvoegen (~400 regels
+      bijna-identieke SQL die de tabellen voedt waar live vanuit gepusht wordt — vraagt een
+      OLD-vs-NEW-harness met een volledige build tegen Redshift), en de listing-tree-helpers naar
+      `google_ads_helpers.py` (de drift die het moest voorkomen is al direct gefixt).
+- [ ] **Zeven modules hebben nog een hardgecodeerde taxv2-base-URL:** `ai_titles_service`,
+      `url_validator_service`, `category_lookup`, `dma_plus_service`, `dma_plus_monthly`,
+      `rurl_optimizer_v2_service`, `keyword_redirect_service`. Vielen buiten de geauditeerde scope.
+- [ ] **Backend is niet herstart,** dus niets hiervan draait live op :8003. Uvicorn draait zonder
+      `--reload`.
+- [ ] **Het auditrapport noemt 156 s voor GSD Check;** dat is 9,4 s. Corrigeren bij de volgende
+      update van het artifact.
+
 ### 2026-09-02 (2) — GSD Budgets: de uitsluitingen uit de spreadsheet werden half genegeerd
 
 Joeps vraag: check of de uitsluitingen uit de sheet achter "Add shop exclusions" goed worden

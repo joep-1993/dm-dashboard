@@ -1,6 +1,58 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Wat een audit van acht tools opleverde: de code sprak drie keer zijn eigen documentatie tegen (2026-09-02)
+
+Acht dashboard-tools die nooit een audit hadden gehad (GSD Tag Toppers, Healthscore, SEO Priority,
+SEO Titles, SEO Rulings, Facet Watch, GSD Budgets, GSD Check), 12.163 regels, 10 parallelle
+review-agents. 31 HIGH-bevindingen. Fase 0 t/m 5 grotendeels doorgevoerd. De vier dingen die
+generaliseren voorbij deze tools:
+
+### Het goedkoopste type bevinding: de code tegen zijn eigen comments leggen
+
+Drie keer stond het juiste antwoord al in het bestand. `_merchant_id_for_shop()` matchte op shop_id
+alleen, tien regels onder een docstring die letterlijk zegt dat shop_id géén sleutel is (652237 is
+zowel Bruna.nl als Hubfootwear.com). `NOSCRIPT_TITLE_CLASS` pinde een CSS-modulehash vast, tien
+regels boven het comment dat uitlegt waarom precies dat de basement-check al eens sloopte. En
+`_check_sitemaps()` beloofde in zijn docstring "non-empty XML" terwijl de code alleen op een
+niet-lege body toetste. Dat is geen kennis die je hoeft op te bouwen — begin een audit met de
+diff tussen wat een functie zegt te doen en wat er staat.
+
+### Een guard in scripts/ is geen guard
+
+`_guard_knee_shrink` is op 2026-08-06 gebouwd nadat een omgezette visits-definitie elke knie ~3x
+kleiner maakte. Hij stond in `scripts/analysis/healthscore_caps.py`. Het pad achter de dashboardknop
+(`build_category_caps` → `_refresh_cat_knee`) truncate diezelfde tabel zonder enige vergelijking.
+Zelfde vorm bij de taxv2-clients: één van de drie had retry, de andere twee niet. Bij een fix hoort
+de vraag "welke andere ingangen raken hetzelfde?" — niet "waar deed het pijn?".
+
+### `execute_values` op een lege lijst voert NIETS uit
+
+Dus `TRUNCATE` + `execute_values(...)` op een query die 0 rijen gaf, leegt de tabel, commit, en
+geeft `len(data)` = 0 terug als succes. Zes plekken in healthscore_service. Bij truncate-and-reload
+hoort een expliciete `if not data: raise` — de bibliotheekfunctie beschermt je hier niet.
+
+### `percent_rank()` maakt de staart één groot gelijkspel
+
+`row_number() OVER (ORDER BY score DESC, visits DESC)` waar score uit `percent_rank()` komt: elke
+URL met visits=1 en revenue=0 heeft een identiek sleutelpaar. Valt de cap middenin dat blok, dan
+kiest Postgres vrij en levert elke rebuild een andere set op. Bij een push die replace-zonder-DELETE
+is, ruilt dat telkens een willekeurige plak van de live sitemap om — en dat leest als
+modelinstabiliteit. Een laatste, unieke sorteersleutel (`npath`) is het hele verschil.
+
+### En over meten: verifieer eerst de probe, dan pas de bevinding
+
+Drie keer trok ik vandaag een verkeerde conclusie uit een meting die er overtuigend uitzag.
+`/api/audit-logs` negeert `From`/`To` stil en geeft dan de héle log terug (1,5 M rijen vanaf
+2025-12-08); de tool gebruikt `FromDate`/`ToDate` en die wérken. Bij het vergelijken van
+`/api/CategoryFacets` met `/api/Categories/{id}.facets` las ik `id` waar het veld `facetId` heet, wat
+"1 tegen 25 facetten" opleverde in plaats van het echte 243 tegen 25. En de 156 s die de audit voor
+GSD Check rapporteerde, is in werkelijkheid 9,4 s — het structurele probleem (een window-functie over
+87,8 M rijen) klopte, de orde van grootte niet. Een getal dat een beslissing draagt, hoort een tweede
+keer langs een andere weg.
+
+Zie [[bothits_process]] voor dezelfde les in een ander jasje, en de sessie-entry in TASKS.
+
 ## Een lege kolomkop is een schemafout, en een gecatchte exception is een stille regressie (2026-09-02, GSD Budgets uitsluitingen)
 
 Joeps vraag: worden de uitsluitingen uit de spreadsheet achter "Add shop exclusions" wel echt

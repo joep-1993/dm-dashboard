@@ -39,30 +39,46 @@ ruim onder zijn desktopaandeel — 82% van onze Bing-organische visits is deskto
 
 Blokkerend voor het meten: geen toegang tot Bing Webmaster Tools (staat als open punt in TASKS).
 
-### SEO titles: de description-template herhaalt de frase, en 84.881 gepushte blueprints renderen daardoor een halve zin (logged 2026-08-27)
+### ~~SEO titles: de description-herhaling~~ — OPGELOST aan de site-kant (gesloten 2026-09-02)
 
-`build_blueprint()` zet de facetfrase twee keer in de description — `Zoek je <frase>? … Shop
-<frase> met !!DISCOUNT!! korting online!` — en de site-renderer vult een `!!facet!!` **alleen op
-zijn eerste voorkomen** (`!!sub_category!!` is de uitzondering, die resolvet elke keer). De tweede
-helft rendert dus leeg: live gezien als "Shop **Klussen** met 58% korting" (de merk/type-frase weg)
-en zelfs "Shop **met** 76% korting" als de noun een type-facet was in plaats van `sub_category`.
-Titel en H1 zijn ongedeerd — alleen de herhaling in de description. Geldt voor **84.881 van de
-85.167** gepushte blueprints; vastgesteld 2026-08-21, template sindsdien onveranderd.
+**Dit punt is vervallen. De renderer vult inmiddels élk voorkomen van een `!!facet!!`, niet alleen
+het eerste.** Live nagemeten op 2026-09-02 met de SEO-UA, drie pagina's, alle drie beide helften
+gevuld:
 
-De fix in de template is één token (`!!sub_category!!` op de tweede plek, of de herhaling gewoon
-schrappen) en is op 2026-08-27 voor **één** nieuw record zo toegepast (cat 9002870, key
-`productlijn_koffiepads~s_boon~s_smaak`) om niet bewust een halve zin te shippen. Dat record wijkt
-nu dus af van de andere ~85k.
+* `/c/merk~19254272~~seizoen_schoenen~8693402~~doelgroep_schoenen~430828`
+  -> "Zoek je **Bering Zomer Dames Motorlaarzen**? ... Shop **Bering Zomer Dames Motorlaarzen** met 39% korting online!"
+* `/c/materiaal~401168~~merk~1341230~~thema_speelgoed~424697`
+  -> "Zoek je **Zilverstad Houten Muziekdoosjes Educatief speelgoed**? ... Shop **Zilverstad Houten Muziekdoosjes Educatief speelgoed** met 21% korting"
+* `/c/doelgroep_schoenen~430827~~maat~430810~~merk~19253712~~sluiting_schoen~430981`
+  -> "Zoek je **Forma Met klittenband Motorlaarzen Heren Maat 42**? ... Shop **Forma Met klittenband Motorlaarzen Heren Maat 42** met 16% korting"
 
-Wat het een besluit maakt en geen taak: **globaal fixen betekent 84.881 records opnieuw pushen.**
-Punten om af te wegen — (a) `/page-titles` valideert een POST atomair, dus één slechte record kelder
-een hele batch van 5.000 met 400 "Invalid record values" (de `MAX_H1_LEN`-les); (b) de push gaat
-vrijwel direct live, dus dit is een zichtbare wijziging op 84.881 pagina's in één keer, niet een
-stille datamigratie; (c) `!!sub_category!!` in de tweede helft geeft een kortere, generiekere zin dan
-de eerste — is dat beter dan de huidige mangeling, of wil je daar iets anders? (d) een re-push
-overschrijft óók de records waar iemand later handmatig aan gesleuteld heeft; check dat eerst tegen
-de store-GET. Zie LEARNINGS 2026-08-27 en de memory `page_titles_placeholder_first_occurrence`.
+Gevolg: **de re-push van 84.881 records is niet meer nodig** en de vier afwegingen die dit een
+besluit maakten (atomaire batchvalidatie, zichtbaarheid, generiekere tweede helft, overschrijven van
+handwerk) zijn allemaal moot. `build_blueprint()` mag blijven zoals hij is.
 
+**Twee restpunten die hier wél uit volgen:**
+
+1. **Het ene record van 27-08 is nu de uitzondering in de verkeerde richting.** Voor
+   cat 9002870 / `productlijn_koffiepads~s_boon~s_smaak` is destijds `!!sub_category!!` op de tweede
+   plek gezet om geen halve zin te shippen. Status is `pushed`, dus die pagina zegt nu
+   "Shop Koffiepads met ... korting" terwijl de andere ~86k de volle frase herhalen. Eén record
+   terugzetten naar de standaardtemplate en herpushen.
+
+2. **NIEUW — `&#10062;` staat dubbel-geescaped in de live description** (gevonden in de audit van
+   2026-09-02). `build_blueprint()` schrijft de bullet als de letterlijke tekst `&#10062;`; de site
+   escapet de content nog een keer bij het injecteren in de meta-tag, dus de ruwe HTML bevat
+   `&amp;#10062;` en Google leest de **letterlijke tekst** `&#10062;`, drie keer per description:
+
+   ```html
+   <meta name="description" content="Zoek je Bering Zomer Dames Motorlaarzen? &amp;#10062; Vergelijk 10002 ..."/>
+   ```
+
+   Het `title`-veld heeft dit niet: dat slaat het echte teken `✔️` op en rendert correct.
+   Telling: **86.123 van de 86.124** descriptions bevatten de entity, **0** titles.
+   Los daarvan is `&#10062;` = `❎` (NEGATIVE SQUARED CROSS MARK) — een rood kruis, vermoedelijk
+   niet wat bedoeld was; de titel gebruikt `✔️`. Fix is één teken in `build_blueprint()`
+   plus een re-push — en die re-push is nu wél een gewone datamigratie, want de vier bezwaren
+   hierboven zijn vervallen.
 
 ### Enkeltoken-ATTRIBUUTsprongen: een facetwaarde die de hele query dekt is nog geen categorie (logged 2026-08-27, merk-helft opgelost in V65)
 
