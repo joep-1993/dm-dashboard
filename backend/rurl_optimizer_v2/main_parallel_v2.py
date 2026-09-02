@@ -1649,6 +1649,51 @@ def _covered_after_vowel_collapse(token, target_text, matcher):
         for tt in target_toks)
 
 
+def _v55_lift(keyword, score, cat_name, facet_value_names, reason):
+    """V65: apply the V55 H1-overlap lift and hand back the fields it changes.
+
+    ONE implementation for every finals site. The lift used to live only in the
+    shared finals block at the end of process_url_v2, so any branch that RETURNS
+    on the spot silently skipped it: the V28-reject -> cross-maincat fallback
+    return shipped `h1_overlap: 0` and an unlifted score even when the
+    destination H1 was a twin of the R-URL's. Measured on the 4.998-row run of
+    2026-08-26: 28 rows took that return, 12 of them qualified for the lift and 9
+    would have changed tier ("opbergkast voor balkon" vs Opbergkasten + 'Balkon':
+    overlap 100, recall 100).
+
+    Returns (score, tier, reason, overlap, query_coverage).
+    """
+    from src.reliability_scorer import (apply_h1_overlap_lift as _lift,
+                                        get_reliability_tier as _tier,
+                                        h1_overlap_parts as _parts)
+    overlap, query_coverage, _target_coverage = _parts(
+        keyword, cat_name, facet_value_names)
+    lifted = _lift(score, overlap, query_coverage)
+    if lifted != score:
+        reason = ((reason or '')
+                  + f"; [V55] H1 overlap {overlap} "
+                  + f"({cat_name or ''}"
+                  + (f" {facet_value_names}" if facet_value_names else '')
+                  + f" vs '{keyword}'): {score} -> {lifted}")
+        score = lifted
+    return score, _tier(score), reason, overlap, query_coverage
+
+
+def _cross_maincat_rung(verified, agreed, facet_covers, name_score, dom_share):
+    """V65: the cross-maincat fallback's score ladder as a pure function, so the
+    rungs are pinnable in tests instead of only observable through a full run.
+
+    See the comments at the call site for what each rung claims.
+    """
+    if verified and (name_score or 0) >= 99 and (dom_share or 0) >= 0.9:
+        return 80
+    if verified or facet_covers:
+        return 72
+    if agreed:
+        return 60
+    return 45
+
+
 def _cross_maincat_fallback_fields(url, parsed, categories_df, matcher,
                                    facet_filter, builder, category_lookup):
     """V36: build the output-field overrides for the cross-maincat LAST-RESORT
@@ -1714,17 +1759,40 @@ def _cross_maincat_fallback_fields(url, parsed, categories_df, matcher,
     # count that isn't a taxonomy accident (V62_DOM_COUNT_FLOOR) and a near-exact
     # subcat-name match, is not the same thing as an unverified guess. 60 (tier
     # C, "review nodig") instead of 45 (tier D, "onbruikbaar").
+    # V65: a faceted destination that covers the WHOLE query is a different
+    # claim than bare-category dominance, and the two disagree BY CONSTRUCTION.
+    # dom_cat_share asks how dominant the BARE category is over the full query;
+    # when the query's qualifier is a facet value rather than a category noun
+    # ('opbergkast voor balkon' — 'balkon' is a `ruimte` value), that qualifier
+    # cannot sharpen the share, it only spreads the AND-set over sibling
+    # categories: Opbergkasten 271, Wandkasten 93, Voorraadkasten 88, Dressoirs
+    # 66, Archiefkasten 50 -> share 0.38. So refining the destination with the
+    # RIGHT facet lowers the number that grades it, and the row sank from 72 to
+    # 60 (Joeps observatie, 2026-09-02) while the answer got strictly better.
+    #
+    # The remedy is to also credit what the destination COVERS: when the
+    # appended facet makes the destination H1 represent every query token, the
+    # page answers the whole query. Gated on `_agreed`, so V64's rule stands
+    # unchanged — the query must name the destination CATEGORY and the search
+    # leader must agree with it. Without that gate a facet value echoing a
+    # single token would be enough again ('fietsen berging' -> Hogedrukreinigers
+    # /c/t_hdrukrein~'Fietsen'), which is exactly what V64 closed. The fragment
+    # itself is already liveness-checked in _append_facet_to_subcat_redirect, so
+    # this cannot vouch for a /c/ URL that does not exist.
     _agreed = (and_mode and slug_agrees
                and (pv.get('dom_cat_count') or 0) >= V62_DOM_COUNT_FLOOR
                and (fb_m.get('score', 0) or 0) >= 95)
-    if verified and (fb_m.get('score', 0) or 0) >= 99 and (pv.get('dom_cat_share') or 0) >= 0.9:
-        score = 80
-    elif verified:
-        score = 72
-    elif _agreed:
-        score = 60
+    _facet_cov = 0
+    if res.facet_fragment and _agreed:
+        from src.reliability_scorer import (H1_OVERLAP_RECALL_FLOOR as _RECALL,
+                                            h1_overlap_parts as _hop)
+        _facet_cov = _hop(parsed.keyword, fb_m.get('matched_category', ''),
+                          res.facet_value_names or '')[1]
+        _facet_covers = _facet_cov >= _RECALL
     else:
-        score = 45
+        _facet_covers = False
+    score = _cross_maincat_rung(verified, _agreed, _facet_covers,
+                                fb_m.get('score', 0), pv.get('dom_cat_share'))
     sub_id = extract_subcategory_id_from_url(res.redirect_url)
     dropped = getattr(parsed, 'existing_facet', '') or ''
     reason = (
@@ -1737,7 +1805,19 @@ def _cross_maincat_fallback_fields(url, parsed, categories_df, matcher,
            (f", search-agreed: AND-leader IS this category "
             f"({int(100 * (pv.get('dom_cat_share') or 0))}% share, "
             f"{pv.get('dom_cat_count') or 0} products)" if _agreed
-            else ", unverified (no search evidence)"))
+            # V65: say WHICH evidence fell short. "no search evidence" also
+            # covered the case where the evidence was present and merely below
+            # the 0.6 bar, which reads as a probe failure and hides the real
+            # reason a score moved between two runs.
+            else (f", unverified: AND-leader is "
+                  f"'{pv.get('dom_cat_name') or pv.get('dom_cat_url_slug') or '?'}' "
+                  f"({int(100 * (pv.get('dom_cat_share') or 0))}% share, "
+                  f"{pv.get('dom_cat_count') or 0} products)"
+                  if and_mode and pv.get('dom_cat_share') is not None
+                  else ", unverified (no search evidence)")))
+        + (f"; destination covers the whole query: facet {res.facet_fragment} "
+           f"({res.facet_value_names!r}) carries the remaining token(s), "
+           f"query coverage {_facet_cov}%" if _facet_covers else '')
         + (f"; dropped original facet '{dropped}'" if dropped else '')
         + ((res.reason and f"; {res.reason}") or ''))
     return {
@@ -1776,8 +1856,7 @@ def process_url_v2(args):
 
     import re  # Nodig voor DIMENSION_PATTERN + V30 coverage check (moet vóór gebruik staan)
     from src.reliability_scorer import (calculate_reliability_score, get_reliability_tier,
-                                       compute_h1_similarity, _v27_reject_reason,
-                                       h1_overlap_parts, apply_h1_overlap_lift)
+                                       compute_h1_similarity, _v27_reject_reason)
     from src.search_derived import derive_redirect as derive_search_redirect
     from src.facet_probe import derive_facet as derive_search_facet
     from src.validation_rules import STOPWORDS, SHOP_NAMES
@@ -3195,6 +3274,16 @@ def process_url_v2(args):
                     url, parsed, d.get('categories_df'), matcher, facet_filter,
                     builder, category_lookup)
                 if _xfb:
+                    # V65: this return bypasses the shared finals block, so the
+                    # V55 H1 lift never reached these rows — they shipped
+                    # h1_overlap=0 and an unlifted score even when the
+                    # destination H1 named exactly what the searcher typed.
+                    # Apply it here through the shared helper.
+                    (_xscore, _xtier, _xreason,
+                     _xoverlap, _xqcov) = _v55_lift(
+                        r.keyword, _xfb['reliability_score'],
+                        _xfb['redirect_category'], _xfb['facet_value_names'],
+                        _xfb['reason'] + f" (after: {reject_reason})")
                     return {
                         'original_url': r.original_url,
                         'main_category': r.main_category,
@@ -3209,11 +3298,11 @@ def process_url_v2(args):
                         'facet_count': _xfb['facet_count'],
                         'match_score': r.match_score,
                         'match_type': _xfb['match_type'],
-                        'reliability_score': _xfb['reliability_score'],
-                        'reliability_tier': _xfb['reliability_tier'],
+                        'reliability_score': _xscore,
+                        'reliability_tier': _xtier,
                         'h1_similarity': 0,
-                        'h1_overlap': 0,
-                        'h1_query_coverage': 0,
+                        'h1_overlap': _xoverlap,
+                        'h1_query_coverage': _xqcov,
                         'reject_reason': '',
                         'flag_for_review': '',
                         'search_derived_total': search_derived_total,
@@ -3230,7 +3319,7 @@ def process_url_v2(args):
                         'has_dimensions': has_dims,
                         'merk_of_shop_missing': getattr(r, 'merk_of_shop_missing', ''),
                         'success': True,
-                        'reason': _xfb['reason'] + f" (after: {reject_reason})",
+                        'reason': _xreason,
                     }
                 # V62: before shipping nothing, try the V50 relaxation. This
                 # branch returns on the spot, so the relaxation at the end of the
@@ -4559,21 +4648,14 @@ def process_url_v2(args):
     # destination page name what the searcher named?) instead of the branch that
     # found it, which is what makes it worth adding: the cascade reaches one
     # target down several routes whose flat constants disagree about it.
-    # Lift-only and capped — see apply_h1_overlap_lift.
-    h1_overlap, h1_query_coverage, _h1_target_coverage = (0, 0, 0)
+    # Lift-only and capped — see apply_h1_overlap_lift. V65: through the shared
+    # _v55_lift helper, so the early-returning branches get the same treatment.
+    h1_overlap, h1_query_coverage = (0, 0)
     if final_redirect_url:
-        h1_overlap, h1_query_coverage, _h1_target_coverage = h1_overlap_parts(
-            r.keyword, final_redirect_cat_name, out_facet_value_names)
-        _v55_lifted = apply_h1_overlap_lift(final_score, h1_overlap,
-                                            h1_query_coverage)
-        if _v55_lifted != final_score:
-            final_reason = ((final_reason or '')
-                            + f"; [V55] H1 overlap {h1_overlap} "
-                            + f"({final_redirect_cat_name or ''}"
-                            + (f" {out_facet_value_names}" if out_facet_value_names else '')
-                            + f" vs '{r.keyword}'): {final_score} -> {_v55_lifted}")
-            final_score = _v55_lifted
-            final_tier = get_reliability_tier(final_score)
+        (final_score, final_tier, final_reason,
+         h1_overlap, h1_query_coverage) = _v55_lift(
+            r.keyword, final_score, final_redirect_cat_name,
+            out_facet_value_names, final_reason)
 
     # V61: prune facet pieces that do not exist on the destination page. The
     # per-path check in _append_facet_to_subcat_redirect fixed the biggest
