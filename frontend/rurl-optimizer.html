@@ -277,33 +277,33 @@
                     <div class="card-body">
                         <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
                             <div class="form-check mb-0">
-                                <input class="form-check-input" type="checkbox" id="pushSelectAll" title="Selecteer alle zichtbare rijen">
+                                <input class="form-check-input" type="checkbox" id="pushSelectAll" title="Select all visible rows">
                             </div>
                             <div class="input-group input-group-sm" style="max-width: 265px;">
-                                <span class="input-group-text">Score vanaf</span>
-                                <select id="pushMinScore" class="form-select" title="Toon en selecteer alle redirects met minstens deze betrouwbaarheidsscore. Tier A (>= 90) is wat de engine veilig voor productie noemt."></select>
+                                <span class="input-group-text">Min. score</span>
+                                <select id="pushMinScore" class="form-select" title="Show and select every redirect with at least this reliability score. Tier A (>= 90) is what the engine itself calls safe for production."></select>
                             </div>
                             <div class="input-group input-group-sm" style="max-width: 260px;">
                                 <span class="input-group-text">Filter</span>
-                                <input type="text" id="pushFilter" class="form-control" placeholder="filter op URL-deel...">
+                                <input type="text" id="pushFilter" class="form-control" placeholder="filter by URL part…">
                                 <button class="btn btn-outline-secondary" type="button" id="pushFilterClear">&times;</button>
                             </div>
                             <div class="input-group input-group-sm" style="max-width: 170px;">
-                                <span class="input-group-text">Statuscode</span>
+                                <span class="input-group-text">Status code</span>
                                 <select id="pushStatusCode" class="form-select">
                                     <option value="301" selected>301</option>
                                     <option value="302">302</option>
                                 </select>
                             </div>
-                            <div class="input-group input-group-sm" style="max-width: 155px;">
-                                <span class="input-group-text">Land</span>
+                            <div class="input-group input-group-sm" style="max-width: 185px;">
+                                <span class="input-group-text">Country</span>
                                 <select id="pushCountry" class="form-select">
                                     <option value="NL+BE" selected>NL+BE</option>
                                     <option value="NL">NL</option>
                                     <option value="BE">BE</option>
                                 </select>
                             </div>
-                            <span id="pushSelCount" class="badge sel-count ms-auto">0 geselecteerd</span>
+                            <span id="pushSelCount" class="badge sel-count ms-auto">0 selected</span>
                         </div>
                         <p class="text-muted mb-2" style="font-size: 0.82rem;" id="pushSummary"></p>
                         <div class="alert alert-warning py-2 px-3 d-none" style="font-size: 0.82rem;" id="pushTruncWarn"></div>
@@ -313,14 +313,14 @@
                                     <tr>
                                         <th style="width: 40px"></th>
                                         <th class="col-center" style="width: 70px">Score</th>
-                                        <th>Oude URL (R-url)</th>
-                                        <th>Nieuwe URL</th>
-                                        <th class="col-center" style="width: 90px" title="Producten achter de bestemming">Producten</th>
+                                        <th>Old URL (R-url)</th>
+                                        <th>New URL</th>
+                                        <th class="col-center" style="width: 90px" title="Products behind the destination">Products</th>
                                         <th class="col-center" style="width: 80px">Visits</th>
                                     </tr>
                                 </thead>
                                 <tbody id="pushBody">
-                                    <tr><td colspan="6" class="text-muted text-center p-3">Nog geen run geladen</td></tr>
+                                    <tr><td colspan="6" class="text-muted text-center p-3">No run loaded yet</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -346,7 +346,7 @@
                                         <th class="sortable col-status" data-sort="status" onclick="sortHistory('status')">Status</th>
                                         <th class="sortable col-input" data-sort="_filename" onclick="sortHistory('_filename')">Input</th>
                                         <th class="col-message">Message</th>
-                                        <th class="col-output">Output</th>
+                                        <th class="col-center col-output">Output</th>
                                     </tr>
                                 </thead>
                                 <tbody id="historyBody">
@@ -375,7 +375,7 @@
             <div class="modal-content">
                 <div class="modal-header text-white" style="background-color: var(--color-navbar);">
                     <h5 class="modal-title">Push redirects to production</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Sluiten"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body" id="pushModalBody"></div>
                 <div class="modal-footer" id="pushModalFooter"></div>
@@ -666,7 +666,7 @@
                     <td>${statusBadge(h.status)}</td>
                     <td class="cell-clip" title="${escapeHtml(h._filename || '')}">${escapeHtml(h._filename || '')}</td>
                     <td class="cell-clip" title="${escapeHtml(msg)}">${escapeHtml(msg)}</td>
-                    <td>${view}</td>
+                    <td class="col-center">${view}</td>
                 </tr>`;
             }).join('');
             updateRunSelectionCount();
@@ -898,7 +898,7 @@
             pushDeselected = new Set();
             document.getElementById('pushCard').classList.add('d-none');
             document.getElementById('pushBody').innerHTML =
-                '<tr><td colspan="6" class="text-muted text-center p-3">Nog geen run geladen</td></tr>';
+                '<tr><td colspan="6" class="text-muted text-center p-3">No run loaded yet</td></tr>';
             updatePushSelectionCount();
         }
 
@@ -919,15 +919,15 @@
         async function loadPushRows(minScore, rebuildOptions) {
             if (!pushRun) return;
             const tbody = document.getElementById('pushBody');
-            tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center p-3">Resultaten laden...</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center p-3">Loading results…</td></tr>';
             try {
                 const r = await fetch(`${pushRun.base}/results/${pushRun.taskId}`
                     + `?min_score=${encodeURIComponent(minScore)}&limit=${PUSH_ROW_LIMIT}`);
                 if (r.status === 404) {
-                    throw new Error('De resultaten van deze run staan nog niet in de database. '
-                        + 'Vlak na een run duurt dat een paar seconden — probeer het zo opnieuw.');
+                    throw new Error('This run\'s results are not in the database yet. '
+                        + 'Right after a run that takes a few seconds — try again in a moment.');
                 }
-                if (!r.ok) throw new Error(await r.text() || 'kon de resultaten niet laden');
+                if (!r.ok) throw new Error(await r.text() || 'could not load the results');
                 const data = await r.json();
                 pushRows = data.rows || [];
                 pushMeta = data;
@@ -965,7 +965,7 @@
         function renderPushRows() {
             const tbody = document.getElementById('pushBody');
             if (!pushRows.length) {
-                tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center p-3">Geen redirects boven deze score.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center p-3">No redirects at or above this score.</td></tr>';
             } else {
                 tbody.innerHTML = pushRows.map((r, i) => {
                     const checked = pushDeselected.has(r.old_url) ? '' : ' checked';
@@ -990,19 +990,19 @@
             if (!pushMeta) { el.textContent = ''; warn.classList.add('d-none'); return; }
             const sk = pushMeta.skipped || {};
             const left = [];
-            if (sk.no_target) left.push(`${fmtInt(sk.no_target)} zonder bestemming`);
-            if (sk.no_score) left.push(`${fmtInt(sk.no_score)} zonder score`);
-            if (sk.duplicate) left.push(`${fmtInt(sk.duplicate)} dubbele oude URL`);
-            el.textContent = `${fmtInt(pushMeta.matched)} van ${fmtInt(pushMeta.total)} redirects `
-                + `met score ≥ ${pushMeta.min_score}`
-                + (left.length ? ` · niet te pushen uit deze run: ${left.join(', ')}` : '');
+            if (sk.no_target) left.push(`${fmtInt(sk.no_target)} without a destination`);
+            if (sk.no_score) left.push(`${fmtInt(sk.no_score)} without a score`);
+            if (sk.duplicate) left.push(`${fmtInt(sk.duplicate)} duplicate old URL`);
+            el.textContent = `${fmtInt(pushMeta.matched)} of ${fmtInt(pushMeta.total)} redirects `
+                + `with score ≥ ${pushMeta.min_score}`
+                + (left.length ? ` · not pushable from this run: ${left.join(', ')}` : '');
             // A selection can only ever cover the rows it was shown, so say so
             // rather than letting the count quietly mean something else.
             if (pushMeta.truncated) {
                 warn.classList.remove('d-none');
-                warn.textContent = `Alleen de eerste ${fmtInt(pushMeta.returned)} van `
-                    + `${fmtInt(pushMeta.matched)} rijen staan hieronder, en Push werkt `
-                    + `alleen op wat je hier ziet. Kies een hogere score om de rest binnen bereik te brengen.`;
+                warn.textContent = `Only the first ${fmtInt(pushMeta.returned)} of `
+                    + `${fmtInt(pushMeta.matched)} rows are listed below, and Push only acts on what `
+                    + `you see here. Pick a higher score to bring the rest within reach.`;
             } else {
                 warn.classList.add('d-none');
             }
@@ -1059,7 +1059,7 @@
 
         function updatePushSelectionCount() {
             const n = getSelectedPushRows().length;
-            document.getElementById('pushSelCount').textContent = `${fmtInt(n)} geselecteerd`;
+            document.getElementById('pushSelCount').textContent = `${fmtInt(n)} selected`;
             document.getElementById('pushBtn').disabled = n === 0;
             syncPushSelectAll();
         }
@@ -1102,14 +1102,14 @@
                 if (task.status === 'completed' || task.status === 'failed') return task;
                 await _sleep(500);
             }
-            throw new Error('Time-out bij het wachten op de taak');
+            throw new Error('Timed out waiting for the task to finish');
         }
 
         async function pushSelectedToRedirect() {
             _redirPreflight = null;  // drop any prior preflight so a failed
                                      // re-preflight can't submit stale data
             const selected = getSelectedPushRows();
-            if (!selected.length) { alert('Geen redirects geselecteerd'); return; }
+            if (!selected.length) { alert('No redirects selected'); return; }
             const statuscode = document.getElementById('pushStatusCode').value || '301';
             const country = document.getElementById('pushCountry').value || 'NL+BE';
             const label = `auto-redirects-${new Date().toISOString().split('T')[0]}`;
@@ -1122,7 +1122,7 @@
             const body = document.getElementById('pushModalBody');
             const footer = document.getElementById('pushModalFooter');
             footer.innerHTML = '';
-            body.innerHTML = `<p>Preflight van ${fmtInt(rows.length)} redirect(s), score &ge; ${escapeHtml(minScore)}...</p>
+            body.innerHTML = `<p>Preflighting ${fmtInt(rows.length)} redirect(s) with score &ge; ${escapeHtml(minScore)}…</p>
                 <div class="progress"><div id="pushProg" class="progress-bar" role="progressbar" style="width:0%"></div></div>`;
             modal.show();
 
@@ -1131,29 +1131,29 @@
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ rows }),
                 });
-                if (!start.ok) throw new Error((await start.json()).detail || 'Preview mislukt');
+                if (!start.ok) throw new Error((await start.json()).detail || 'Preview failed');
                 const { task_id } = await start.json();
                 const task = await _pollTask(`${REDIRECT_API}/preview-status/${task_id}`, 'pushProg', rows.length);
-                if (task.status === 'failed') throw new Error(task.error || 'Preflight mislukt');
+                if (task.status === 'failed') throw new Error(task.error || 'Preflight failed');
                 _redirPreflight = task.result;
                 const st = _redirPreflight.stats || {};
                 const reasons = Object.entries(st.skip_reasons || {})
                     .sort((a, b) => b[1] - a[1])
                     .map(([r, n]) => `<li>${fmtInt(n)} — ${escapeHtml(r)}</li>`).join('');
                 body.innerHTML = `
-                    <p class="mb-2">Preflight klaar:</p>
+                    <p class="mb-2">Preflight complete:</p>
                     <ul class="mb-3">
-                        <li><strong>${fmtInt(st.submittable)}</strong> klaar om door te voeren</li>
-                        <li>${fmtInt(st.flattened)} ketens platgeslagen</li>
+                        <li><strong>${fmtInt(st.submittable)}</strong> ready to submit</li>
+                        <li>${fmtInt(st.flattened)} chain-flattened</li>
                     </ul>
-                    ${reasons ? `<p class="mb-1 small text-muted">Overgeslagen:</p><ul class="mb-3 small">${reasons}</ul>` : ''}
+                    ${reasons ? `<p class="mb-1 small text-muted">Skipped:</p><ul class="mb-3 small">${reasons}</ul>` : ''}
                     <div class="form-check">
                         <input class="form-check-input" type="checkbox" id="pushReplace">
-                        <label class="form-check-label" for="pushReplace">Bestaande redirects overschrijven (replace_existing)</label>
+                        <label class="form-check-label" for="pushReplace">Overwrite existing redirects (replace_existing)</label>
                     </div>
-                    ${st.submittable ? '' : '<div class="alert alert-warning mt-2 mb-0">Niets te pushen in deze selectie.</div>'}`;
+                    ${st.submittable ? '' : '<div class="alert alert-warning mt-2 mb-0">Nothing submittable in this selection.</div>'}`;
                 footer.innerHTML = `
-                    <button class="btn btn-secondary" data-bs-dismiss="modal">Annuleren</button>
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button id="pushConfirmBtn" class="btn btn-outline-red" ${st.submittable ? '' : 'disabled'}>Push ${fmtInt(st.submittable)} to production</button>`;
                 // Listener rather than an inline onclick with the label interpolated
                 // into it — the label is generated here, so it never needs to make a
@@ -1162,7 +1162,7 @@
                 if (confirmBtn) confirmBtn.addEventListener('click', () => confirmPushToRedirect(label));
             } catch (e) {
                 body.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(e.message)}</div>`;
-                footer.innerHTML = `<button class="btn btn-secondary" data-bs-dismiss="modal">Sluiten</button>`;
+                footer.innerHTML = `<button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>`;
             }
         }
 
@@ -1172,7 +1172,7 @@
             const body = document.getElementById('pushModalBody');
             const footer = document.getElementById('pushModalFooter');
             footer.innerHTML = '';
-            body.innerHTML = `<p>Pushen naar productie...</p>
+            body.innerHTML = `<p>Pushing to production…</p>
                 <div class="progress"><div id="pushProg2" class="progress-bar" role="progressbar" style="width:0%"></div></div>`;
             try {
                 const start = await fetch(`${REDIRECT_API}/submit`, {
@@ -1182,18 +1182,18 @@
                         input_method: 'text', replace_existing: replace,
                     }),
                 });
-                if (!start.ok) throw new Error((await start.json()).detail || 'Push mislukt');
+                if (!start.ok) throw new Error((await start.json()).detail || 'Push failed');
                 const { task_id } = await start.json();
                 const task = await _pollTask(`${REDIRECT_API}/submit-status/${task_id}`,
                     'pushProg2', (_redirPreflight.processed || []).length);
-                if (task.status === 'failed') throw new Error(task.error || 'Push mislukt');
+                if (task.status === 'failed') throw new Error(task.error || 'Push failed');
                 const res = task.result || {};
-                body.innerHTML = `<div class="alert alert-success mb-2">Klaar — ${fmtInt(res.success)} gelukt, ${fmtInt(res.failed)} mislukt.${res.run_id ? ` Run #${res.run_id}.` : ''}</div>
-                    <p class="small text-muted mb-0">De Redirect Tool &rarr; Recent Results toont de details per rij.</p>`;
-                footer.innerHTML = `<button class="btn btn-secondary" data-bs-dismiss="modal">Sluiten</button>`;
+                body.innerHTML = `<div class="alert alert-success mb-2">Done — ${fmtInt(res.success)} succeeded, ${fmtInt(res.failed)} failed.${res.run_id ? ` Run #${res.run_id}.` : ''}</div>
+                    <p class="small text-muted mb-0">See the Redirect tool &rarr; Recent Results for full per-row details.</p>`;
+                footer.innerHTML = `<button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>`;
             } catch (e) {
                 body.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(e.message)}</div>`;
-                footer.innerHTML = `<button class="btn btn-secondary" data-bs-dismiss="modal">Sluiten</button>`;
+                footer.innerHTML = `<button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>`;
             }
         }
 

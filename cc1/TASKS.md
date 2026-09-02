@@ -49,10 +49,12 @@ Gedaan:
 
 Nog te doen:
 
-- [ ] **De kaart is Nederlands, de kop en de knoppen zijn Engels.** `Push Redirects` / `View` / `Push`
-      staan boven `Score vanaf`, `geselecteerd` en `niet te pushen uit deze run`. Beslissen of de rest
-      van de kaart mee naar Engels gaat (dan loopt hij gelijk met Canonicals en de Redirect Generator)
-      of dat de koppen terug naar Nederlands moeten.
+- [x] ~~De kaart is Nederlands, de kop en de knoppen zijn Engels.~~ Joep, 2026-09-03: de rest van de
+      kaart mee naar Engels, dus hij loopt nu gelijk met Canonicals en de Redirect Generator — labels,
+      lege staten, samenvatting, afkap-waarschuwing en de hele modal. Getallen blijven `nl-NL`
+      (punt als duizendtal): dat is de huisconventie in 44 andere plekken in `frontend/`, ook op
+      pagina's met Engelse labels — het formaat volgt de lezer, niet het label. `Country` is een
+      breder label dan `Land` en kneep de select tot `NL+E`; max-width van 155 naar 185 px.
 - [ ] **Nooit een echte push gedaan.** De preflight is end-to-end getoetst, maar `/submit` is alleen
       met een gestubde response gedraaid — dat pad heeft zijn eerste echte run nog voor de boeg.
 - [ ] **Een run die tijdens het bekijken wordt verwijderd** sluit de kaart alleen als je hem via
