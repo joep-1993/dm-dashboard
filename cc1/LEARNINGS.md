@@ -89,6 +89,11 @@ de DELETE draaide nooit en de oude acht rijen bleven staan. Was de volgorde ande
 had een sheetwijziging de uitsluitingen leeggegooid en had de tool álle shops aangepast. Bij een
 truncate-and-reload geldt: eerst alles wat kan falen, dan pas weggooien.
 
+Het bronscript (`scripts_def/GSD_verhogingen_verlagingen*.py`) had die bescherming níet: daar stond
+een `conn.commit()` ná de CREATE én ná de DELETE, dus daar zou een klappende INSERT de tabel leeg
+achterlaten en had het script daarna niemand meer uitgesloten. Bij het meepatchen van die scripts
+(2026-09-02) is dat teruggebracht tot één transactie met één commit aan het eind.
+
 ### Een `except` zonder uitgang in de UI is geen afhandeling
 
 De aanroeper deed `logger.warning(f"sync_shop_exclusions failed: {e}")` en zette

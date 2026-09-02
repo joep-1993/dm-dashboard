@@ -101,10 +101,24 @@ Nog te doen:
       campagnenamen dragen `[shop_id:…]`. Het probleem is attributie — al onze API-tools schrijven
       onder `j.schagen@beslist.nl`, dus je ziet niet welk script het deed. In NL 89 budgetwijzigingen
       op sheet-shops in 14 dagen, in BE 12, drie actoren door elkaar. Zie LEARNINGS voor de opties.
-- [ ] **Het bronscript heeft dezelfde bug en crasht erop.** `scripts_def/GSD_verhogingen_verlagingen.py`
-      roept `get_shop_exclusions()` op regel 1413 aan zonder try/except, met exact dezelfde dynamische
-      DDL. Als dat script nog draait, valt het sinds de notitiekolom om vóór het iets doet. Nagaan of
-      het nog gebruikt wordt en of het dan de fix moet overnemen.
+- [x] **Het bronscript had dezelfde bug en crashte erop — meegepatcht (2026-09-02).** Joep: het
+      script draait niet meer, maar moet bruikbaar blijven als noodgreep. Beide varianten
+      (`scripts_def/GSD_verhogingen_verlagingen.py` en `_BE.py`, allebei dezelfde 195 gewijzigde
+      regels) hebben nu dezelfde `get_shop_exclusions()` als de dashboardtool: kolommen zonder kop
+      eruit, dubbele koppen en een ontbrekende `Shop ID`-kolom geweigerd, niet-numerieke shop-id's
+      overgeslagen met een logregel, tabel opnieuw opbouwen bij gewijzigde kolommen, en `<> ''` in
+      plaats van `IS NOT NULL` in de hoofdquery. Extra t.o.v. het dashboard: één transactie met één
+      commit (er stond een `commit()` ná de CREATE én ná de DELETE, dus een klappende INSERT liet de
+      tabel leeg achter), plus een `count_shop_exclusions()` en een `_exclusions_redshift_conn()`
+      helper. De aanroep op moduleniveau zit nu in een try/except: mislukt het bijwerken, dan draait
+      het script alleen door als er nog shop-id's in de tabel staan (met een luide waarschuwing) en
+      stopt het anders met `SystemExit` vóór de eerste budgetmutatie.
+      Getest door de nieuwe functies uit het gepatchte bestand te `exec`'en tegen een tijdelijke
+      Redshift-tabel — dat dekt ook de psycopg2-tuple-cursor, het enige echte verschil met de
+      dashboardversie. Back-ups staan naast de originelen als `*.py.bak-20260902`.
+- [ ] **`scripts_def/` staat in geen enkele repo.** Deze patch is dus alleen op Joeps schijf
+      gewijzigd, met een `.bak-20260902` ernaast als enige terugweg. Als die scripts noodgrepen
+      moeten blijven, horen ze in versiebeheer — bij Joep neerleggen of dat de moeite waard is.
 - [x] **De sheet heet "Uitsluitingen GSD verhogingen"** maar de tool sluit de shop volledig uit, dus
       ook van verlagingen. **Bevestigd door Joep (2026-09-02): helemaal uitsluiten is de bedoeling.**
       Dat komt overeen met de beslistabel in het bronscript ("Op uitsluitingen lijst? = Nee" bij élke
