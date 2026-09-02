@@ -27,11 +27,12 @@ from typing import Optional, List, Dict, Any
 
 from backend.beslist_rate_limit import productsearch_bucket
 from backend.gsd_check_service import search_gsd
+from backend import taxv2_client as taxv2
 
 logger = logging.getLogger(__name__)
 
 SEARCH_API = "https://productsearch-v2.api.beslist.nl"
-TAX_API = "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl"
+TAX_API = taxv2.BASE
 LOCALE = "nl-NL"
 
 _session = requests.Session()
@@ -147,7 +148,9 @@ def _url_slug(cat_id: int) -> str:
         return _slug_cache[cat_id]
     slug = ""
     try:
-        j = _session.get(f"{TAX_API}/api/Categories/{cat_id}", timeout=30).json()
+        # taxv2 via de gedeelde client (retry); _session hierboven praat met de
+        # Search API en blijft dus zoals hij is.
+        j = taxv2.get_json(f"/api/Categories/{cat_id}", timeout=30)
         labels = j.get("labels", []) or []
         for loc in (LOCALE, "nl-BE"):
             for l in labels:

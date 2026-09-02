@@ -37,13 +37,14 @@ from typing import Dict, Optional, Tuple
 import requests
 
 from backend.text_encoding import fix_mojibake
+from backend import taxv2_client as taxv2
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 CAT_URLS_CSV = os.path.join(_DATA_DIR, "cat_urls.csv")
 MAINCAT_CSV = os.path.join(os.path.dirname(__file__), "maincat_mapping.csv")
 
-TAX_BASE = "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl"
-TAX_HEADERS = {"X-User-Name": "SEO_JOEP", "Accept": "application/json"}
+TAX_BASE = taxv2.BASE
+TAX_HEADERS = taxv2.headers()
 TAX_TIMEOUT = 30
 LOCALE = "nl-NL"
 
@@ -60,7 +61,7 @@ _walk_in_flight: bool = False
 _lock = threading.Lock()
 
 # Reuse one session: the walk is many small requests to the same host.
-_session = requests.Session()
+_session = taxv2.session()
 
 
 # ---------------------------------------------------------------------------

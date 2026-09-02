@@ -17,10 +17,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse, parse_qs
+from backend import taxv2_client as taxv2
 
 # Taxonomy API
-TAX_BASE = "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl"
-TAX_HEADERS = {"X-User-Name": "SEO_JOEP", "Accept": "application/json"}
+# Gedeelde client (backend/taxv2_client.py): retry op 502/503/504 en één sessie
+# per thread. Alle taxv2-calls hier zijn reads, dus de retry raakt niets dat schrijft.
+TAX_BASE = taxv2.BASE
+TAX_HEADERS = taxv2.headers()
 TAX_TIMEOUT = 30
 
 # Data files
@@ -81,7 +84,7 @@ class TaxonomyCache:
         self._category_facets: Dict[int, list] = {}    # cat_id -> [facet dicts]
         self._facet_values: Dict[int, Dict[int, dict]] = {}  # facet_id -> {value_id -> value dict}
         self._last_csv_load: float = 0
-        self._session = requests.Session()
+        self._session = taxv2.session()
 
     # --- CSV loading ---
     def _ensure_csv_loaded(self):

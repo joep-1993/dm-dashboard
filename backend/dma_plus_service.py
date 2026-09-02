@@ -38,6 +38,7 @@ for _stream_name in ("stdout", "stderr"):
             pass
 
 from google.ads.googleads.client import GoogleAdsClient
+from backend import taxv2_client as taxv2
 
 logger = logging.getLogger(__name__)
 
@@ -292,8 +293,8 @@ def _fetch_all_cat_ids_from_taxonomy_api() -> list:
     """Fetch all categories from Taxonomy API v2. Returns [(mc_name, mc_id, cat_name, cat_id), ...]."""
     import requests
 
-    TAX_BASE = "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl"
-    TAX_HEADERS = {"X-User-Name": "SEO_JOEP", "Accept": "application/json"}
+    TAX_BASE = taxv2.BASE
+    TAX_HEADERS = taxv2.headers()
     result = []
 
     try:

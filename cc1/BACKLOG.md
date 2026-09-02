@@ -39,6 +39,41 @@ ruim onder zijn desktopaandeel — 82% van onze Bing-organische visits is deskto
 
 Blokkerend voor het meten: geen toegang tot Bing Webmaster Tools (staat als open punt in TASKS).
 
+### De twee laatste fase-5-refactors vragen allebei een harness die niet bestaat (logged 2026-09-02)
+
+Fase 5 van de audit is voor het grootste deel gedaan (`backend/taxv2_client.py`, alle tien
+taxv2-consumenten gemigreerd, `engine`-kolom op de captabellen). Twee items blijven staan, en bij
+allebei is de blokkade dezelfde: het zijn merges van gedrifte implementaties, geen verplaatsingen.
+
+**1. Listing-tree-helpers naar `google_ads_helpers.py`.** De audit noemde ze "verbatim duplication"
+en stelde voor de simulator uit de DMA-Exclusions-audit van 2026-07-02 te hergebruiken. Beide
+premissen kloppen niet. Die simulator staat niet in de repo (scratchpad-werk, net als de
+tag_toppers-negatives-scripts uit BACKLOG hierboven). En het zijn geen kopieën — drie concrete
+verschillen, nu ook als comment bij beide `_unit_op`'s:
+
+* `_unit_op` gaat in Tag Toppers via `_set_case_value(spec)` met vier dimensies (item_id,
+  custom_attr, brand, product_type); DMA Exclusions kent alleen item_id en custom_attr inline.
+* `_subdiv_op` heeft in Tag Toppers een optionele case value; in DMA Exclusions is `custom_attr`
+  een verplicht keyword, dus daar kunnen alleen custom-attribuut-subdivisions gebouwd worden.
+* Tag Toppers guardt `if parent_resource:`, DMA Exclusions wijst hem onvoorwaardelijk toe.
+
+Dat laatste is mogelijk een echte bug in DMA Exclusions: op regel 962 komt `parent_resource` uit
+`live_leaf["parent"]`, en `_read_tree` slaat dat op als `... or None`. Een ad group met één enkele
+root-UNIT — een bestaande vorm — geeft dan `None` aan `_subdiv_op`. **Niet nagegaan of dat
+bereikbaar is**; DMA Exclusions viel buiten de scope van vandaag.
+
+**2. De Healthscore categorie/maincat-tweelingen.** ~400 regels bijna-identieke SQL-generatie
+(`_refresh_cat_month` / `_refresh_maincat_month`, `build_category_caps` / `build_maincat_caps`,
+`build_sitemaps` / `build_maincat_sitemaps`) die de tabellen voedt waar live vanuit gepusht wordt.
+De `engine`-kolom maakt nu tenminste zichtbaar wie wat schreef, maar samenvoegen vraagt een
+OLD-vs-NEW-vergelijking over een volledige build tegen Redshift.
+
+**Wat een harness voor allebei moet kunnen:** een nagebouwde `GoogleAdsClient` (get_type / enums /
+copy_from met proto-plus-semantiek) respectievelijk twee volledige builds op dezelfde `as_of`, en
+dan een diff op de geproduceerde operaties c.q. de geschreven rijen. Een harness die zelf niet klopt
+is erger dan geen harness, dus dit is eigen werk waard — niet iets om aan het eind van een sessie
+in te schuiven.
+
 ### ~~SEO titles: de description-herhaling~~ — OPGELOST aan de site-kant (gesloten 2026-09-02)
 
 **Dit punt is vervallen. De renderer vult inmiddels élk voorkomen van een `!!facet!!`, niet alleen

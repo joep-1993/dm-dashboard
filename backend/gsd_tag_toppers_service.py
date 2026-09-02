@@ -743,6 +743,17 @@ def _spec_from_legacy(item_id_value, custom_attr):
     return None
 
 
+# LET OP bij het samenvoegen met de tweeling in dma_exclusions_service.py — het zijn GEEN kopieën.
+# Vastgesteld 2026-09-02, drie concrete verschillen:
+#   1. _unit_op: hier via _set_case_value(spec) met vier dimensies (item_id,
+#      custom_attr, brand, product_type); daar alleen item_id + custom_attr inline.
+#   2. _subdiv_op: hier is de case value optioneel (spec=None mag); daar is
+#      custom_attr een VERPLICHT keyword, dus alleen custom-attribuut-subdivisions.
+#   3. parent_resource: hier `if parent_resource:`, daar onvoorwaardelijk toegewezen —
+#      een ad group met één enkele root-UNIT (parent None) gedraagt zich dus anders.
+# Samenvoegen betekent daarom kiezen per verschil, niet verplaatsen. Dat vraagt een
+# OLD-vs-NEW-harness met een nagebouwde client; de simulator waar de audit naar
+# verwees bestaat niet in de repo (was scratchpad-werk van 2026-07-02).
 def _unit_op(client, customer_id, ad_group_id, temp, parent_resource, *,
              item_id_value=None, custom_attr=None, spec=None, negative=False, bid=None):
     op = client.get_type("AdGroupCriterionOperation")

@@ -22,6 +22,7 @@ from openai import OpenAI
 from backend.database import get_db_connection, return_db_connection
 from backend import openai_guard
 from backend.faq_service import fetch_products_api, parse_beslist_url
+from backend import taxv2_client as taxv2
 
 # Configuration
 USER_AGENT = "Beslist script voor SEO"
@@ -636,8 +637,7 @@ _NEUTER_COLOUR_BASE = {
     'zwarte': 'zwart',
 }
 
-_TAXV2_BASE = os.getenv("TAXV2_BASE",
-                        "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl")
+_TAXV2_BASE = os.getenv("TAXV2_BASE", taxv2.BASE)
 _COLOUR_FACET_IDS = (3241, 3255)  # kleur facets
 _colour_map_lock = threading.Lock()
 _colour_map_cache: Optional[dict] = None

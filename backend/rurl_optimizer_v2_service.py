@@ -20,6 +20,7 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
+from backend import taxv2_client as taxv2
 
 logger = logging.getLogger(__name__)
 
@@ -281,7 +282,7 @@ def _history_append(task_id: str) -> None:
         _save_history_to_disk()
 
 
-TAXV2_BASE = "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl"
+TAXV2_BASE = taxv2.BASE
 _SLUG_TO_MAINCAT: Dict[str, str] = {}
 _CAT_ID_TO_DEEPEST: Dict[str, str] = {}
 

@@ -38,6 +38,7 @@ from typing import Dict, List, Optional
 
 import openpyxl
 
+from backend import taxv2_client as taxv2
 from backend.dma_plus_service import (
     COUNTRY_CONFIG,
     TaskCancelled,
@@ -158,7 +159,7 @@ DMA_PLUS_SHEETS = {
     "BE": {"nieuw": "BE - Nieuw (aanmaken)", "afvallers": "BE - Afvallers"},
 }
 
-TAXV2_BASE_URL = "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl"
+TAXV2_BASE_URL = taxv2.BASE
 
 # Output files go here so the router can hand them to FileResponse.
 OUTPUT_DIR = Path("/tmp/dma-plus-output")
