@@ -43,10 +43,10 @@ Nog te doen:
       roept `get_shop_exclusions()` op regel 1413 aan zonder try/except, met exact dezelfde dynamische
       DDL. Als dat script nog draait, valt het sinds de notitiekolom om vóór het iets doet. Nagaan of
       het nog gebruikt wordt en of het dan de fix moet overnemen.
-- [ ] **De sheet heet "Uitsluitingen GSD verhogingen"** maar de tool sluit de shop volledig uit, dus
-      ook van verlagingen. Dat komt overeen met de beslistabel in het bronscript ("Op uitsluitingen
-      lijst? = Nee" bij élke actie), maar de naam suggereert iets anders. Bij Joep checken of dat de
-      bedoeling is.
+- [x] **De sheet heet "Uitsluitingen GSD verhogingen"** maar de tool sluit de shop volledig uit, dus
+      ook van verlagingen. **Bevestigd door Joep (2026-09-02): helemaal uitsluiten is de bedoeling.**
+      Dat komt overeen met de beslistabel in het bronscript ("Op uitsluitingen lijst? = Nee" bij élke
+      actie); alleen de sheetnaam suggereert iets anders. Niet "repareren" naar alleen-verhogingen.
 
 ### 2026-09-02 (1) — SEO Stats: categorienamen in de Performance standup op één regel
 
