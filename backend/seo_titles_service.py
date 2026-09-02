@@ -33,6 +33,7 @@ scripts/pagetitles_blueprint_from_urls.py so generated keys stay byte-identical
 to the historical deliverable.
 """
 import os
+import re
 import time
 import threading
 from urllib.parse import unquote
@@ -122,6 +123,21 @@ END_PIN_ORDER = 9000
 PIN_TIE_SCALE = 1e6
 COUNTRY_CODE = 'NL'
 TAIL_TITLE = 'kopen? ✔️ Tot !!DISCOUNT!! korting! | beslist.nl'
+# Scheidingsteken in de description. MOET een echt karakter zijn, geen HTML-entity.
+#
+# Hier stond de letterlijke tekst '&#10062;'. Live nagemeten op 2026-09-02: de site
+# substitueert eerst de !!placeholders!! en HTML-escapet daarna de hele string bij het
+# injecteren in de meta-tag — terecht, dat hoort zo. Gevolg: de `&` werd `&amp;` en de
+# meta-tag bevatte `&amp;#10062;`, oftewel Google las drie keer per description de
+# letterlijke tekens `&#10062;`. In de nog-onvervangen JSON-blob op diezelfde pagina
+# staat de entity wél rauw; het is dus puur de meta-tag-route.
+#
+# LET OP, dit raakt 86.123 bestaande rijen én de legacy-templates in
+# pa.page_titles_existing (8.791 keer dezelfde entity), dus het is niet alleen van ons.
+# Keuze van hét teken: &#10062; is U+274E (❎, rood kruis) — vrijwel zeker niet wat
+# bedoeld was. TAIL_TITLE hierboven gebruikt ✔️, en de description is daar de tegenhanger
+# van, dus die is aangehouden. Eén regel om te wijzigen als Joep iets anders wil.
+DESC_BULLET = '✔️'
 # /page-titles rejects a title over this many characters (400 "too long").
 MAX_TITLE_LEN = 200
 # /page-titles enforces this on h1_title as well (learned the hard way: one 205-char
@@ -307,12 +323,37 @@ def _rule(rules, slug):
 _deps_cache = {"deps": None, "loaded_at": 0.0}
 _DEPS_TTL = 600  # seconds
 
-_IDENTITY_PARENT_PREFIXES = ('merk', 'automerk', 'populaire_serie', 'serie_',
-                             'productlijn', 'pl_')
+# Een identity-parent is een NAAM (merk, serie, productlijn, personage, model) en
+# geen dimensie die je uit het kind kunt afleiden. Die moet in de titel blijven staan.
+#
+# Dit was een prefix-test, en die matchte 9 van de 55 parent_slugs in
+# pa.facet_dependencies: `'serie'.startswith('serie_')` is False, en
+# speelgoed_series / voertuigmerken / nerf_series / personage vielen er ook buiten.
+# Gevolg: merk~speelgoed_series~thema_little_people shipte als
+# `!!merk!! !!sub_category!! !!thema_little_people!!` — serienaam weg.
+#
+# Fout in de identity-richting kost hooguit een iets redundante titel; fout in de
+# andere richting wist stil een naam. Dus bij twijfel identity.
+# Getoetst tegen alle 55 parent_slugs op 2026-09-02: 21 identity, 34 dimensie.
+# Nieuwe naamfamilie erbij? Voeg een token toe (of de slug aan _IDENTITY_PARENT_SLUGS)
+# en draai de split opnieuw tegen pa.facet_dependencies.
+_IDENTITY_PARENT_TOKENS = frozenset({
+    'merk', 'merken', 'automerk', 'automerken', 'voertuigmerken',
+    'serie', 'series', 'productlijn', 'productlijnen', 'prodl', 'pl',
+    'personage', 'spellen', 'model',
+})
+_IDENTITY_PARENT_SUBSTRINGS = ('merk', 'serie')
+# Namen die geen herkenbaar token dragen (de `s_`-familie = serie-<merk>).
+_IDENTITY_PARENT_SLUGS = frozenset({'s_bouwstenen', 's_clementoni', 's_voer'})
 
 
 def _identity_parent(slug):
-    return 'automerk' in slug or slug.startswith(_IDENTITY_PARENT_PREFIXES)
+    s = (slug or '').lower()
+    if s in _IDENTITY_PARENT_SLUGS:
+        return True
+    if set(re.split(r'[_\-]', s)) & _IDENTITY_PARENT_TOKENS:
+        return True
+    return any(sub in s for sub in _IDENTITY_PARENT_SUBSTRINGS)
 
 
 def deps_cached(force=False):
@@ -327,18 +368,44 @@ def deps_cached(force=False):
     return _deps_cache["deps"]
 
 
-def covered_parents(types, deps):
+# Generieke koppen: `processor_type_laptop`.endswith('_type_laptop') is waar, maar dat
+# maakt type_laptop nog geen parent van processor_type_laptop — ze delen alleen een
+# achtervoegsel. Voor deze koppen eisen we een echte rij in pa.facet_dependencies.
+_GENERIC_SUFFIX_HEADS = ('type', 'soort', 'model', 'vorm', 'kleur', 'maat')
+
+
+def covered_parents(types, deps, rules=None):
     """Parent slugs in `types` whose VALUE is already implied by a dependent child
     that is also in `types`. Two dependency sources, because pa.facet_dependencies
     is incomplete (it knows houttype_materiaal -> materiaal but not
     houtsoort_materiaal): the table, plus the slug-suffix convention
-    (`<child>_<parent>`), which can only fire when both sit in the same key."""
+    (`<child>_<parent>`), which can only fire when both sit in the same key.
+
+    Twee dingen mogen NOOIT als gedekte parent wegvallen:
+      * een type-facet — dat is het zelfstandig naamwoord. Viel dat weg, dan zette
+        facet_phrase() er het generieke !!sub_category!! voor in de plaats. Live
+        raakten 99 gepushte blueprints zo hun noun kwijt.
+      * een identity-parent (naam), zie _identity_parent().
+    """
     pool = set(types)
     out = set()
     for child in pool:
         parents = set(deps.get(child, ()))
-        parents |= {p for p in pool if p != child and child.endswith('_' + p)}
-        out |= {p for p in parents if p in pool and not _identity_parent(p)}
+        for p in pool:
+            if p == child or not child.endswith('_' + p):
+                continue
+            # Blinde suffixmatch alleen toestaan als de kop niet generiek is;
+            # anders moet de dependency-tabel het bevestigen.
+            head = p.split('_')[0].lower()
+            if head in _GENERIC_SUFFIX_HEADS and p not in deps.get(child, ()):
+                continue
+            parents.add(p)
+        for p in parents:
+            if p not in pool or _identity_parent(p):
+                continue
+            if rules is not None and _rule(rules, p)[1]:
+                continue                      # type-facet = de noun, nooit schrappen
+            out.add(p)
     return out
 
 
@@ -358,7 +425,7 @@ def facet_phrase(types, rules, deps=None):
     """
     if deps is None:
         deps = deps_cached()
-    types = [t for t in types if t not in covered_parents(types, deps)]
+    types = [t for t in types if t not in covered_parents(types, deps, rules)]
     items = []  # (order, slug, placeholder)
     has_type = False
     type_orders = []
@@ -428,8 +495,9 @@ def build_blueprint(cat_id, cat_name, types, rules):
         while tokens and len(' '.join(tokens)) > MAX_H1_LEN:
             tokens.pop()
         h1 = ' '.join(tokens)
-    desc = (f'Zoek je {phrase}? &#10062; Vergelijk !!NR!! aanbiedingen en bespaar op je '
-            f'aankoop &#10062; Shop {phrase} met !!DISCOUNT!! korting online! &#10062; beslist.nl')
+    desc = (f'Zoek je {phrase}? {DESC_BULLET} Vergelijk !!NR!! aanbiedingen en bespaar op je '
+            f'aankoop {DESC_BULLET} Shop {phrase} met !!DISCOUNT!! korting online! '
+            f'{DESC_BULLET} beslist.nl')
     return {
         'cat_id': cat_id, 'key': key, 'cat_name': cat_name,
         'title': title, 'h1_title': h1, 'description': desc,
@@ -946,21 +1014,48 @@ def _generate_titles(source_urls, workers=10):
     from backend.ai_titles_service import process_single_url
 
     # Skip URLs that already have a unique title.
+    #
+    # Eén query voor de hele batch, en FAIL CLOSED. Hiervoor liep hier een lus met
+    # één cursor en `except Exception: todo.append(u)`. Zodra één lookup faalde stond
+    # de verbinding in een afgebroken transactie (geen rollback), gooide élke volgende
+    # _has_unique_title InFailedSqlTransaction, en belandde de hele rest van de batch
+    # in `todo` — waarna process_single_url() onvoorwaardelijk naar
+    # pa.unique_titles_content schrijft en handgeschreven titels overschrijft.
+    # Kan de check niet worden uitgevoerd, dan genereren we juist NIET.
     todo = []
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        for u in source_urls:
-            try:
-                if _has_unique_title(cur, u):
-                    _inc("titles_skipped")
-                else:
-                    todo.append(u)
-            except Exception:
-                todo.append(u)  # on check failure, attempt generation
+        # Canonicaliseren blijft in SQL: pa.canonicalize_url() is de enige
+        # bron van waarheid en een Python-kopie die één teken afwijkt zou juist
+        # rijen missen — en dan overschrijven we alsnog handwerk.
+        cur.execute("""
+            WITH want AS (
+                SELECT x AS raw, pa.canonicalize_url(x) AS canon
+                FROM unnest(%s::text[]) AS x
+            )
+            SELECT w.raw AS raw
+            FROM want w
+            JOIN pa.urls u ON u.url = w.canon
+            JOIN pa.unique_titles_content c ON c.url_id = u.url_id
+            WHERE COALESCE(c.title, '') <> ''
+        """, (list(source_urls),))
+        covered = {r['raw'] for r in cur.fetchall()}
+    except Exception as e:
+        conn.rollback()
+        # `message` is het veld dat de frontend toont; een eigen key zou onzichtbaar zijn.
+        _set(message=f"unique-title-check mislukt, geen titels gegenereerd: {e}")
+        _inc("titles_skipped", len(source_urls))
+        return
     finally:
         cur.close()
         return_db_connection(conn)
+
+    for u in source_urls:
+        if u in covered:
+            _inc("titles_skipped")
+        else:
+            todo.append(u)
 
     def _one(u):
         if _stopping():
