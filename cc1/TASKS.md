@@ -3,6 +3,50 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-02 (5) — Top-10 koopgidsen: 14 URL's aangevuld tot 30 en alle 30 gedraaid
+
+Joeps opdracht in drie stappen: zijn lijst van 14 kandidaat-URL's aanvullen tot 30 met zoekvolumes
+en shopping-season-pieken, daarna de eerste 3 door de pijplijn met een mockup, daarna alle 30.
+Commit `8fb8888`. Les in LEARNINGS (zelfde datum, "Een kindcategorie met een ander producttype").
+
+Gedaan:
+
+- [x] **16 toevoegingen gekozen op data, niet op gevoel**: alle 3.317 bladcategorieën + 220
+      parents door Keyword Planner (`beste X` / `top 10 X` / `top X`, enkelvoud én meervoud),
+      gekruist met SEO-visits en -omzet uit Redshift over 12 maanden. Onderbouwing en 19
+      reserve-kandidaten in `Downloads\claude\top10_kandidaat_urls_2026-09-02.xlsx`.
+- [x] **Bevinding die de opdracht veranderde**: `top 10 X` is in het NL verwaarloosbaar (mediaan
+      50/mnd) tegen `beste X` (1.600). Een top-10 pagina moet op `beste X` ranken; "top 10" is een
+      koptekstvariant. Ook: `top X` is vervuild (topmatras, kledingtop) en de kale term hoort niet
+      in een paginatotaal.
+- [x] **Excel op URL-niveau** (`top10_urls_zoekvolume_2026-09-02.xlsx`): URL, live H1, maincat,
+      diepste cat, % uplift shopping season, totaal koopintentie-volume, plus linkkolommen naar de
+      artifact en het HTML-bestand. Uplift = okt–dec-gemiddelde ÷ jaargemiddelde, gerekend op de
+      opgetelde maandreeks van de hele termset (losse termen van 20/mnd zijn te ruisig).
+- [x] **Alle 30 gedraaid**: $98,84, 2.863 producten, 164 termpagina's, 0 fouten. Drie parallelle
+      banen in plaats van serieel (26 topics × ~9 min → ~85 min).
+- [x] **Facet-URL's (10 van de 30) via `resolve_category.py --url`**, niet op naam — anders pakt het
+      topic de moedercategorie. Zes labels rechtgezet omdat ze uit de facetwaarde komen
+      ("Volautomatisch" → "Volautomatische koffiemachines").
+- [x] **Matrassen gerepareerd** met de nieuwe `exclude_title` (zie LEARNINGS): 31 van de 77
+      kandidaten waren toppers en er stond een Emma-topper op 1.
+- [x] **30 mockups + overzicht**, zelfstandige HTML met de foto's als data-URI in
+      `Downloads\claude\top10_mockups\`; artifacts voor het overzicht en voor stofzuigers,
+      stoomreinigers en airfryers.
+
+Nog te doen:
+
+- [ ] **Producttype-controle over de andere 29 pagina's**: matrassen was niet uniek, elke categorie
+      met een kindcategorie van een ander producttype kan hetzelfde hebben. Nakijken of de titels in
+      de top 10 het producttype van de categorie zijn.
+- [ ] **Babyboxen (20 kandidaten, 1 termpagina, 220/mnd koopintentie) en airconditionings (32
+      kandidaten)** zijn technisch een top 10 maar inhoudelijk mager. Beslissen of die pagina's er
+      komen.
+- [ ] De 27 niet-gepubliceerde mockups zijn lokale bestanden; de relatieve links in de Excel werken
+      alleen naast de map `top10_mockups\`. Joep koos dit bewust — pas op bij doormailen.
+- [ ] De 87 MB gegenereerde data (reviews + exports) staat alleen op deze machine;
+      `top10/topics/.gitignore` trackt enkel `topic.json`. Opnieuw genereren kost weer $99.
+
 ### 2026-09-02 (4) — FAQ v2 publish: de replace-DELETE's parallel (publish-timeout)
 
 Joep gaf de opdracht kant-en-klaar mee: de publishstap van FAQ v2 haalde de `PUBLISH_TIMEOUT` niet

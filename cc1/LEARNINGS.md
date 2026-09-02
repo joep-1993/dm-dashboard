@@ -1,6 +1,44 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een kindcategorie met een ander producttype zet dat product op 1 (2026-09-02, top-10 pijplijn)
+
+Op "de 10 beste matrassen" stond een **Emma Original Pro Topper**. De ranking had niets fout
+gedaan: 31 van de 77 kandidaten waren toppers, en op de populariteitssortering waren dat 19 van
+de eerste 30 treffers.
+
+### Waarom de scope het niet oplost
+
+**Topdekmatrassen (9000187) is een kindcategorie van Matrassen (9000048)**, dus een
+categoriebrede zoekopdracht hoort ze op te leveren. De Search API neemt **één** categorie mee,
+dus "Matrassen zonder Topdekmatrassen" is geen scope die je kunt opgeven. Zoektermen aanpassen
+helpt ook niet: de M line-toppers komen via "m line matrassen", maar de Emma- en Tempur-toppers
+komen net zo goed mee op "beste matrassen".
+
+### De fix: `exclude_title` per topic
+
+Een lijst regexen in `topic.json`, gematcht op de producttitel, toegepast in
+`collect_products.py` direct na de API-call (`excluded()` + `fetch_term(..., skip)`), met een
+telling in de uitvoer zodat je ziet wat er wegvalt. Voor matrassen:
+`\btoppers?\b`, `topdekmatras`, `splittopper`, `matrastopper`, `matrasbeschermer`, `matrashoes`,
+`hoeslaken`, `molton`, `onderlaken` — plus `limit_per_term: 30`, want de uitsluiting haalde 63%
+van de generieke termen weg. Resultaat: 128 treffers uitgesloten, 68 schone kandidaten, Emma
+Original+ pocketvering op 1.
+
+`\btoppers?\b` en niet `topper` als deelstring: nummer 10 is een matras **met geïntegreerd
+topmatras** en dat is wél een matras. De uitsluiting moet het losse product raken, niet het woord.
+
+### Wat dit betekent voor de andere categorieën
+
+Dit is geen matrassen-eigenaardigheid. Stofzuigers heeft Stofzuigerzakken als buur,
+Koptelefoons heeft oordopjes, Beddengoed heeft van alles. **Bij een nieuwe categorie hoort een
+controle of de top 10 het producttype van die categorie is** — dat is met de kale titels in het
+exportbestand in tien seconden te zien en het is de enige fout in deze batch die niemand aan de
+data kon aflezen. Kosten van de reparatie: $1,00 aan 27 nieuwe reviews plus $0,02 rank, want
+reviews cachen per EAN.
+
+- **Date**: 2026-09-02
+
 ## Een kostenraming op aantallen mist de rekening die serieel wachten stuurt (2026-09-02, FAQ Publish 2.0)
 
 Vervolg op [de replace=True-omzetting van 31-08](#een-additieve-api-met-een-zuinige-default-laat-de-content-rotten-2026-08-31-faq--publish-20).
