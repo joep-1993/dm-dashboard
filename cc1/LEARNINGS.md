@@ -1,6 +1,87 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een lege kolomkop is een schemafout, en een gecatchte exception is een stille regressie (2026-09-02, GSD Budgets uitsluitingen)
+
+Joeps vraag: worden de uitsluitingen uit de spreadsheet achter "Add shop exclusions" wel echt
+meegenomen? Nee. De sheet had 16 shops, `pa.gsd_shop_exclusions_joep` acht, en de hoofdquery leest
+alleen die tabel. Zeven van de acht ontbrekende shops waren de afgelopen 7 dagen actief in GSD, dus
+die konden gewoon verhoogd of verlaagd worden — Sanitairwinkel (3.076 omzet), Toolstation (815),
+Praxis, Prontowonen NL+BE, Profijtmeubel, Massamarkt NL+BE.
+
+### De sheet bepaalt het schema, dus de sheet kan het schema slopen
+
+`sync_shop_exclusions()` bouwde CREATE en INSERT dynamisch uit rij 1 van de sheet. Iemand had een
+notitiekolom toegevoegd ("Hebben het financieel zwaar, dus niet te hard laten gaan") zonder er een
+kop boven te zetten. `gspread.get_all_values()` geeft een rechthoekig grid, dus die kop komt terug
+als `''`, en dan is de DDL:
+
+```sql
+CREATE TABLE IF NOT EXISTS pa.gsd_shop_exclusions_joep (
+  "Shop ID" VARCHAR(1000), "Shop naam" VARCHAR(1000), "AM" VARCHAR(1000), "" VARCHAR(1000)
+);
+-- SyntaxError: zero-length delimited identifier at or near """"
+```
+
+Twee dingen om te onthouden. Ten eerste faalt dit **ook met `IF NOT EXISTS` op een bestaande
+tabel**: parsen gaat vóór de bestaanscheck, dus de statement komt nooit langs de parser. Ten tweede
+is `IF NOT EXISTS` sowieso het verkeerde gereedschap voor een spiegeltabel: het voegt geen kolom toe
+aan een tabel die al bestaat, dus zodra de sheet een kolom erbij krijgt loopt de INSERT dáárna stuk
+op een onbekende kolom. Een spiegel hoort opnieuw opgebouwd te worden (DROP + CREATE) zodra de
+kolommen van de bron afwijken — de bron is de waarheid, de tabel is wegwerp.
+
+### De DELETE stond ná de CREATE, en dat is het enige wat dit onschuldig hield
+
+Volgorde in de functie was CREATE → DELETE → INSERT, alles in één transactie. De CREATE klapte, dus
+de DELETE draaide nooit en de oude acht rijen bleven staan. Was de volgorde andersom geweest, dan
+had een sheetwijziging de uitsluitingen leeggegooid en had de tool álle shops aangepast. Bij een
+truncate-and-reload geldt: eerst alles wat kan falen, dan pas weggooien.
+
+### Een `except` zonder uitgang in de UI is geen afhandeling
+
+De aanroeper deed `logger.warning(f"sync_shop_exclusions failed: {e}")` en zette
+`exclusions_sync_status = f"failed: {e}"` in het resultaat — maar `gsd-budgets.html` rende dat veld
+nergens. Vier maanden lang stond de foutmelding netjes klaar in de JSON en zag niemand hem. Vergelijk
+met het BUDGET_CONSTRAINED-sheet in dezelfde functie: als dát sheet niet laadt, aborteert de run met
+een rode banner. Twee sheets, dezelfde faalmodus, tegenovergestelde afhandeling.
+
+De regel die hieruit volgt: een gecatchte exception die het gedrag van de run verandert, hoort een
+zichtbare uitgang te hebben. Nu staat er een gele `alert-warning` boven de resultaten met de
+foutmelding én het aantal shop-id's waar de run dan mee rekent, plus "Uitgesloten shops: N" op de
+meta-regel.
+
+### Eén niet-numerieke cel sloopt de hele hoofdquery
+
+`outclick_shop_id NOT IN (SELECT "shop id" FROM ...)` vergelijkt een int met een varchar-kolom;
+Redshift cast de varchar naar int. Zet iemand "n.v.t." of een shopnaam in de kolom, dan faalt niet de
+uitsluiting maar de complete shop-query. Rijen zonder numeriek shop id worden nu overgeslagen en
+gemeld in dezelfde gele banner — ze horen zichtbaar te zijn, want dat zijn shops waarvan de gebruiker
+denkt dat ze uitgesloten zijn. `WHERE "shop id" IS NOT NULL` werd `<> ''`: dat vangt NULL én lege
+string, en één NULL in een `NOT IN`-subselect maakt het hele predicaat NULL.
+
+### Strict dry run botste met "de preview moet kloppen"
+
+Op 2026-04-21 is besloten dat dry run niets schrijft, ook de spiegeltabel niet. Gevolg: een dry run
+rekent met de tabel zoals de laatste live run hem achterliet. Dat besluit staat, maar de preview mag
+er niet over liegen. Dry run leest de sheet nu wél (lezen is geen mutatie), vergelijkt met de tabel
+en zegt in de banner welke shop-id's nog ontbreken en hieronder dus ten onrechte meelopen. De
+leeshelft zit in `read_shop_exclusions_sheet()`, de schrijfhelft eromheen in
+`sync_shop_exclusions()` — dat is meteen de reden om die twee te splitsen.
+
+### Terugdraaien kan, maar niet op basis van "wie"
+
+Google Ads `change_event` geeft per campagne `old_resource`/`new_resource` met `amount_micros` over
+de laatste 14 dagen (30 dagen retentie), en de campagnenamen dragen `[shop_id:…]`, dus je kunt exact
+de sheet-shops terugvinden. Wat het níet geeft is welk script het deed: al onze API-tools schrijven
+onder hetzelfde OAuth-account, dus alles staat op `j.schagen@beslist.nl`. In NL stonden 89
+budgetwijzigingen op sheet-shops in 14 dagen, in BE 12, van drie verschillende mensen/tools door
+elkaar. Alleen de eigen run-historie (`budget_old` per campagne in
+`backend/data/gsd_budgets_history.json`) zegt met zekerheid wat déze tool deed — en die staat op
+deze machine nog op 6 mei, alleen dry runs.
+
+- **Commit**: `03fd95f`
+- **Bestanden**: `backend/gsd_budgets_service.py`, `frontend/gsd-budgets.html`
+
 ## Vier klachten, één oorzaak: twee runs die tegelijk door dezelfde changelijst lopen (2026-09-01, GSD Campaigns)
 
 Joep kwam met elf errorregels uit een run (`DUPLICATE_CAMPAIGN_NAME`, "The request conflicted with
@@ -2040,6 +2121,14 @@ dus "Shop <frase> met korting" wordt "Shop  Koffiepads met korting". `build_blue
 **niet** aangeraakt — dat raakt alle toekomstige runs plus een re-push van 84.881 bestaande
 blueprints, en dat is een besluit van Joep. Zie [page_titles_placeholder_first_occurrence] en
 BACKLOG. Gevolg om te weten: dit record wijkt nu af van de andere ~85k.
+
+> **CORRECTIE 2026-09-02.** De premisse onder deze alinea klopt niet meer: de renderer vult
+> inmiddels **elk** voorkomen van een `!!facet!!`, niet alleen het eerste. Live geverifieerd op drie
+> `/c/`-pagina's met de SEO-UA — beide helften van de description staan gevuld. De herhaling in
+> `build_blueprint()` is dus geen bug meer, en dit record is nu juist de afwijking: het zegt
+> "Shop Koffiepads met korting" waar de andere ~86k de volle frase herhalen. Zie BACKLOG
+> "SEO titles: de description-herhaling — OPGELOST". Wat er wél nog zit: de bullet `&#10062;` wordt
+> dubbel geescaped en rendert als letterlijke tekst in de meta-description (86.123 van 86.124 rijen).
 
 
 ## Een maat is geen inhoudswoord, en een gate die het verkeerde type vergelijkt (2026-08-27, Auto-redirects V65)

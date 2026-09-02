@@ -3,6 +3,51 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-02 (2) — GSD Budgets: de uitsluitingen uit de spreadsheet werden half genegeerd
+
+Joeps vraag: check of de uitsluitingen uit de sheet achter "Add shop exclusions" goed worden
+meegenomen. Antwoord: nee — 8 van de 16 shops stonden in `pa.gsd_shop_exclusions_joep`. Les in
+LEARNINGS (zelfde datum, "Een lege kolomkop is een schemafout"). Commit `03fd95f`.
+
+Gedaan:
+
+- [x] **Oorzaak**: de notitiekolom in de sheet heeft geen kolomkop. `sync_shop_exclusions()` bouwde
+      de DDL uit de headers, dus daar stond `"" VARCHAR(1000)` in en Redshift antwoordt met
+      `zero-length delimited identifier`. De exception werd alleen als warning gelogd, dus de run
+      liep door op de stand van vóór de notitiekolom.
+- [x] **Impact gemeten**: 7 van de 8 ontbrekende shops waren de laatste 7 dagen actief in GSD —
+      Sanitairwinkel (3.076), Toolstation (815), Praxis (179), Prontowonen NL+BE, Profijtmeubel (111),
+      Massamarkt NL+BE. Die konden dus verhoogd/verlaagd worden.
+- [x] **Leeshelft apart**: `read_shop_exclusions_sheet()` laat kolommen zonder kop met cellen en al
+      vallen, weigert dubbele koppen en een ontbrekende `Shop ID`-kolom, en slaat rijen zonder
+      numeriek shop id over (één "n.v.t." laat anders de hele `NOT IN`-subselect klappen).
+- [x] **Schrijfhelft**: `sync_shop_exclusions()` bouwt de tabel opnieuw op zodra de kolommen van de
+      sheet afwijken — `CREATE TABLE IF NOT EXISTS` voegt niets toe aan een bestaande tabel.
+- [x] **Waarschuwing in de UI**: gele `alert-warning` boven de resultaten bij een mislukte of
+      onvolledige uitlezing, met de foutmelding en het aantal shop-id's waar de run mee rekent.
+      Meta-regel toont "Uitgesloten shops: N".
+- [x] **Dry run blijft droog** (besluit 2026-04-21) maar leest de sheet nu wél en meldt welke
+      shop-id's nog in de tabel ontbreken en hieronder dus ten onrechte meelopen.
+- [x] **Tabel bijgewerkt**: sync gedraaid, staat nu op 16 van de 16.
+- [x] **Getest**: zes sheetvarianten (kolom zonder kop, niet-numeriek id, kolom erbij, `Shop ID` weg,
+      dubbele kop, lege sheet) tegen een tijdelijke Redshift-tabel; live sync end-to-end.
+
+Nog te doen:
+
+- [ ] **Beslissen of we iets terugdraaien.** Technisch kan het: `change_event` in de Google Ads API
+      geeft `old_resource`/`new_resource` per campagnebudget over 14 dagen (30 dagen retentie) en de
+      campagnenamen dragen `[shop_id:…]`. Het probleem is attributie — al onze API-tools schrijven
+      onder `j.schagen@beslist.nl`, dus je ziet niet welk script het deed. In NL 89 budgetwijzigingen
+      op sheet-shops in 14 dagen, in BE 12, drie actoren door elkaar. Zie LEARNINGS voor de opties.
+- [ ] **Het bronscript heeft dezelfde bug en crasht erop.** `scripts_def/GSD_verhogingen_verlagingen.py`
+      roept `get_shop_exclusions()` op regel 1413 aan zonder try/except, met exact dezelfde dynamische
+      DDL. Als dat script nog draait, valt het sinds de notitiekolom om vóór het iets doet. Nagaan of
+      het nog gebruikt wordt en of het dan de fix moet overnemen.
+- [ ] **De sheet heet "Uitsluitingen GSD verhogingen"** maar de tool sluit de shop volledig uit, dus
+      ook van verlagingen. Dat komt overeen met de beslistabel in het bronscript ("Op uitsluitingen
+      lijst? = Nee" bij élke actie), maar de naam suggereert iets anders. Bij Joep checken of dat de
+      bedoeling is.
+
 ### 2026-09-02 (1) — SEO Stats: categorienamen in de Performance standup op één regel
 
 Joeps vraag: zorg dat de categorienamen in de standup-tabel niet afgekapt worden en op één regel
