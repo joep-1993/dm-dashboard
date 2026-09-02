@@ -1,6 +1,99 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een cascade met returns halverwege heeft geen staart die je kunt vertrouwen (2026-09-02, Auto-Redirects V67)
+
+Vervolg op [de opbergkast-rij van dezelfde dag](#een-score-die-het-bewijs-van-de-kále-categorie-meet-zakt-als-je-de-bestemming-verfijnt-2026-09-02-auto-redirects).
+Die sessie repareerde één overgeslagen stap (de V55-lift) op één return-plek. Dit is de generieke
+versie van dat probleem, plus wat de A/B onderweg over mijn eigen metrieken vertelde.
+
+### De staart was geen 3 maar 5 stappen, en de volgorde is inhoudelijk
+
+Achter het finals-blok van `process_url_v2` staan: **V55-lift → V61-pruning → V62-restore-hertest →
+V61-laatste-redmiddel → V64-cap**. Niet één daarvan is optioneel, en de volgorde draagt betekenis:
+
+- de **pruning vóór de dekkingstests**, anders maakt een dood facetfragment een rij beter gedekt
+  dan hij is;
+- de **V62-hertest vóór de cap**, want V62 kan de score TERUGZETTEN naar die van de scorer en de
+  cap moet daar daarna nog overheen kunnen. Zet je de cap ervoor, dan komt een ingetrokken restore
+  er weer bovenuit.
+
+Elke `return` halverwege sloeg alle vijf over, en niets in de code zei dat. `_finalize_redirect(row, ctx)`
+bundelt nu de vier *beoordelende* stappen in één aanroep; het laatste redmiddel (dat een redirect
+*maakt* en de builder nodig heeft) blijft erbuiten maar loopt ervóór, zodat de categoriepagina die
+het verzint ook de lift en de pruning krijgt.
+
+De les die verder reikt: **als een functie eindigt met stappen die "voor elke rij" gelden, mag er
+geen `return` boven staan.** Ofwel de staart is een aanroepbaar geheel, ofwel elk exit-punt moet hem
+zelf doen — en dan vergeet iemand het. Dezelfde fout zat er één niveau lager nog in: `keyword_words`
+was een parameter, dus een nieuwe aanroeper die hem vergat zette stil de twee dekkingsstappen uit.
+Nu leidt de staart hem zelf af (`_keyword_words()`).
+
+Bewijs dat de verplaatsing niets kostte: A/B over 2.909 URL's, **0 verschillen** in élk staart-stratum
+(stopwords-only 331, category_fallback 522, V61-pruned 83, V62 443, V64-capped 107, controle 844).
+Alleen `category_noun_only_clean_category` beweegt (32× 80→89): de query ís het categorie-noun, dus
+de lift vuurt daar nu — dezelfde claim die de constante 80 al maakte, nu uitgesproken door het
+signaal dat hem meet.
+
+### Een gefuseerde constante ontleden: meet elk signaal één keer
+
+De cross-maincat-ladder (80/72/60/45) fuseerde drie vragen: noemt de query deze CATEGORIE, is de
+Search API het EENS dat de producten hier liggen, en hoe DOMINANT is die categorie. Daardoor nam
+één bewegend signaal (dominantie) de hele score mee, en kon het facet dat de bestemming juist maakte
+niet meedoen. Nu draagt `_cross_maincat_base()` alleen de identiteitsclaim (72/65/45, geankerd op de
+oude constanten) en doen dekking, dominantie en producttelling hun werk in `score_search_derived` —
+dezelfde banden die de andere search-derived branches sinds V45 gebruiken. `verified` (share ≥ 0.6)
+is geen sport meer; de share spreekt via `DOMINANCE_BANDS`, waar de producttelling hem kan
+kwalificeren. Hij bepaalt nog wél het `match_type` en de reason, want RC5 leest dat.
+
+Gevolg zoals bedoeld: een gefacetteerde bestemming verslaat de kale zonder eigen sport (100% dekking
+= +8 tegen 50% = −16 voor kaal). En 183 rijen zakken, vrijwel allemaal kale bestemmingen die een
+echt token laten vallen: `kokers voor posters` → Schilderijen & posters (hij wil kokers),
+`toiletsteunen hulpmiddelen` → de brede parent, `lopers gang` → Rode lopers.
+
+### De A/B is het instrument dat je eigen metriek betrapt — twee keer in één sessie
+
+1. **Maten.** Eerste versie mat dekking met de H1-recall, die commerciële filler laat vallen maar
+   geen maten. `bloempotten 20 liter` → Bloempotten las 33% en zakte van 80 naar 38, terwijl
+   `c853b1e` al had vastgelegd dat een maat geen inhoudswoord is. Nu meet de branch met
+   `_tokens_not_represented`, dezelfde teller die V62 en V64 gebruiken: die rij staat op 78 (B).
+   **Als er al een teller in het huis is, gebruik die** — een tweede definitie van "dekking" is een
+   tweede kans om het anders te doen dan de guards die er al staan.
+2. **Een vloer die scores verzint.** Joeps besluit (zie onder) is een vloer op tier C. In de A/B
+   tilde die `voor lange oren` → **Noren** van 26 naar 50: het enige onvertegenwoordigde token was
+   'lange', en het token dat als gedekt gold was de containment-bridge die 'oren' voor de staart van
+   'Noren' aanzag — precies de gedocumenteerde zwakte van de ≥4-teken-bridge. Guard:
+   `base >= ADJ_ONLY_FLOOR`. **Een vloer herstelt wat de banden afpakten van een rij die al iets
+   claimde; hij mag geen tier verzinnen voor een rij die zijn eigen branch nooit gaf.**
+
+### Joeps besluit: een gevallen maat- of kleurwoord is tier C, geen D
+
+De banden konden het verschil niet zien: `grote wasknijpers` → kale Wasknijpers leest 50% gedekt,
+precies als `kokers voor posters` → Schilderijen & posters, en de verdiepte kale-straf zette beide
+in D. Het onderscheid zit in WELK woord wegviel, dus geeft de aanroeper de onvertegenwoordigde
+tokens mee en beslist `score_search_derived` (`SIZE_WORDS | COLOUR_WORDS`, vloer 50).
+
+Bewust **niet** in die set: **materialen** ('houten', 'plastic', 'metalen') en **vormen** ('rond',
+'ovaal', 'vierkant'). Een materiaal is productintentie — de V64-cap leunt er juist op dat 'houten'
+in "Hout" gezien wordt — en een vorm is geen maat en geen kleur. De vloer zit in de gedeelde
+scorer, dus hij geldt ook voor de andere branches: de regel gaat over welk woord een bestemming
+laat vallen, niet over welke route hem vond.
+
+### Twee A/B-mechanieken die stil liegen
+
+- **Hetzelfde `-o`-pad hergebruiken.** `main_parallel_v2` hervat uit `<output>_progress.csv` en
+  schrijft de oude rijen opnieuw uit. Mijn tweede AFTER-run zag er identiek uit aan de eerste en
+  het leek "de fix doet niets" — er was niets gerekend. Verse outputnaam per run, of de
+  progress-file weggooien.
+- **Een wachtlus die op zijn eigen `pgrep` matcht.** `until ... ! pgrep -f "python main_parallel_v2.py"`
+  wordt nooit waar: het bash-wrapper-proces van de lus bevat dat patroon zelf.
+
+Bijvangst: `GENERIC_ADJECTIVES as _GEN_ADJ` stond in het V45-blok geïmporteerd en werd **nooit
+gebruikt**. Die dode import weerlegde mijn aanname over de huisregel (die haalt alleen
+kwaliteitsfiller uit de noemer) en is eruit.
+
+- **Date**: 2026-09-02
+
 ## Een score die het bewijs van de kále categorie meet, zakt als je de bestemming verfijnt (2026-09-02, Auto-Redirects)
 
 `/r/opbergkast_voor_balkon/` redirectte naar de kale `meubilair_389371_6383260` (Opbergkasten) met

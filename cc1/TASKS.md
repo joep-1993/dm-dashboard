@@ -3,7 +3,61 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
-### 2026-09-02 (6) — Auto-Redirects V65: de score zakte terwijl de match beter werd
+### 2026-09-02 (7) — Auto-Redirects V67: de staart als één aanroep, en de ladder ontleed
+
+De twee openstaande punten uit sessie (6). Diagnose en fix in commit `151d800`; de generieke lessen
+in LEARNINGS (zelfde datum, "Een cascade met returns halverwege").
+
+Gedaan:
+
+- [x] **`_finalize_redirect(row, ctx)`**: de staart bleek geen 3 maar **5** stappen (V55-lift,
+      V61-pruning, V62-restore-hertest, V61-laatste-redmiddel, V64-cap) en de volgorde is
+      inhoudelijk — V62 kan de score terugzetten naar die van de scorer, dus de cap moet het laatste
+      woord houden. De vier beoordelende stappen zitten nu in één aanroep; het laatste redmiddel
+      (dat een redirect *maakt*) blijft erbuiten maar loopt ervóór, zodat wat het verzint ook de
+      lift en de pruning krijgt.
+- [x] **Drie return-plekken aangesloten**: de cross-maincat-return, `stopwords_only_clean_category`
+      (bewijsbaar no-op, maar de invariant is het waard) en `category_noun_only_clean_category`
+      (die verandert wél: 80 → 89, want de query ís het categorie-noun).
+- [x] **`_keyword_words()` gehoist** en door de staart zelf afgeleid — anders zet een nieuwe
+      aanroeper die dat veld vergeet stil de twee dekkingsstappen uit.
+- [x] **De ladder ontleed**: `_cross_maincat_base()` draagt alleen de identiteitsclaim (72/65/45,
+      geankerd op de oude constanten), en dekking/dominantie/producttelling doen hun werk in
+      `score_search_derived`. `verified` is geen sport meer — de share spreekt via de banden — maar
+      bepaalt nog het `match_type` en de reason (RC5 leest dat).
+- [x] **Joeps besluit ingebouwd**: een bestemming die alleen een maat- of kleurwoord laat vallen is
+      tier C, geen D. `SIZE_WORDS | COLOUR_WORDS` + vloer 50 in de gedeelde scorer, dus de regel
+      geldt voor élke branch. Materialen en vormen zitten er bewust niet in (zie LEARNINGS).
+- [x] **A/B over 2.909 URL's** (gestratificeerd: cross-maincat 264, stopwords-only 331, noun-only 53,
+      category_fallback 522, V61-pruned 83, V62 443, V64-capped 107, V55-lifted 438, controle 844):
+      **0 bestemmingswijzigingen**, 78 scores omhoog, 183 omlaag. Tier A gelijk, B −36, C −36, D +72.
+      Elk staart-stratum staat op 0 verschillen, wat bewijst dat de refactor gedragsidentiek is.
+- [x] 134 tests groen; nieuwe suite `tests/test_v67_shared_tail_and_bands.py`.
+- [x] **Verschuivingen-export voor review**: `Downloads\claude\rurl_v67_verschuivingen_2026-09-02.csv`
+      (260 rijen met dekking, bestemming en reason; van de eerste A/B-versie).
+- [x] Mijn `V65`-labels van sessie (6) omgezet naar `V66`: `c853b1e` had die naam al.
+- [x] Dode import `GENERIC_ADJECTIVES as _GEN_ADJ` uit het V45-blok verwijderd (nooit gebruikt, en
+      hij weerlegde mijn aanname over de huisregel).
+
+Nog te doen:
+
+- [ ] **De 28 B→D-rijen langslopen** in de review-export. De meeste zijn terecht (`kokers voor
+      posters` → Schilderijen & posters, `toiletsteunen hulpmiddelen` → de brede parent, `lopers
+      gang` → Rode lopers), maar het is de eerste wijziging in deze reeks die rijen uit de
+      productieset haalt.
+- [ ] **De prijs van de vloer-guard**: `smalle banken` → Tuinbanken `/c/t_tuinbank~Parkbanken` valt
+      buiten de vloer omdat zijn branch hem onder 50 scoorde (base-guard), terwijl alleen 'smalle'
+      wegvalt. Zonder guard werd `voor lange oren` → Noren van 26 naar 50 getild (containment-bridge
+      op 'oren' in 'Noren'). Beslissen wat zwaarder weegt: een verloren redirect in D of een
+      onzin-match in de reviewwachtrij.
+- [ ] **`h1_similarity` staat op de drie early-return-plekken nog hard op 0.** Dat is de legacy
+      V26-metriek die nergens meer een besluit stuurt (de sheet leest `h1_overlap`), maar de kolom
+      liegt wel.
+- [ ] **Twee tests falen op HEAD** (`test_v48_bridge_morphology.py::test_voicing_s_to_z` en
+      `::test_double_vowel`) — stonden er al vóór sessie (6); nog uitzoeken of de morfologie of de
+      test achterloopt.
+
+### 2026-09-02 (6) — Auto-Redirects V66: de score zakte terwijl de match beter werd
 
 Joeps observatie op `/r/opbergkast_voor_balkon/`: eerst 72 naar de kale Opbergkasten, na de
 facet-fix 60 naar `…/c/ruimte~4945789` — betere match, slechtere score. Diagnose plus fix A+B
