@@ -1,0 +1,107 @@
+{
+ "slug": "2026-09-02_bestof-keukenmachines",
+ "label": "Keukenmachines",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9005309,
+  "name": "Keukenmachines",
+  "path": [
+   "Huishoudelijk",
+   "Keukenapparatuur",
+   "Keukenmachines"
+  ],
+  "main_category": 12000,
+  "category": "huishoudelijke_apparatuur_19968034_19970339"
+ },
+ "filters": {},
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "keukenmachine",
+   "display": "keukenmachine",
+   "volume": 27100,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "kitchenaid keukenmachine",
+   "display": "kitchenaid keukenmachine",
+   "volume": 8100,
+   "kind": "brand",
+   "params": {
+    "query": "kitchenaid keukenmachine"
+   }
+  },
+  {
+   "term": "kenwood keukenmachine",
+   "display": "kenwood keukenmachine",
+   "volume": 5400,
+   "kind": "brand",
+   "params": {
+    "query": "kenwood keukenmachine"
+   }
+  },
+  {
+   "term": "smeg keukenmachine",
+   "display": "smeg keukenmachine",
+   "volume": 3600,
+   "kind": "brand",
+   "params": {
+    "query": "smeg keukenmachine"
+   }
+  },
+  {
+   "term": "bosch keukenmachine",
+   "display": "bosch keukenmachine",
+   "volume": 2900,
+   "kind": "brand",
+   "params": {
+    "query": "bosch keukenmachine"
+   }
+  },
+  {
+   "term": "beste keukenmachine",
+   "display": "beste keukenmachine",
+   "volume": 1300,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "maxima keukenmachine",
+   "display": "maxima keukenmachine",
+   "volume": 390,
+   "kind": "brand",
+   "params": {
+    "query": "maxima keukenmachine"
+   }
+  },
+  {
+   "term": "keukenmachine kopen",
+   "display": "keukenmachine kopen",
+   "volume": 210,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "keukenmachine aanbieding",
+   "display": "keukenmachine aanbieding",
+   "volume": 210,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "keukenmachine test",
+   "display": "keukenmachine test",
+   "volume": 110,
+   "kind": "generic",
+   "params": {}
+  }
+ ]
+}

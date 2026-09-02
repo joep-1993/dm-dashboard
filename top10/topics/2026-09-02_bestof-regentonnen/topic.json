@@ -1,0 +1,88 @@
+{
+ "slug": "2026-09-02_bestof-regentonnen",
+ "label": "Regentonnen",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9003715,
+  "name": "Regentonnen",
+  "path": [
+   "Tuinartikelen",
+   "Regentonnen"
+  ],
+  "main_category": 36000,
+  "category": "tuin_accessoires_4906804"
+ },
+ "filters": {},
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "regentonnen kopen",
+   "display": "regentonnen kopen",
+   "volume": 5400,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "regentonnen",
+   "display": "regentonnen",
+   "volume": 1000,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "regentonnen aanbieding",
+   "display": "regentonnen aanbieding",
+   "volume": 50,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "beste regentonnen",
+   "display": "beste regentonnen",
+   "volume": 10,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "regentonnen test",
+   "display": "regentonnen test",
+   "volume": 10,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "garantia regentonnen",
+   "display": "garantia regentonnen",
+   "volume": 10,
+   "kind": "brand",
+   "params": {
+    "query": "garantia regentonnen"
+   }
+  },
+  {
+   "term": "vidaxl regentonnen",
+   "display": "vidaxl regentonnen",
+   "volume": 10,
+   "kind": "brand",
+   "params": {
+    "query": "vidaxl regentonnen"
+   }
+  },
+  {
+   "term": "nature regentonnen",
+   "display": "nature regentonnen",
+   "volume": 10,
+   "kind": "brand",
+   "params": {
+    "query": "nature regentonnen"
+   }
+  }
+ ]
+}

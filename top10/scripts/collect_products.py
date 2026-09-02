@@ -10,6 +10,7 @@ Leest de termen en categorie uit topic.json en schrijft
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 from pathlib import Path
@@ -55,11 +56,31 @@ def norm(p: dict) -> dict:
     }
 
 
-def fetch_term(topic, term: dict, session: requests.Session) -> list[dict]:
+def excluded(topic) -> re.Pattern | None:
+    """``exclude_title`` uit topic.json: producten die niet in de categorie horen.
+
+    Een categorie bevat soms een kindcategorie met een ander product erin.
+    Matrassen heeft Topdekmatrassen (9000187) als kind, dus een categorie-brede
+    zoekopdracht levert toppers op — 31 van de 77 kandidaten, en dan zet de
+    ranking een topper op 1 van "de 10 beste matrassen". De categoriescope kan
+    dat niet oplossen (de Search API neemt één categorie) en zoektermen ook
+    niet: Emma- en Tempur-toppers komen net zo goed mee op "beste matrassen".
+    Daarom een expliciete lijst per topic, gematcht op de producttitel.
+    """
+    pats = topic.cfg.get("exclude_title") or []
+    return re.compile("|".join(pats), re.I) if pats else None
+
+
+def fetch_term(topic, term: dict, session: requests.Session,
+               skip: re.Pattern | None = None) -> tuple[list[dict], int]:
     params = topic.search_params(**(term.get("params") or {}))
     r = session.get(SEARCH_API, params=params, timeout=60)
     r.raise_for_status()
-    return [norm(p) for p in r.json().get("products") or []]
+    products = [norm(p) for p in r.json().get("products") or []]
+    if not skip:
+        return products, 0
+    keep = [p for p in products if not skip.search(p.get("title") or "")]
+    return keep, len(products) - len(keep)
 
 
 def build_pages(per_term: dict) -> list[dict]:
@@ -116,10 +137,14 @@ def main() -> int:
         return 1
 
     session = requests.Session()
-    per_term, master = {}, {}
+    skip = excluded(topic)
+    if skip:
+        print(f"uitgesloten op titel: {skip.pattern}")
+    per_term, master, weg = {}, {}, 0
     for i, term in enumerate(topic.terms, 1):
         try:
-            products = fetch_term(topic, term, session)
+            products, n_weg = fetch_term(topic, term, session, skip)
+            weg += n_weg
         except Exception as e:
             print(f"[{i}/{len(topic.terms)}] {term['term']}: FOUT {type(e).__name__}: {e}")
             per_term[term["term"]] = {"term": term["term"], "volume": term.get("volume"),
@@ -133,7 +158,8 @@ def main() -> int:
         for p in products:
             if p["ean"]:
                 master.setdefault(p["ean"], p)
-        print(f"[{i}/{len(topic.terms)}] {term['term']}: {len(products)} producten")
+        print(f"[{i}/{len(topic.terms)}] {term['term']}: {len(products)} producten"
+              + (f" ({n_weg} uitgesloten)" if skip and n_weg else ""))
         time.sleep(args.sleep)
 
     topic.write_json("products_per_term.json", per_term)
@@ -142,6 +168,8 @@ def main() -> int:
     pages = build_pages(per_term)
     topic.write_json("pages.json", pages)
 
+    if skip:
+        print(f"{weg} treffers uitgesloten op titel")
     print(f"\n{len(master)} unieke producten over {len(per_term)} termen "
           f"-> {topic.file('products_master.json').relative_to(topic.dir.parents[2])}")
     print(f"{len(pages)} pagina's na samenvoegen van termen met dezelfde productlijst:")

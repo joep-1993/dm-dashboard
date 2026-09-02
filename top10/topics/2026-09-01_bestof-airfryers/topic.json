@@ -24,12 +24,14 @@
  "terms": [
   {
    "term": "airfryer",
+   "display": "airfryer",
    "volume": 90500,
    "kind": "generic",
    "params": {}
   },
   {
    "term": "philips airfryer",
+   "display": "philips airfryer",
    "volume": 27100,
    "kind": "brand",
    "params": {
@@ -37,29 +39,15 @@
    }
   },
   {
-   "term": "kip airfryer",
-   "volume": 9900,
-   "kind": "facet:bereidingsprogramma",
-   "params": {
-    "query": "kip airfryer"
-   }
-  },
-  {
    "term": "beste airfryer",
+   "display": "beste airfryer",
    "volume": 5400,
    "kind": "generic",
    "params": {}
   },
   {
-   "term": "dubbele airfryer",
-   "volume": 5400,
-   "kind": "facet:type_airfryer",
-   "params": {
-    "query": "dubbele airfryer"
-   }
-  },
-  {
    "term": "tefal airfryer",
+   "display": "tefal airfryer",
    "volume": 2900,
    "kind": "brand",
    "params": {
@@ -68,18 +56,21 @@
   },
   {
    "term": "airfryer aanbieding",
+   "display": "airfryer aanbieding",
    "volume": 2400,
    "kind": "generic",
    "params": {}
   },
   {
    "term": "airfryer kopen",
+   "display": "airfryer kopen",
    "volume": 1900,
    "kind": "generic",
    "params": {}
   },
   {
    "term": "princess airfryer",
+   "display": "princess airfryer",
    "volume": 1900,
    "kind": "brand",
    "params": {
@@ -87,11 +78,28 @@
    }
   },
   {
-   "term": "airfryer oven",
-   "volume": 1300,
-   "kind": "facet:type_airfryer",
+   "term": "cosori airfryer",
+   "display": "cosori airfryer",
+   "volume": 880,
+   "kind": "brand",
    "params": {
-    "query": "airfryer oven"
+    "query": "cosori airfryer"
+   }
+  },
+  {
+   "term": "airfryer test",
+   "display": "airfryer test",
+   "volume": 480,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "beste philips airfryer",
+   "display": "beste philips airfryer",
+   "volume": 210,
+   "kind": "brand",
+   "params": {
+    "query": "beste philips airfryer"
    }
   }
  ]

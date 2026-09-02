@@ -1,0 +1,109 @@
+{
+ "slug": "2026-09-02_bestof-wasmachines",
+ "label": "Wasmachines",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9005340,
+  "name": "Wasmachines",
+  "path": [
+   "Huishoudelijk",
+   "Wassen & Drogen",
+   "Wasmachines"
+  ],
+  "main_category": 12000,
+  "category": "huishoudelijke_apparatuur_19968038_19968044"
+ },
+ "filters": {},
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "wasmachine",
+   "display": "wasmachine",
+   "volume": 74000,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "miele wasmachine",
+   "display": "miele wasmachine",
+   "volume": 18100,
+   "kind": "brand",
+   "params": {
+    "query": "miele wasmachine"
+   }
+  },
+  {
+   "term": "wasmachine kopen",
+   "display": "wasmachine kopen",
+   "volume": 12100,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "aeg wasmachine",
+   "display": "aeg wasmachine",
+   "volume": 12100,
+   "kind": "brand",
+   "params": {
+    "query": "aeg wasmachine"
+   }
+  },
+  {
+   "term": "bosch wasmachine",
+   "display": "bosch wasmachine",
+   "volume": 12100,
+   "kind": "brand",
+   "params": {
+    "query": "bosch wasmachine"
+   }
+  },
+  {
+   "term": "samsung wasmachine",
+   "display": "samsung wasmachine",
+   "volume": 9900,
+   "kind": "brand",
+   "params": {
+    "query": "samsung wasmachine"
+   }
+  },
+  {
+   "term": "beko wasmachine",
+   "display": "beko wasmachine",
+   "volume": 8100,
+   "kind": "brand",
+   "params": {
+    "query": "beko wasmachine"
+   }
+  },
+  {
+   "term": "wasmachine aanbieding",
+   "display": "wasmachine aanbieding",
+   "volume": 6600,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "hisense wasmachine",
+   "display": "hisense wasmachine",
+   "volume": 3600,
+   "kind": "brand",
+   "params": {
+    "query": "hisense wasmachine"
+   }
+  },
+  {
+   "term": "beste wasmachine",
+   "display": "beste wasmachine",
+   "volume": 2900,
+   "kind": "generic",
+   "params": {}
+  }
+ ]
+}

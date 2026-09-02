@@ -1,0 +1,99 @@
+{
+ "slug": "2026-09-02_bestof-matrassen",
+ "label": "Matrassen",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9000048,
+  "name": "Matrassen",
+  "path": [
+   "Meubels",
+   "Matrassen"
+  ],
+  "main_category": 10,
+  "category": "meubilair_390027"
+ },
+ "filters": {},
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 30,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "m line matrassen",
+   "display": "m line matrassen",
+   "volume": 6600,
+   "kind": "brand",
+   "params": {
+    "query": "m line matrassen"
+   }
+  },
+  {
+   "term": "matrassen",
+   "display": "matrassen",
+   "volume": 5400,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "tempur matrassen",
+   "display": "tempur matrassen",
+   "volume": 5400,
+   "kind": "brand",
+   "params": {
+    "query": "tempur matrassen"
+   }
+  },
+  {
+   "term": "matrassen kopen",
+   "display": "matrassen kopen",
+   "volume": 3600,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "matrassen aanbieding",
+   "display": "matrassen aanbieding",
+   "volume": 1600,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "beste matrassen",
+   "display": "beste matrassen",
+   "volume": 590,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "matrassen test",
+   "display": "matrassen test",
+   "volume": 480,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "vidaxl matrassen",
+   "display": "vidaxl matrassen",
+   "volume": 90,
+   "kind": "brand",
+   "params": {
+    "query": "vidaxl matrassen"
+   }
+  }
+ ],
+ "exclude_title": [
+  "\\btoppers?\\b",
+  "topdekmatras",
+  "splittopper",
+  "matrastopper",
+  "matrasbeschermer",
+  "matrashoes",
+  "hoeslaken",
+  "molton",
+  "onderlaken"
+ ]
+}

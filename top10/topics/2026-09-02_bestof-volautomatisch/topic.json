@@ -1,0 +1,112 @@
+{
+ "slug": "2026-09-02_bestof-volautomatisch",
+ "label": "Volautomatische koffiemachines",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9005311,
+  "name": "Koffiezetapparaten",
+  "path": [
+   "Huishoudelijk",
+   "Keukenapparatuur",
+   "Koffiezetapparaten",
+   "Volautomatisch"
+  ],
+  "main_category": 12000,
+  "category": "huishoudelijke_apparatuur_19968034_19970341"
+ },
+ "filters": {
+  "opties_koffie": [
+   "23755306"
+  ]
+ },
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "volautomatische koffiemachine",
+   "display": "volautomatische koffiemachine",
+   "volume": 4400,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "beste volautomatische koffiemachine",
+   "display": "beste volautomatische koffiemachine",
+   "volume": 1300,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "volautomatische koffiemachine aanbieding",
+   "display": "volautomatische koffiemachine aanbieding",
+   "volume": 320,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "krups volautomatische koffiemachine",
+   "display": "krups volautomatische koffiemachine",
+   "volume": 260,
+   "kind": "brand",
+   "params": {
+    "query": "krups volautomatische koffiemachine"
+   }
+  },
+  {
+   "term": "de'longhi volautomatische koffiemachine",
+   "display": "de'longhi volautomatische koffiemachine",
+   "volume": 210,
+   "kind": "brand",
+   "params": {
+    "query": "de'longhi volautomatische koffiemachine"
+   }
+  },
+  {
+   "term": "philips volautomatische koffiemachine",
+   "display": "philips volautomatische koffiemachine",
+   "volume": 210,
+   "kind": "brand",
+   "params": {
+    "query": "philips volautomatische koffiemachine"
+   }
+  },
+  {
+   "term": "volautomatische koffiemachine test",
+   "display": "volautomatische koffiemachine test",
+   "volume": 70,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "melitta volautomatische koffiemachine",
+   "display": "melitta volautomatische koffiemachine",
+   "volume": 50,
+   "kind": "brand",
+   "params": {
+    "query": "melitta volautomatische koffiemachine"
+   }
+  },
+  {
+   "term": "volautomatische koffiemachine kopen",
+   "display": "volautomatische koffiemachine kopen",
+   "volume": 30,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "gaggia volautomatische koffiemachine",
+   "display": "gaggia volautomatische koffiemachine",
+   "volume": 30,
+   "kind": "brand",
+   "params": {
+    "query": "gaggia volautomatische koffiemachine"
+   }
+  }
+ ]
+}

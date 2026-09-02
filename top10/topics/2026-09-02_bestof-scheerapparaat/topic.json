@@ -1,0 +1,103 @@
+{
+ "slug": "2026-09-02_bestof-scheerapparaat",
+ "label": "Scheerapparaten",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9005272,
+  "name": "Ontharingsapparaten",
+  "path": [
+   "Elektronica",
+   "Persoonlijke verzorging",
+   "Ontharingsapparaten",
+   "Scheerapparaat"
+  ],
+  "main_category": 655,
+  "category": "elektronica_19875535_19934730"
+ },
+ "filters": {
+  "type_scheren": [
+   "104315"
+  ]
+ },
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "scheerapparaten",
+   "display": "scheerapparaten",
+   "volume": 22200,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "philips scheerapparaten",
+   "display": "philips scheerapparaten",
+   "volume": 9900,
+   "kind": "brand",
+   "params": {
+    "query": "philips scheerapparaten"
+   }
+  },
+  {
+   "term": "scheerapparaten aanbieding",
+   "display": "scheerapparaten aanbieding",
+   "volume": 590,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "scheerapparaten kopen",
+   "display": "scheerapparaten kopen",
+   "volume": 390,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "panasonic scheerapparaten",
+   "display": "panasonic scheerapparaten",
+   "volume": 210,
+   "kind": "brand",
+   "params": {
+    "query": "panasonic scheerapparaten"
+   }
+  },
+  {
+   "term": "braun scheerapparaten",
+   "display": "braun scheerapparaten",
+   "volume": 110,
+   "kind": "brand",
+   "params": {
+    "query": "braun scheerapparaten"
+   }
+  },
+  {
+   "term": "beste scheerapparaten",
+   "display": "beste scheerapparaten",
+   "volume": 90,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "scheerapparaten test",
+   "display": "scheerapparaten test",
+   "volume": 70,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "remington scheerapparaten",
+   "display": "remington scheerapparaten",
+   "volume": 10,
+   "kind": "brand",
+   "params": {
+    "query": "remington scheerapparaten"
+   }
+  }
+ ]
+}

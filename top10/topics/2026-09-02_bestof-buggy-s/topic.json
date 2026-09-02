@@ -1,0 +1,109 @@
+{
+ "slug": "2026-09-02_bestof-buggy-s",
+ "label": "Buggy's",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9002513,
+  "name": "Buggy's",
+  "path": [
+   "Baby & peuter",
+   "Kinderwagens",
+   "Buggy's"
+  ],
+  "main_category": 8,
+  "category": "baby_peuter_563173_563189"
+ },
+ "filters": {},
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "buggy'",
+   "display": "buggy'",
+   "volume": 18100,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "easywalker buggy'",
+   "display": "easywalker buggy'",
+   "volume": 2900,
+   "kind": "brand",
+   "params": {
+    "query": "easywalker buggy'"
+   }
+  },
+  {
+   "term": "buggy' kopen",
+   "display": "buggy' kopen",
+   "volume": 2400,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "cybex buggy'",
+   "display": "cybex buggy'",
+   "volume": 2400,
+   "kind": "brand",
+   "params": {
+    "query": "cybex buggy'"
+   }
+  },
+  {
+   "term": "beste buggy'",
+   "display": "beste buggy'",
+   "volume": 720,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "kinderkraft buggy'",
+   "display": "kinderkraft buggy'",
+   "volume": 720,
+   "kind": "brand",
+   "params": {
+    "query": "kinderkraft buggy'"
+   }
+  },
+  {
+   "term": "chicco buggy'",
+   "display": "chicco buggy'",
+   "volume": 390,
+   "kind": "brand",
+   "params": {
+    "query": "chicco buggy'"
+   }
+  },
+  {
+   "term": "hauck buggy'",
+   "display": "hauck buggy'",
+   "volume": 320,
+   "kind": "brand",
+   "params": {
+    "query": "hauck buggy'"
+   }
+  },
+  {
+   "term": "buggy' aanbieding",
+   "display": "buggy' aanbieding",
+   "volume": 260,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "lionelo buggy'",
+   "display": "lionelo buggy'",
+   "volume": 260,
+   "kind": "brand",
+   "params": {
+    "query": "lionelo buggy'"
+   }
+  }
+ ]
+}

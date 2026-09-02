@@ -1,0 +1,108 @@
+{
+ "slug": "2026-09-02_bestof-stofzuigers",
+ "label": "Stofzuigers",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9005565,
+  "name": "Stofzuigers",
+  "path": [
+   "Huishoudelijk",
+   "Stofzuigers"
+  ],
+  "main_category": 12000,
+  "category": "huishoudelijke_apparatuur_23795091"
+ },
+ "filters": {},
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "stofzuiger",
+   "display": "stofzuiger",
+   "volume": 60500,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "miele stofzuiger",
+   "display": "miele stofzuiger",
+   "volume": 12100,
+   "kind": "brand",
+   "params": {
+    "query": "miele stofzuiger"
+   }
+  },
+  {
+   "term": "beste stofzuiger",
+   "display": "beste stofzuiger",
+   "volume": 8100,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "philips stofzuiger",
+   "display": "philips stofzuiger",
+   "volume": 6600,
+   "kind": "brand",
+   "params": {
+    "query": "philips stofzuiger"
+   }
+  },
+  {
+   "term": "stofzuiger kopen",
+   "display": "stofzuiger kopen",
+   "volume": 3600,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "bosch stofzuiger",
+   "display": "bosch stofzuiger",
+   "volume": 3600,
+   "kind": "brand",
+   "params": {
+    "query": "bosch stofzuiger"
+   }
+  },
+  {
+   "term": "aeg stofzuiger",
+   "display": "aeg stofzuiger",
+   "volume": 2900,
+   "kind": "brand",
+   "params": {
+    "query": "aeg stofzuiger"
+   }
+  },
+  {
+   "term": "stofzuiger aanbieding",
+   "display": "stofzuiger aanbieding",
+   "volume": 1900,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "rowenta stofzuiger",
+   "display": "rowenta stofzuiger",
+   "volume": 1600,
+   "kind": "brand",
+   "params": {
+    "query": "rowenta stofzuiger"
+   }
+  },
+  {
+   "term": "samsung stofzuiger",
+   "display": "samsung stofzuiger",
+   "volume": 1600,
+   "kind": "brand",
+   "params": {
+    "query": "samsung stofzuiger"
+   }
+  }
+ ]
+}

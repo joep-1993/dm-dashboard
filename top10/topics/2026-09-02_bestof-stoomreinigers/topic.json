@@ -1,0 +1,106 @@
+{
+ "slug": "2026-09-02_bestof-stoomreinigers",
+ "label": "Stoomreinigers",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9005566,
+  "name": "Stoomreinigers",
+  "path": [
+   "Huishoudelijk",
+   "Stoomreinigers"
+  ],
+  "main_category": 12000,
+  "category": "huishoudelijke_apparatuur_23795362"
+ },
+ "filters": {},
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "stoomreiniger",
+   "display": "stoomreiniger",
+   "volume": 49500,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "beste stoomreiniger",
+   "display": "beste stoomreiniger",
+   "volume": 2900,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "bissell stoomreiniger",
+   "display": "bissell stoomreiniger",
+   "volume": 880,
+   "kind": "brand",
+   "params": {
+    "query": "bissell stoomreiniger"
+   }
+  },
+  {
+   "term": "stoomreiniger kopen",
+   "display": "stoomreiniger kopen",
+   "volume": 480,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "shark stoomreiniger",
+   "display": "shark stoomreiniger",
+   "volume": 480,
+   "kind": "brand",
+   "params": {
+    "query": "shark stoomreiniger"
+   }
+  },
+  {
+   "term": "stoomreiniger aanbieding",
+   "display": "stoomreiniger aanbieding",
+   "volume": 260,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "rowenta stoomreiniger",
+   "display": "rowenta stoomreiniger",
+   "volume": 210,
+   "kind": "brand",
+   "params": {
+    "query": "rowenta stoomreiniger"
+   }
+  },
+  {
+   "term": "stoomreiniger test",
+   "display": "stoomreiniger test",
+   "volume": 110,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "polti stoomreiniger",
+   "display": "polti stoomreiniger",
+   "volume": 70,
+   "kind": "brand",
+   "params": {
+    "query": "polti stoomreiniger"
+   }
+  },
+  {
+   "term": "ariete stoomreiniger",
+   "display": "ariete stoomreiniger",
+   "volume": 20,
+   "kind": "brand",
+   "params": {
+    "query": "ariete stoomreiniger"
+   }
+  }
+ ]
+}

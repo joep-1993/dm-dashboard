@@ -1,0 +1,112 @@
+{
+ "slug": "2026-09-02_bestof-noise-cancelling-koptelefoon",
+ "label": "Noise cancelling koptelefoons",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9005238,
+  "name": "Koptelefoons",
+  "path": [
+   "Elektronica",
+   "Audio & hifi",
+   "Koptelefoons",
+   "Noise cancelling koptelefoon"
+  ],
+  "main_category": 655,
+  "category": "elektronica_19875530_19943088"
+ },
+ "filters": {
+  "type_hoofdtelefoon": [
+   "11180437"
+  ]
+ },
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "noise cancelling koptelefoon",
+   "display": "noise cancelling koptelefoon",
+   "volume": 9900,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "beste noise cancelling koptelefoon",
+   "display": "beste noise cancelling koptelefoon",
+   "volume": 1600,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "bose noise cancelling koptelefoon",
+   "display": "bose noise cancelling koptelefoon",
+   "volume": 880,
+   "kind": "brand",
+   "params": {
+    "query": "bose noise cancelling koptelefoon"
+   }
+  },
+  {
+   "term": "jbl noise cancelling koptelefoon",
+   "display": "jbl noise cancelling koptelefoon",
+   "volume": 170,
+   "kind": "brand",
+   "params": {
+    "query": "jbl noise cancelling koptelefoon"
+   }
+  },
+  {
+   "term": "sony noise cancelling koptelefoon",
+   "display": "sony noise cancelling koptelefoon",
+   "volume": 90,
+   "kind": "brand",
+   "params": {
+    "query": "sony noise cancelling koptelefoon"
+   }
+  },
+  {
+   "term": "fresh 'n rebel noise cancelling koptelefoon",
+   "display": "fresh 'n rebel noise cancelling koptelefoon",
+   "volume": 20,
+   "kind": "brand",
+   "params": {
+    "query": "fresh 'n rebel noise cancelling koptelefoon"
+   }
+  },
+  {
+   "term": "noise cancelling koptelefoon kopen",
+   "display": "noise cancelling koptelefoon kopen",
+   "volume": 10,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "noise cancelling koptelefoon test",
+   "display": "noise cancelling koptelefoon test",
+   "volume": 10,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "noise cancelling koptelefoon aanbieding",
+   "display": "noise cancelling koptelefoon aanbieding",
+   "volume": 10,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "sennheiser noise cancelling koptelefoon",
+   "display": "sennheiser noise cancelling koptelefoon",
+   "volume": 10,
+   "kind": "brand",
+   "params": {
+    "query": "sennheiser noise cancelling koptelefoon"
+   }
+  }
+ ]
+}

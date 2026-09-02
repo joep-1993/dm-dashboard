@@ -1,0 +1,71 @@
+{
+ "slug": "2026-09-02_bestof-airconditionings",
+ "label": "Airconditionings",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9005317,
+  "name": "Airconditionings",
+  "path": [
+   "Huishoudelijk",
+   "Klimaatbeheersing",
+   "Airconditionings"
+  ],
+  "main_category": 12000,
+  "category": "huishoudelijke_apparatuur_19968035_19968042"
+ },
+ "filters": {},
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "airconditioning",
+   "display": "airconditioning",
+   "volume": 27100,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "airconditioning kopen",
+   "display": "airconditioning kopen",
+   "volume": 2400,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "beste airconditioning",
+   "display": "beste airconditioning",
+   "volume": 70,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "airconditioning aanbieding",
+   "display": "airconditioning aanbieding",
+   "volume": 70,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "qlima airconditioning",
+   "display": "qlima airconditioning",
+   "volume": 70,
+   "kind": "brand",
+   "params": {
+    "query": "qlima airconditioning"
+   }
+  },
+  {
+   "term": "airconditioning test",
+   "display": "airconditioning test",
+   "volume": 30,
+   "kind": "generic",
+   "params": {}
+  }
+ ]
+}

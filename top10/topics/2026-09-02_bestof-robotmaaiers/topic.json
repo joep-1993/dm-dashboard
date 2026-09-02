@@ -1,0 +1,112 @@
+{
+ "slug": "2026-09-02_bestof-robotmaaiers",
+ "label": "Robotmaaiers",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9003581,
+  "name": "Grasmaaiers",
+  "path": [
+   "Tuinartikelen",
+   "Tuingereedschap",
+   "Grasmaaiers",
+   "Robotmaaiers"
+  ],
+  "main_category": 36000,
+  "category": "tuin_accessoires_504070_4468892"
+ },
+ "filters": {
+  "soort_grasmaaier": [
+   "4565296"
+  ]
+ },
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "robotmaaier",
+   "display": "robotmaaier",
+   "volume": 6600,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "husqvarna robotmaaier",
+   "display": "husqvarna robotmaaier",
+   "volume": 4400,
+   "kind": "brand",
+   "params": {
+    "query": "husqvarna robotmaaier"
+   }
+  },
+  {
+   "term": "gardena robotmaaier",
+   "display": "gardena robotmaaier",
+   "volume": 1900,
+   "kind": "brand",
+   "params": {
+    "query": "gardena robotmaaier"
+   }
+  },
+  {
+   "term": "beste robotmaaier",
+   "display": "beste robotmaaier",
+   "volume": 720,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "worx robotmaaier",
+   "display": "worx robotmaaier",
+   "volume": 720,
+   "kind": "brand",
+   "params": {
+    "query": "worx robotmaaier"
+   }
+  },
+  {
+   "term": "stiga robotmaaier",
+   "display": "stiga robotmaaier",
+   "volume": 590,
+   "kind": "brand",
+   "params": {
+    "query": "stiga robotmaaier"
+   }
+  },
+  {
+   "term": "robotmaaier kopen",
+   "display": "robotmaaier kopen",
+   "volume": 390,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "bosch robotmaaier",
+   "display": "bosch robotmaaier",
+   "volume": 320,
+   "kind": "brand",
+   "params": {
+    "query": "bosch robotmaaier"
+   }
+  },
+  {
+   "term": "robotmaaier aanbieding",
+   "display": "robotmaaier aanbieding",
+   "volume": 260,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "robotmaaier test",
+   "display": "robotmaaier test",
+   "volume": 210,
+   "kind": "generic",
+   "params": {}
+  }
+ ]
+}

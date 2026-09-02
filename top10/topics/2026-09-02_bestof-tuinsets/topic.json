@@ -1,0 +1,108 @@
+{
+ "slug": "2026-09-02_bestof-tuinsets",
+ "label": "Tuinsets",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9004683,
+  "name": "Tuinsets",
+  "path": [
+   "Meubels",
+   "Tuinsets"
+  ],
+  "main_category": 10,
+  "category": "meubilair_6935764"
+ },
+ "filters": {},
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "tuinset",
+   "display": "tuinset",
+   "volume": 27100,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "tuinset aanbieding",
+   "display": "tuinset aanbieding",
+   "volume": 2400,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "tuinset kopen",
+   "display": "tuinset kopen",
+   "volume": 590,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "vidaxl tuinset",
+   "display": "vidaxl tuinset",
+   "volume": 590,
+   "kind": "brand",
+   "params": {
+    "query": "vidaxl tuinset"
+   }
+  },
+  {
+   "term": "4 seasons outdoor tuinset",
+   "display": "4 seasons outdoor tuinset",
+   "volume": 260,
+   "kind": "brand",
+   "params": {
+    "query": "4 seasons outdoor tuinset"
+   }
+  },
+  {
+   "term": "garden impressions tuinset",
+   "display": "garden impressions tuinset",
+   "volume": 140,
+   "kind": "brand",
+   "params": {
+    "query": "garden impressions tuinset"
+   }
+  },
+  {
+   "term": "coco tuinset",
+   "display": "coco tuinset",
+   "volume": 30,
+   "kind": "brand",
+   "params": {
+    "query": "coco tuinset"
+   }
+  },
+  {
+   "term": "beste tuinset",
+   "display": "beste tuinset",
+   "volume": 20,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "lifestyle garden furniture tuinset",
+   "display": "lifestyle garden furniture tuinset",
+   "volume": 10,
+   "kind": "brand",
+   "params": {
+    "query": "lifestyle garden furniture tuinset"
+   }
+  },
+  {
+   "term": "manifesto furniture tuinset",
+   "display": "manifesto furniture tuinset",
+   "volume": 10,
+   "kind": "brand",
+   "params": {
+    "query": "manifesto furniture tuinset"
+   }
+  }
+ ]
+}

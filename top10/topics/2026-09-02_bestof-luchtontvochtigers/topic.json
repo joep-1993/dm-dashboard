@@ -1,0 +1,112 @@
+{
+ "slug": "2026-09-02_bestof-luchtontvochtigers",
+ "label": "Luchtontvochtigers",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9005319,
+  "name": "Luchtbehandeling",
+  "path": [
+   "Huishoudelijk",
+   "Klimaatbeheersing",
+   "Luchtbehandeling",
+   "Luchtontvochtigers"
+  ],
+  "main_category": 12000,
+  "category": "huishoudelijke_apparatuur_19968035_19970678"
+ },
+ "filters": {
+  "type_lucht": [
+   "106871"
+  ]
+ },
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "luchtontvochtiger",
+   "display": "luchtontvochtiger",
+   "volume": 18100,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "beste luchtontvochtiger",
+   "display": "beste luchtontvochtiger",
+   "volume": 1600,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "luchtontvochtiger kopen",
+   "display": "luchtontvochtiger kopen",
+   "volume": 480,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "trotec luchtontvochtiger",
+   "display": "trotec luchtontvochtiger",
+   "volume": 480,
+   "kind": "brand",
+   "params": {
+    "query": "trotec luchtontvochtiger"
+   }
+  },
+  {
+   "term": "eurom luchtontvochtiger",
+   "display": "eurom luchtontvochtiger",
+   "volume": 260,
+   "kind": "brand",
+   "params": {
+    "query": "eurom luchtontvochtiger"
+   }
+  },
+  {
+   "term": "de'longhi luchtontvochtiger",
+   "display": "de'longhi luchtontvochtiger",
+   "volume": 170,
+   "kind": "brand",
+   "params": {
+    "query": "de'longhi luchtontvochtiger"
+   }
+  },
+  {
+   "term": "luchtontvochtiger test",
+   "display": "luchtontvochtiger test",
+   "volume": 140,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "luchtontvochtiger aanbieding",
+   "display": "luchtontvochtiger aanbieding",
+   "volume": 110,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "clean air optima luchtontvochtiger",
+   "display": "clean air optima luchtontvochtiger",
+   "volume": 70,
+   "kind": "brand",
+   "params": {
+    "query": "clean air optima luchtontvochtiger"
+   }
+  },
+  {
+   "term": "argo luchtontvochtiger",
+   "display": "argo luchtontvochtiger",
+   "volume": 10,
+   "kind": "brand",
+   "params": {
+    "query": "argo luchtontvochtiger"
+   }
+  }
+ ]
+}

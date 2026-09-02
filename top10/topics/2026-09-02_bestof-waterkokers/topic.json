@@ -1,0 +1,107 @@
+{
+ "slug": "2026-09-02_bestof-waterkokers",
+ "label": "Waterkokers",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9005315,
+  "name": "Waterkokers",
+  "path": [
+   "Huishoudelijk",
+   "Keukenapparatuur",
+   "Waterkokers"
+  ],
+  "main_category": 12000,
+  "category": "huishoudelijke_apparatuur_19968034_19970345"
+ },
+ "filters": {},
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "waterkoker",
+   "display": "waterkoker",
+   "volume": 40500,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "smeg waterkoker",
+   "display": "smeg waterkoker",
+   "volume": 18100,
+   "kind": "brand",
+   "params": {
+    "query": "smeg waterkoker"
+   }
+  },
+  {
+   "term": "tefal waterkoker",
+   "display": "tefal waterkoker",
+   "volume": 2400,
+   "kind": "brand",
+   "params": {
+    "query": "tefal waterkoker"
+   }
+  },
+  {
+   "term": "beste waterkoker",
+   "display": "beste waterkoker",
+   "volume": 1600,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "russell hobbs waterkoker",
+   "display": "russell hobbs waterkoker",
+   "volume": 1600,
+   "kind": "brand",
+   "params": {
+    "query": "russell hobbs waterkoker"
+   }
+  },
+  {
+   "term": "waterkoker kopen",
+   "display": "waterkoker kopen",
+   "volume": 1000,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "bosch waterkoker",
+   "display": "bosch waterkoker",
+   "volume": 1000,
+   "kind": "brand",
+   "params": {
+    "query": "bosch waterkoker"
+   }
+  },
+  {
+   "term": "waterkoker aanbieding",
+   "display": "waterkoker aanbieding",
+   "volume": 590,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "waterkoker test",
+   "display": "waterkoker test",
+   "volume": 140,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "adler waterkoker",
+   "display": "adler waterkoker",
+   "volume": 90,
+   "kind": "brand",
+   "params": {
+    "query": "adler waterkoker"
+   }
+  }
+ ]
+}

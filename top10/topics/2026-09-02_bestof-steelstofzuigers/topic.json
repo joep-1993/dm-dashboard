@@ -1,0 +1,113 @@
+{
+ "slug": "2026-09-02_bestof-steelstofzuigers",
+ "label": "Steelstofzuigers",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9005565,
+  "name": "Stofzuigers",
+  "path": [
+   "Huishoudelijk",
+   "Stofzuigers",
+   "Steelstofzuigers"
+  ],
+  "main_category": 12000,
+  "category": "huishoudelijke_apparatuur_23795091"
+ },
+ "filters": {
+  "type_stofzuiger": [
+   "1353086"
+  ]
+ },
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "steelstofzuiger",
+   "display": "steelstofzuiger",
+   "volume": 27100,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "beste steelstofzuiger",
+   "display": "beste steelstofzuiger",
+   "volume": 2400,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "samsung steelstofzuiger",
+   "display": "samsung steelstofzuiger",
+   "volume": 2400,
+   "kind": "brand",
+   "params": {
+    "query": "samsung steelstofzuiger"
+   }
+  },
+  {
+   "term": "dyson steelstofzuiger",
+   "display": "dyson steelstofzuiger",
+   "volume": 1600,
+   "kind": "brand",
+   "params": {
+    "query": "dyson steelstofzuiger"
+   }
+  },
+  {
+   "term": "bosch steelstofzuiger",
+   "display": "bosch steelstofzuiger",
+   "volume": 880,
+   "kind": "brand",
+   "params": {
+    "query": "bosch steelstofzuiger"
+   }
+  },
+  {
+   "term": "steelstofzuiger aanbieding",
+   "display": "steelstofzuiger aanbieding",
+   "volume": 590,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "rowenta steelstofzuiger",
+   "display": "rowenta steelstofzuiger",
+   "volume": 480,
+   "kind": "brand",
+   "params": {
+    "query": "rowenta steelstofzuiger"
+   }
+  },
+  {
+   "term": "aeg steelstofzuiger",
+   "display": "aeg steelstofzuiger",
+   "volume": 480,
+   "kind": "brand",
+   "params": {
+    "query": "aeg steelstofzuiger"
+   }
+  },
+  {
+   "term": "steelstofzuiger test",
+   "display": "steelstofzuiger test",
+   "volume": 390,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "dreame steelstofzuiger",
+   "display": "dreame steelstofzuiger",
+   "volume": 260,
+   "kind": "brand",
+   "params": {
+    "query": "dreame steelstofzuiger"
+   }
+  }
+ ]
+}

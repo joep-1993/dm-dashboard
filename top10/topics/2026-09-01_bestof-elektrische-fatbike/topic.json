@@ -1,6 +1,6 @@
 {
  "slug": "2026-09-01_bestof-elektrische-fatbike",
- "label": "Elektrische fatbike",
+ "label": "Elektrische fatbikes",
  "created_at": "2026-09-01",
  "category": {
   "category_id": 9001191,
@@ -29,79 +29,33 @@
  },
  "terms": [
   {
-   "term": "beste elektrische fatbike",
-   "volume": null,
+   "term": "elektrische fatbike",
+   "display": "elektrische fatbike",
+   "volume": 880,
    "kind": "generic",
    "params": {}
   },
   {
    "term": "elektrische fatbike kopen",
-   "volume": null,
+   "display": "elektrische fatbike kopen",
+   "volume": 70,
    "kind": "generic",
    "params": {}
   },
   {
-   "term": "engwe elektrische fatbike",
-   "volume": null,
-   "kind": "brand",
-   "params": {
-    "query": "Engwe elektrische fatbike"
-   }
+   "term": "beste elektrische fatbike",
+   "display": "beste elektrische fatbike",
+   "volume": 10,
+   "kind": "generic",
+   "params": {}
   },
   {
-   "term": "fafrees elektrische fatbike",
-   "volume": null,
+   "term": "ouxi elektrische fatbike",
+   "display": "ouxi elektrische fatbike",
+   "volume": 10,
    "kind": "brand",
    "params": {
-    "query": "Fafrees elektrische fatbike"
-   }
-  },
-  {
-   "term": "ttgo elektrische fatbike",
-   "volume": null,
-   "kind": "brand",
-   "params": {
-    "query": "TTGO elektrische fatbike"
-   }
-  },
-  {
-   "term": "cortina elektrische fatbike",
-   "volume": null,
-   "kind": "brand",
-   "params": {
-    "query": "Cortina elektrische fatbike"
-   }
-  },
-  {
-   "term": "gazelle elektrische fatbike",
-   "volume": null,
-   "kind": "brand",
-   "params": {
-    "query": "Gazelle elektrische fatbike"
-   }
-  },
-  {
-   "term": "bafang elektrische fatbike",
-   "volume": null,
-   "kind": "brand",
-   "params": {
-    "query": "Bafang elektrische fatbike"
-   }
-  },
-  {
-   "term": "cube elektrische fatbike",
-   "volume": null,
-   "kind": "brand",
-   "params": {
-    "query": "CUBE elektrische fatbike"
-   }
-  },
-  {
-   "term": "samebike elektrische fatbike",
-   "volume": null,
-   "kind": "brand",
-   "params": {
-    "query": "Samebike elektrische fatbike"
+    "query": "ouxi elektrische fatbike"
    }
   }
  ]

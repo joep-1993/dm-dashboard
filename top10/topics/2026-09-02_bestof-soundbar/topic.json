@@ -1,0 +1,112 @@
+{
+ "slug": "2026-09-02_bestof-soundbar",
+ "label": "Soundbars",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9005241,
+  "name": "Speakers",
+  "path": [
+   "Elektronica",
+   "Audio & hifi",
+   "Speakers",
+   "Soundbar"
+  ],
+  "main_category": 655,
+  "category": "elektronica_19875530_19943092"
+ },
+ "filters": {
+  "type_luidspreker": [
+   "5407348"
+  ]
+ },
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "soundbar",
+   "display": "soundbar",
+   "volume": 22200,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "sonos soundbar",
+   "display": "sonos soundbar",
+   "volume": 12100,
+   "kind": "brand",
+   "params": {
+    "query": "sonos soundbar"
+   }
+  },
+  {
+   "term": "samsung soundbar",
+   "display": "samsung soundbar",
+   "volume": 6600,
+   "kind": "brand",
+   "params": {
+    "query": "samsung soundbar"
+   }
+  },
+  {
+   "term": "lg soundbar",
+   "display": "lg soundbar",
+   "volume": 1900,
+   "kind": "brand",
+   "params": {
+    "query": "lg soundbar"
+   }
+  },
+  {
+   "term": "beste soundbar",
+   "display": "beste soundbar",
+   "volume": 1600,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "sony soundbar",
+   "display": "sony soundbar",
+   "volume": 1300,
+   "kind": "brand",
+   "params": {
+    "query": "sony soundbar"
+   }
+  },
+  {
+   "term": "soundbar aanbieding",
+   "display": "soundbar aanbieding",
+   "volume": 480,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "hisense soundbar",
+   "display": "hisense soundbar",
+   "volume": 390,
+   "kind": "brand",
+   "params": {
+    "query": "hisense soundbar"
+   }
+  },
+  {
+   "term": "soundbar kopen",
+   "display": "soundbar kopen",
+   "volume": 320,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "soundbar test",
+   "display": "soundbar test",
+   "volume": 260,
+   "kind": "generic",
+   "params": {}
+  }
+ ]
+}

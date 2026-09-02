@@ -1,0 +1,114 @@
+{
+ "slug": "2026-09-02_bestof-game-laptop",
+ "label": "Game laptops",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9005194,
+  "name": "Laptops",
+  "path": [
+   "Computers",
+   "Systemen",
+   "Laptops",
+   "Game laptop"
+  ],
+  "main_category": 6,
+  "category": "computers_19664326_19904517"
+ },
+ "filters": {
+  "type_laptop": [
+   "7121126"
+  ]
+ },
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "game laptop",
+   "display": "game laptop",
+   "volume": 18100,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "beste game laptop",
+   "display": "beste game laptop",
+   "volume": 2400,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "asus game laptop",
+   "display": "asus game laptop",
+   "volume": 880,
+   "kind": "brand",
+   "params": {
+    "query": "asus game laptop"
+   }
+  },
+  {
+   "term": "game laptop kopen",
+   "display": "game laptop kopen",
+   "volume": 720,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "hp game laptop",
+   "display": "hp game laptop",
+   "volume": 480,
+   "kind": "brand",
+   "params": {
+    "query": "hp game laptop"
+   }
+  },
+  {
+   "term": "game laptop aanbieding",
+   "display": "game laptop aanbieding",
+   "volume": 390,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "acer game laptop",
+   "display": "acer game laptop",
+   "volume": 260,
+   "kind": "brand",
+   "params": {
+    "query": "acer game laptop"
+   }
+  },
+  {
+   "term": "msi game laptop",
+   "display": "msi game laptop",
+   "volume": 210,
+   "kind": "brand",
+   "params": {
+    "query": "msi game laptop"
+   }
+  },
+  {
+   "term": "lenovo game laptop",
+   "display": "lenovo game laptop",
+   "volume": 170,
+   "kind": "brand",
+   "params": {
+    "query": "lenovo game laptop"
+   }
+  },
+  {
+   "term": "lenovo legion game laptop",
+   "display": "lenovo legion game laptop",
+   "volume": 90,
+   "kind": "brand",
+   "params": {
+    "query": "lenovo legion game laptop"
+   }
+  }
+ ]
+}

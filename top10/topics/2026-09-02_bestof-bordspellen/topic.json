@@ -1,0 +1,91 @@
+{
+ "slug": "2026-09-02_bestof-bordspellen",
+ "label": "Bordspellen",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9000123,
+  "name": "Bordspellen",
+  "path": [
+   "Speelgoed",
+   "Gezelschapsspellen",
+   "Bordspellen"
+  ],
+  "main_category": 332,
+  "category": "speelgoed_spelletjes_395616_395884"
+ },
+ "filters": {},
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "bordspellen",
+   "display": "bordspellen",
+   "volume": 14800,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "beste bordspellen",
+   "display": "beste bordspellen",
+   "volume": 390,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "bordspellen aanbieding",
+   "display": "bordspellen aanbieding",
+   "volume": 320,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "bordspellen kopen",
+   "display": "bordspellen kopen",
+   "volume": 260,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "ravensburger bordspellen",
+   "display": "ravensburger bordspellen",
+   "volume": 20,
+   "kind": "brand",
+   "params": {
+    "query": "ravensburger bordspellen"
+   }
+  },
+  {
+   "term": "999 games bordspellen",
+   "display": "999 games bordspellen",
+   "volume": 20,
+   "kind": "brand",
+   "params": {
+    "query": "999 games bordspellen"
+   }
+  },
+  {
+   "term": "asmodee bordspellen",
+   "display": "asmodee bordspellen",
+   "volume": 10,
+   "kind": "brand",
+   "params": {
+    "query": "asmodee bordspellen"
+   }
+  },
+  {
+   "term": "hasbro bordspellen",
+   "display": "hasbro bordspellen",
+   "volume": 10,
+   "kind": "brand",
+   "params": {
+    "query": "hasbro bordspellen"
+   }
+  }
+ ]
+}

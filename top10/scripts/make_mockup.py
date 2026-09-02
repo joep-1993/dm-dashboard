@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mockup_style import (CSS, FONT_LINK, HEADER_CSS, ICON_CART, ICON_CHEVRON,     # noqa: E402
                           ICON_HEART, ICON_SEARCH, LOGO_SVG, PLACEHOLDER, TICK)
-from shared.topic import add_topic_arg, find_topic                        # noqa: E402
+from shared.topic import add_topic_arg, find_topic, singular              # noqa: E402
 
 E = html.escape
 SITE = "https://www.beslist.nl"
@@ -44,6 +44,27 @@ def euro(v) -> str:
 
 def nl(n) -> str:
     return f"{int(n or 0):,}".replace(",", ".")
+
+
+def plural(display: str, label: str) -> str:
+    """'philips stofzuiger' + label 'Stofzuigers' -> 'philips stofzuigers'.
+
+    De rank-stap zet in ``display`` de zoekterm zonder 'beste', en dat is
+    enkelvoud ('stofzuiger'): "De 10 beste stofzuiger" klopt niet. Het meervoud
+    hoeven we niet te verzinnen — de categorienaam uit de taxonomie ís het
+    meervoud, dus daar ruilen we het laatste woord voor om. Past de naam niet
+    op het einde (merkpagina van een andere categorie), dan blijft display
+    staan zoals hij was.
+    """
+    enkel = singular(label).lower()
+    d = display.strip()
+    # Oudere rank-bestanden (van vóór de guard in rank_top10.py) hebben de
+    # zoekterm mét 'beste' als display; dan wordt de kop 'De 10 beste beste …'.
+    if d.lower().startswith("beste "):
+        d = d[6:]
+    if enkel and d.lower().endswith(enkel):
+        return d[: len(d) - len(enkel)] + label.lower()
+    return d
 
 
 def img_tag(prod: dict, alt: str) -> str:
@@ -262,15 +283,17 @@ def build(topic, page_index: int) -> tuple[str, str]:
     if not 1 <= page_index <= len(pages):
         raise SystemExit(f"--page moet tussen 1 en {len(pages)} liggen")
     page = pages[page_index - 1]
+    label = topic.label
 
     top = [(it, prods.get(it["ean"], {})) for it in page["top10"]]
     top3 = top[:3]
-    title = f"De {len(top)} beste {page['display']}"
+    title = f"De {len(top)} beste {plural(page['display'], label)}"
 
     chips = "".join(
         f'<a class="chip{" is-on" if i == page_index else ""}" href="#">'
-        f'{E(p["display"][0].upper() + p["display"][1:])}</a>'
-        for i, p in enumerate(pages, 1))
+        f'{E(disp[0].upper() + disp[1:])}</a>'
+        for i, p in enumerate(pages, 1)
+        for disp in [plural(p["display"], label)])
 
     alts = "".join(alt_card(it, pr, top3, i == 1) for i, (it, pr) in enumerate(top[1:3]))
     rows = "".join(rest_row(it, pr) for it, pr in top[3:])
@@ -299,7 +322,7 @@ def build(topic, page_index: int) -> tuple[str, str]:
 <div class="crumbs"><div class="crumbs-inner">{E(" › ".join(meta["category"]["path"]))}</div></div>
 <main class="page">
   <div class="lead">
-    <h1>De {len(top)} beste <em>{E(page["display"])}</em></h1>
+    <h1>De {len(top)} beste <em>{E(plural(page["display"], label))}</em></h1>
     <p class="lead-do">{E(page.get("intro") or "")}</p>
     <p class="stamp">Laatst bijgewerkt: {date.today().strftime("%-d %B %Y")} ·
       {nl(page.get("volume_combined"))} zoekopdrachten per maand</p>

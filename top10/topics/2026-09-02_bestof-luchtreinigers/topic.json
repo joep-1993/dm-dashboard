@@ -1,0 +1,112 @@
+{
+ "slug": "2026-09-02_bestof-luchtreinigers",
+ "label": "Luchtreinigers",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9005319,
+  "name": "Luchtbehandeling",
+  "path": [
+   "Huishoudelijk",
+   "Klimaatbeheersing",
+   "Luchtbehandeling",
+   "Luchtreinigers"
+  ],
+  "main_category": 12000,
+  "category": "huishoudelijke_apparatuur_19968035_19970678"
+ },
+ "filters": {
+  "type_lucht": [
+   "106872"
+  ]
+ },
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "luchtreiniger",
+   "display": "luchtreiniger",
+   "volume": 14800,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "philips luchtreiniger",
+   "display": "philips luchtreiniger",
+   "volume": 4400,
+   "kind": "brand",
+   "params": {
+    "query": "philips luchtreiniger"
+   }
+  },
+  {
+   "term": "beste luchtreiniger",
+   "display": "beste luchtreiniger",
+   "volume": 1900,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "luchtreiniger test",
+   "display": "luchtreiniger test",
+   "volume": 260,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "xiaomi luchtreiniger",
+   "display": "xiaomi luchtreiniger",
+   "volume": 260,
+   "kind": "brand",
+   "params": {
+    "query": "xiaomi luchtreiniger"
+   }
+  },
+  {
+   "term": "luchtreiniger kopen",
+   "display": "luchtreiniger kopen",
+   "volume": 210,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "levoit luchtreiniger",
+   "display": "levoit luchtreiniger",
+   "volume": 210,
+   "kind": "brand",
+   "params": {
+    "query": "levoit luchtreiniger"
+   }
+  },
+  {
+   "term": "luchtreiniger aanbieding",
+   "display": "luchtreiniger aanbieding",
+   "volume": 110,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "rowenta luchtreiniger",
+   "display": "rowenta luchtreiniger",
+   "volume": 70,
+   "kind": "brand",
+   "params": {
+    "query": "rowenta luchtreiniger"
+   }
+  },
+  {
+   "term": "clean air optima luchtreiniger",
+   "display": "clean air optima luchtreiniger",
+   "volume": 50,
+   "kind": "brand",
+   "params": {
+    "query": "clean air optima luchtreiniger"
+   }
+  }
+ ]
+}

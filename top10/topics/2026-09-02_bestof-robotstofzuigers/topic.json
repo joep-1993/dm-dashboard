@@ -1,0 +1,107 @@
+{
+ "slug": "2026-09-02_bestof-robotstofzuigers",
+ "label": "Robotstofzuigers",
+ "created_at": "2026-09-02",
+ "category": {
+  "category_id": 9005568,
+  "name": "Robotstofzuigers",
+  "path": [
+   "Huishoudelijk",
+   "Stofzuigers",
+   "Robotstofzuigers"
+  ],
+  "main_category": 12000,
+  "category": "huishoudelijke_apparatuur_23795091_23795092"
+ },
+ "filters": {},
+ "country_language": "nl-nl",
+ "sort": "popularity",
+ "sort_direction": "desc",
+ "limit_per_term": 20,
+ "models": {
+  "review": "gpt-5.6-luna",
+  "rank": "gpt-5.6-luna"
+ },
+ "terms": [
+  {
+   "term": "robotstofzuiger",
+   "display": "robotstofzuiger",
+   "volume": 40500,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "eufy robotstofzuiger",
+   "display": "eufy robotstofzuiger",
+   "volume": 1900,
+   "kind": "brand",
+   "params": {
+    "query": "eufy robotstofzuiger"
+   }
+  },
+  {
+   "term": "beste robotstofzuiger",
+   "display": "beste robotstofzuiger",
+   "volume": 1600,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "dreame robotstofzuiger",
+   "display": "dreame robotstofzuiger",
+   "volume": 590,
+   "kind": "brand",
+   "params": {
+    "query": "dreame robotstofzuiger"
+   }
+  },
+  {
+   "term": "robotstofzuiger test",
+   "display": "robotstofzuiger test",
+   "volume": 390,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "robotstofzuiger aanbieding",
+   "display": "robotstofzuiger aanbieding",
+   "volume": 390,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "robotstofzuiger kopen",
+   "display": "robotstofzuiger kopen",
+   "volume": 210,
+   "kind": "generic",
+   "params": {}
+  },
+  {
+   "term": "rowenta robotstofzuiger",
+   "display": "rowenta robotstofzuiger",
+   "volume": 210,
+   "kind": "brand",
+   "params": {
+    "query": "rowenta robotstofzuiger"
+   }
+  },
+  {
+   "term": "xiaomi robotstofzuiger",
+   "display": "xiaomi robotstofzuiger",
+   "volume": 170,
+   "kind": "brand",
+   "params": {
+    "query": "xiaomi robotstofzuiger"
+   }
+  },
+  {
+   "term": "roborock robotstofzuiger",
+   "display": "roborock robotstofzuiger",
+   "volume": 140,
+   "kind": "brand",
+   "params": {
+    "query": "roborock robotstofzuiger"
+   }
+  }
+ ]
+}
