@@ -35,7 +35,7 @@ tegen een limiet van 2 uur.
       dezelfde vorm als de valse-groen-paden uit fase 1. Overweeg `raise_for_status()` op 429 zodra
       er één opduikt.
 
-### 2026-09-02 (3) — Audit van de acht nooit-geauditeerde tools, fase 0 t/m 5
+### 2026-09-02 (3) — Audit van de acht nooit-geauditeerde tools, fase 0 t/m 5 — volledig register in `cc1/AUDIT_ACHT_20260902.md`
 
 Joep vroeg eerst welke dashboard-tools nog nooit een `/audit` hadden gehad, daarna om die te
 draaien (m.u.v. Performance Standup, Shop Campaigns en DM Review), daarna om de fases uit te voeren.
@@ -103,7 +103,7 @@ https://claude.ai/code/artifact/7e69740b-5ad7-41ec-bac9-341128dc3ce5
       de root heeft geen case value. Geen drift maar een verschil in taak. De invariant hing wel af
       van drie selectors elders en is nu expliciet afgedwongen op beide schrijfpaden (`a0a55c7`).
 
-- [ ] **HET GROOTSTE OPENSTAANDE PUNT: de MED- en LOW-bevindingen staan nergens vastgelegd.**
+- [x] **De MED- en LOW-bevindingen stonden nergens vastgelegd.**
       De zes fases zijn gebouwd uit de 31 HIGH's plus een handvol structureel meewegende MED's —
       naar schatting acht tot tien. De overige **ruim zestig MED's en de hele LOW-categorie** zijn
       nooit in een fase beland en staan alleen in de tien agent-rapporten, die in de context van de
@@ -114,8 +114,10 @@ https://claude.ai/code/artifact/7e69740b-5ad7-41ec-bac9-341128dc3ce5
       `run_id = len(_run_history) + 1` dat botst zodra de historie zijn cap raakt, de
       `_coerce_date`-strptime zonder try, de dubbeltelling van `values_added` tegenover
       `values_deleted`, en de `%`/`_` als onge-escapete LIKE-wildcards in GSD Check.
-      **Actie:** de tien rapporten uitschrijven naar `cc1/AUDIT_ACHT_20260902.md` (zoals
-      `AUDIT_GSD_SEOSTATS_20260801.md`) vóór de sessie sluit, anders is het werk weg.
+      **Opgelost:** uitgeschreven naar `cc1/AUDIT_ACHT_20260902.md` — 146 bevindingen met een
+      status per stuk (GEDAAN / OPEN / DEELS / VERVALLEN), plus de drie bevindingen die de
+      verificatie niet overleefden en de twee eigen meetfouten. De zwaarste openstaande MED's
+      staan onderaan dat bestand op een rij.
 
 ### 2026-09-02 (2) — GSD Budgets: de uitsluitingen uit de spreadsheet werden half genegeerd
 

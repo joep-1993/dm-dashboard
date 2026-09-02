@@ -102,6 +102,20 @@ GSD Check rapporteerde, is in werkelijkheid 9,4 s — het structurele probleem (
 87,8 M rijen) klopte, de orde van grootte niet. Een getal dat een beslissing draagt, hoort een tweede
 keer langs een andere weg.
 
+### Een fasenplan uit alleen de HIGH's laat stilletjes twee derde van de audit liggen
+
+De zes fases zijn opgebouwd uit de 31 HIGH's plus een handvol structureel meewegende MED's. Dat
+leek compleet — tot de vraag "staat er nog werk open?". Toen bleek dat ruim zestig MED's en de hele
+LOW-categorie in géén enkele fase zaten en alleen in de tien agent-rapporten stonden, die met de
+sessiecontext verdwijnen. Het artifact bevat de HIGH's voluit en van de MED's alleen de structurele,
+dus ook dat was geen vangnet.
+
+En het gaat niet om nitpicks: ST-M5 (een bewerking aan een gepushte blueprint bereikt de site nooit,
+en alle 86.124 rijen staan op `pushed`), ST-M3 (1.467 records met een key die per constructie nooit
+kan resolven), GB-M3 (SQL-injectie via een querystring) — allemaal MED, allemaal duurder dan een
+paar van de HIGH's. De les: schrijf het register weg vóór je het plan maakt, niet erna. Sinds
+2026-09-02 staat het in `cc1/AUDIT_ACHT_20260902.md`, met een status per bevinding.
+
 Zie [[bothits_process]] voor dezelfde les in een ander jasje, en de sessie-entry in TASKS.
 
 ## Een lege kolomkop is een schemafout, en een gecatchte exception is een stille regressie (2026-09-02, GSD Budgets uitsluitingen)
