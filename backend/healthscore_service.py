@@ -507,6 +507,71 @@ SEASON_MULT_MIN_DEFAULT = 0.4
 SEASON_MULT_MAX_DEFAULT = 2.5
 
 
+SHRINK_FACTOR = 0.5          # een rebuild mag de mediane knee90 niet halveren
+SHRINK_ENV = "HS2_ALLOW_KNEE_SHRINK"
+
+
+# Welke motor deze rijen schreef. pa.hs2_cat_cap / pa.hs2_maincat_cap worden door
+# DRIE onafhankelijke paden ge-TRUNCATE'd: de categorie-builders hier, hun
+# maincat-tweelingen ~400 regels verderop, en scripts/analysis/healthscore_caps.py —
+# met verschillende vensters (30,5 dagen tegen hard-gepinde complete maanden) en
+# verschillende logica (_combine_caps heeft een seizoens-vooruitblik die het script
+# niet heeft). Wie het laatst draaide won, stil. Dit is de ontbrekende eigenaar.
+ENGINE = "healthscore_service"
+
+
+def _stamp_engine(c, table: str, engine: str = ENGINE) -> Optional[str]:
+    """Zorg dat `table` een engine-kolom heeft en geef terug wie er nu in staat."""
+    c.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS engine TEXT")
+    c.execute(f"SELECT DISTINCT engine FROM {table} WHERE engine IS NOT NULL LIMIT 2")
+    prev = [r[0] for r in c.fetchall()]
+    return prev[0] if len(prev) == 1 else (",".join(sorted(prev)) if prev else None)
+
+
+def _refuse_empty(table: str, data) -> None:
+    """TRUNCATE + execute_values op een lege lijst leegt de tabel en meldt succes.
+
+    execute_values voert bij een lege argslist NIETS uit, dus een Redshift-query die
+    0 rijen teruggeeft laat de tabel leeg achter, commit, en retourneert 0 als
+    'geslaagd'. Daarna vindt build_sitemaps geen cap-rijen en valt alles terug op de
+    vlakke default. Nooit truncaten wat je niet kunt vervangen.
+    """
+    if not data:
+        raise RuntimeError(
+            f"{table}: de bronquery gaf 0 rijen terug — weiger te truncaten. "
+            f"Controleer het Redshift-venster en de filters voordat je dit forceert.")
+
+
+def _guard_knee_shrink(c, table: str, new_knee90) -> None:
+    """Weiger een rebuild die de knieën laat instorten, tenzij expliciet toegestaan.
+
+    Stond tot nu toe alleen in scripts/analysis/healthscore_caps.py, terwijl het pad
+    achter de dashboardknop dezelfde tabel truncate. De storing waarvoor dit bestaat
+    is niet hypothetisch: met _SEO_* in plaats van _ALL_* komt elke knie ~3x kleiner
+    uit, krimpt elke cap mee, en ziet niets aan de run er verkeerd uit.
+    """
+    c.execute(f"SELECT count(*), percentile_cont(0.5) WITHIN GROUP (ORDER BY knee90) "
+              f"FROM {table} WHERE knee90 IS NOT NULL")
+    n_old, med_old = c.fetchone()
+    if not n_old or med_old is None:
+        return                                  # eerste build, niets om mee te vergelijken
+    new = sorted(v for v in new_knee90 if v is not None)
+    if not new:
+        raise RuntimeError(f"{table}: rebuild leverde geen enkele knee90 op.")
+    med_new = new[len(new) // 2]
+    ratio = med_new / float(med_old)
+    print(f"[HS2.0] {table}: knee90-mediaan {med_old:,.0f} -> {med_new:,} "
+          f"({ratio:.2f}x) over {n_old:,} -> {len(new):,} categorieën", file=sys.stderr)
+    if ratio >= SHRINK_FACTOR or os.getenv(SHRINK_ENV) == "1":
+        return
+    raise RuntimeError(
+        f"{table}: mediane knee90 zou {med_old:,.0f} -> {med_new:,} gaan "
+        f"({ratio:.2f}x, drempel {SHRINK_FACTOR}x). Elke cap en elke sitemap krimpt mee. "
+        f"Meest waarschijnlijke oorzaak: de visits-query is van all-channel "
+        f"(_ALL_JOIN/_ALL_WHERE) naar SEO-only (_SEO_*) gegaan; cap-sizing wil het volle "
+        f"vraagsignaal. Is de krimp echt bedoeld, draai dan met {SHRINK_ENV}=1.")
+
+
 def _dkey(d: date) -> int:
     return d.year * 10000 + d.month * 100 + d.day
 
@@ -535,6 +600,7 @@ def _refresh_cat_month(as_of: date, months: int = 24) -> int:
             c.execute(f"""CREATE TABLE IF NOT EXISTS {CAT_MONTH_TABLE} (
                 cat BIGINT, yyyymm INT, visits BIGINT, revenue DOUBLE PRECISION,
                 PRIMARY KEY (cat, yyyymm))""")
+            _refuse_empty(CAT_MONTH_TABLE, data)
             c.execute(f"TRUNCATE {CAT_MONTH_TABLE}")
             execute_values(c, f"INSERT INTO {CAT_MONTH_TABLE} (cat,yyyymm,visits,revenue) VALUES %s",
                            [(r[0], r[1], int(r[2] or 0), float(r[3] or 0)) for r in data],
@@ -585,6 +651,8 @@ def _refresh_cat_knee(as_of: date, months: int = 12) -> int:
             c.execute(f"""CREATE TABLE IF NOT EXISTS {KNEE_TABLE} (
                 cat BIGINT PRIMARY KEY, yearly BIGINT, knee80 INT, knee90 INT,
                 knee95 INT, n_urls INT)""")
+            _refuse_empty(KNEE_TABLE, data)
+            _guard_knee_shrink(c, KNEE_TABLE, [r[3] for r in data])
             c.execute(f"TRUNCATE {KNEE_TABLE}")
             execute_values(c, f"INSERT INTO {KNEE_TABLE} (cat,yearly,knee80,knee90,knee95,n_urls) VALUES %s",
                            [(r[0], int(r[1] or 0), r[2], r[3], r[4], r[5]) for r in data],
@@ -675,15 +743,18 @@ def build_category_caps(as_of: date, knee_p: int = KNEE_P_DEFAULT,
             c.execute(f"""CREATE TABLE IF NOT EXISTS {CAP_TABLE} (
                 cat BIGINT, calendar_month INT, base_cap INT, season_index DOUBLE PRECISION,
                 cap INT, yearly BIGINT, PRIMARY KEY (cat, calendar_month))""")
+            _refuse_empty(CAP_TABLE, rows)
+            prev_engine = _stamp_engine(c, CAP_TABLE)
             c.execute(f"TRUNCATE {CAP_TABLE}")
             execute_values(c, f"INSERT INTO {CAP_TABLE} "
-                              f"(cat,calendar_month,base_cap,season_index,cap,yearly) VALUES %s",
-                           rows, page_size=10000)
+                              f"(cat,calendar_month,base_cap,season_index,cap,yearly,engine) VALUES %s",
+                           [tuple(r) + (ENGINE,) for r in rows], page_size=10000)
         pg.commit()
     finally:
         pg.close()
     return {"as_of": str(as_of), "cats": len(knee), "cap_rows": len(rows),
-            "knee_p": knee_p, "cap_min": cap_min, "cap_max": cap_max, "alpha": alpha}
+            "knee_p": knee_p, "cap_min": cap_min, "cap_max": cap_max, "alpha": alpha,
+            "engine": ENGINE, "replaced_engine": prev_engine}
 
 
 # --------------------------------------------------------------------------- #
@@ -765,7 +836,14 @@ def build_sitemaps(as_of: date, cap_n: int = CAP_N_DEFAULT,
                 SELECT %(as_of)s, r.npath, r.sample_url, r.deepest_category_id, r.type_url, r.score, r.rnk, 'scored'
                 FROM (
                     SELECT *, row_number() OVER (
-                        PARTITION BY deepest_category_id ORDER BY score DESC, visits DESC) AS rnk
+                        -- npath als laatste sleutel is niet cosmetisch: score komt uit
+                        -- percent_rank(), dus de hele staart (visits=1, revenue=0) deelt
+                        -- één identiek (score, visits)-paar. Valt de cap middenin dat blok,
+                        -- dan kiest Postgres vrij en levert elke rebuild een ANDERE set op.
+                        -- De push is replace-zonder-DELETE, dus dat wisselt telkens een
+                        -- willekeurige plak van de live sitemap om.
+                        PARTITION BY deepest_category_id
+                        ORDER BY score DESC, visits DESC, revenue DESC, npath) AS rnk
                     FROM (
                         SELECT npath, sample_url, type_url, deepest_category_id, visits, revenue,
                                %(wv)s * percent_rank() OVER (
@@ -893,6 +971,7 @@ def refresh_maincat_map() -> dict:
             c.execute(f"""CREATE TABLE IF NOT EXISTS {MAINCAT_MAP_TABLE} (
                 cat BIGINT PRIMARY KEY, cat_name TEXT, maincat BIGINT, maincat_name TEXT,
                 urlslug TEXT, cat_level SMALLINT, is_lowest SMALLINT)""")
+            _refuse_empty(MAINCAT_MAP_TABLE, rows)
             c.execute(f"TRUNCATE {MAINCAT_MAP_TABLE}")
             execute_values(c, f"INSERT INTO {MAINCAT_MAP_TABLE} "
                               f"(cat,cat_name,maincat,maincat_name,urlslug,cat_level,is_lowest) VALUES %s",
@@ -945,6 +1024,7 @@ def _refresh_maincat_month(as_of: date, months: int = 24) -> int:
             c.execute(f"""CREATE TABLE IF NOT EXISTS {MAINCAT_MONTH_TABLE} (
                 cat BIGINT, yyyymm INT, visits BIGINT, revenue DOUBLE PRECISION,
                 PRIMARY KEY (cat, yyyymm))""")
+            _refuse_empty(MAINCAT_MONTH_TABLE, data)
             c.execute(f"TRUNCATE {MAINCAT_MONTH_TABLE}")
             execute_values(c, f"INSERT INTO {MAINCAT_MONTH_TABLE} (cat,yyyymm,visits,revenue) VALUES %s",
                            [(r[0], r[1], int(r[2] or 0), float(r[3] or 0))
@@ -998,6 +1078,8 @@ def _refresh_maincat_knee(as_of: date, months: int = 12) -> int:
             c.execute(f"""CREATE TABLE IF NOT EXISTS {MAINCAT_KNEE_TABLE} (
                 cat BIGINT PRIMARY KEY, yearly BIGINT, knee80 INT, knee90 INT,
                 knee95 INT, n_urls INT)""")
+            _refuse_empty(MAINCAT_KNEE_TABLE, data)
+            _guard_knee_shrink(c, MAINCAT_KNEE_TABLE, [r[3] for r in data])
             c.execute(f"TRUNCATE {MAINCAT_KNEE_TABLE}")
             execute_values(c, f"INSERT INTO {MAINCAT_KNEE_TABLE} "
                               f"(cat,yearly,knee80,knee90,knee95,n_urls) VALUES %s",
@@ -1042,20 +1124,29 @@ def build_maincat_caps(as_of: date, knee_p: int = KNEE_P_DEFAULT,
 
     rows = _combine_caps(knee, cm, knee_p, cap_min, cap_max, alpha, mult_min, mult_max)
 
+    # Twee INCOMPATIBELE sizing-methodes schrijven dezelfde tabel: deze knie-variant
+    # en build_maincat_caps_from_live() (1,5x de live set). Ze truncaten allebei, dus
+    # zonder deze markering is achteraf niet te zien welke er in staat — terwijl de
+    # docstring hieronder zegt dat de knie op dit niveau juist NIET overdraagt.
+    _engine = f"{ENGINE}:maincat_knee"
+
     pg = _postgres()
     try:
         with pg.cursor() as c:
             c.execute(f"""CREATE TABLE IF NOT EXISTS {MAINCAT_CAP_TABLE} (
                 cat BIGINT, calendar_month INT, base_cap INT, season_index DOUBLE PRECISION,
                 cap INT, yearly BIGINT, PRIMARY KEY (cat, calendar_month))""")
+            _refuse_empty(MAINCAT_CAP_TABLE, rows)
+            prev_engine = _stamp_engine(c, MAINCAT_CAP_TABLE, _engine)
             c.execute(f"TRUNCATE {MAINCAT_CAP_TABLE}")
             execute_values(c, f"INSERT INTO {MAINCAT_CAP_TABLE} "
-                              f"(cat,calendar_month,base_cap,season_index,cap,yearly) VALUES %s",
-                           rows, page_size=10000)
+                              f"(cat,calendar_month,base_cap,season_index,cap,yearly,engine) VALUES %s",
+                           [tuple(r) + (_engine,) for r in rows], page_size=10000)
         pg.commit()
     finally:
         pg.close()
     return {"as_of": str(as_of), "maincats": len(knee), "cap_rows": len(rows),
+            "engine": _engine, "replaced_engine": prev_engine,
             "knee_p": knee_p, "cap_min": cap_min, "cap_max": cap_max, "alpha": alpha}
 
 
@@ -1098,21 +1189,29 @@ def build_maincat_caps_from_live(multiple: float = MAINCAT_LIVE_MULTIPLE_DEFAULT
         for m in range(1, 13):
             rows.append((mc, m, base, 1.0, base, 0))
 
+    # De gesanctioneerde variant: 1,5x de live set. season_index=1.0 en yearly=0
+    # zijn hier geen meetwaarden maar vulling, dus de markering is het enige wat
+    # achteraf nog zegt welke sizing er in de tabel staat.
+    _engine = f"{ENGINE}:maincat_live"
+
     pg = _postgres()
     try:
         with pg.cursor() as c:
             c.execute(f"""CREATE TABLE IF NOT EXISTS {MAINCAT_CAP_TABLE} (
                 cat BIGINT, calendar_month INT, base_cap INT, season_index DOUBLE PRECISION,
                 cap INT, yearly BIGINT, PRIMARY KEY (cat, calendar_month))""")
+            _refuse_empty(MAINCAT_CAP_TABLE, rows)
+            prev_engine = _stamp_engine(c, MAINCAT_CAP_TABLE, _engine)
             c.execute(f"TRUNCATE {MAINCAT_CAP_TABLE}")
             execute_values(c, f"INSERT INTO {MAINCAT_CAP_TABLE} "
-                              f"(cat,calendar_month,base_cap,season_index,cap,yearly) VALUES %s",
-                           rows, page_size=10000)
+                              f"(cat,calendar_month,base_cap,season_index,cap,yearly,engine) VALUES %s",
+                           [tuple(r) + (_engine,) for r in rows], page_size=10000)
         pg.commit()
     finally:
         pg.close()
     return {"multiple": multiple, "maincats": len(maincats), "cap_rows": len(rows),
             "cap_min": cap_min, "cap_max": cap_max,
+            "engine": _engine, "replaced_engine": prev_engine,
             "total_cap": sum(d["cap"] for d in detail), "detail": detail}
 
 
@@ -1158,13 +1257,28 @@ def build_maincat_sitemaps(as_of: date, cap_n: int = MAINCAT_CAP_MAX_DEFAULT,
     deepest_category_id = NULL, so they cannot be mapped to a maincat. They are
     reported as unmapped rather than silently dropped.
     """
-    cap_join = (f"LEFT JOIN {MAINCAT_CAP_TABLE} cp "
+    # INNER JOIN, geen LEFT + COALESCE. De terugval hier was cap_n, en die staat op
+    # MAINCAT_CAP_MAX_DEFAULT (120.000) — de KLEMwaarde, niet een verstandige default
+    # (de categorie-tweeling gebruikt 1.000). Een maincat die ontbreekt in
+    # pa.hs2_maincat_cap was daarmee effectief ongecapt en zou de 53.411 live records
+    # van bv. /mode/ vervangen door maximaal 120k URL's. Liever nul rijen voor die
+    # maincat — dan slaat de lege-payload-guard in push_run aan — plus een expliciete
+    # melding hieronder welke maincats geen cap hadden.
+    cap_join = (f"JOIN {MAINCAT_CAP_TABLE} cp "
                 f"ON cp.cat = r.maincat AND cp.calendar_month = %(month)s"
                 if seasonal_caps else "")
-    cap_pred = "COALESCE(cp.cap, %(cap)s)" if seasonal_caps else "%(cap)s"
+    cap_pred = "cp.cap" if seasonal_caps else "%(cap)s"
     pg = _postgres()
     try:
         with pg.cursor() as c:
+            if seasonal_caps:
+                c.execute(f"SELECT count(*) FROM {MAINCAT_CAP_TABLE} "
+                          f"WHERE calendar_month = %s", (as_of.month,))
+                if not c.fetchone()[0]:
+                    raise RuntimeError(
+                        f"{MAINCAT_CAP_TABLE} heeft geen rijen voor maand {as_of.month}. "
+                        f"Draai eerst build_maincat_caps_from_live() (of build_maincat_caps) "
+                        f"— zonder caps is er niets te begrenzen.")
             c.execute(f"""
                 CREATE TABLE IF NOT EXISTS {MAINCAT_SITEMAP_TABLE} (
                     as_of_date          DATE NOT NULL,
@@ -1188,7 +1302,14 @@ def build_maincat_sitemaps(as_of: date, cap_n: int = MAINCAT_CAP_MAX_DEFAULT,
                        r.type_url, r.score, r.rnk, 'scored'
                 FROM (
                     SELECT *, row_number() OVER (
-                        PARTITION BY maincat ORDER BY score DESC, visits DESC) AS rnk
+                        -- npath als laatste sleutel is niet cosmetisch: score komt uit
+                        -- percent_rank(), dus de hele staart (visits=1, revenue=0) deelt
+                        -- één identiek (score, visits)-paar. Valt de cap middenin dat blok,
+                        -- dan kiest Postgres vrij en levert elke rebuild een ANDERE set op.
+                        -- De push is replace-zonder-DELETE, dus dat wisselt telkens een
+                        -- willekeurige plak van de live sitemap om.
+                        PARTITION BY maincat
+                        ORDER BY score DESC, visits DESC, revenue DESC, npath) AS rnk
                     FROM (
                         SELECT f.npath, f.sample_url, f.type_url, f.deepest_category_id,
                                m.maincat, f.visits, f.revenue,
@@ -1218,6 +1339,19 @@ def build_maincat_sitemaps(as_of: date, cap_n: int = MAINCAT_CAP_MAX_DEFAULT,
                           LEFT JOIN {MAINCAT_MAP_TABLE} m ON m.cat = f.deepest_category_id
                           WHERE f.as_of_date = %s AND m.cat IS NULL""", (as_of,))
             unmapped = c.fetchone()
+            # Welke maincats hebben features maar geen cap-rij? Die leveren nu (met de
+            # inner join) nul rijen op, en dat mag niet stil gebeuren.
+            uncapped = []
+            if seasonal_caps:
+                c.execute(f"""
+                    SELECT DISTINCT m.maincat
+                    FROM {FEATURE_TABLE} f
+                    JOIN {MAINCAT_MAP_TABLE} m ON m.cat = f.deepest_category_id
+                    LEFT JOIN {MAINCAT_CAP_TABLE} cp
+                           ON cp.cat = m.maincat AND cp.calendar_month = %s
+                    WHERE f.as_of_date = %s AND cp.cat IS NULL
+                """, (as_of.month, as_of))
+                uncapped = [r[0] for r in c.fetchall()]
         pg.commit()
     finally:
         pg.close()
@@ -1225,6 +1359,7 @@ def build_maincat_sitemaps(as_of: date, cap_n: int = MAINCAT_CAP_MAX_DEFAULT,
             "distinct_urls": (got["urls"] if isinstance(got, dict) else got[0]),
             "maincats": (got["maincats"] if isinstance(got, dict) else got[1]),
             "features_unmapped_to_maincat": (unmapped["n"] if isinstance(unmapped, dict) else unmapped[0]),
+            "maincats_without_cap": uncapped,
             "seasonal_caps": seasonal_caps}
 
 
@@ -1331,7 +1466,8 @@ def compute_shadow(holdout_month: str, cap_n: int = CAP_N_DEFAULT,
         hs2 AS (
             SELECT npath FROM (
                 SELECT npath, row_number() OVER (
-                    PARTITION BY cat ORDER BY score DESC, visits DESC) AS rnk FROM pred
+                    PARTITION BY cat
+                    ORDER BY score DESC, visits DESC, npath) AS rnk FROM pred
             ) r WHERE rnk <= %(cap)s
         ),
         cur AS (

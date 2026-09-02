@@ -53,6 +53,7 @@ DEMO_NAME_LIKE = ["slee", "vaz", "airco", "sneaker", "winterjas", "zwembad"]
 _NL = {1:"jan",2:"feb",3:"mrt",4:"apr",5:"mei",6:"jun",7:"jul",8:"aug",9:"sep",10:"okt",11:"nov",12:"dec"}
 
 
+ENGINE = "scripts/analysis/healthscore_caps.py"
 SHRINK_FACTOR = 0.5   # a rebuild may not halve the median knee90 without --force
 SHRINK_ENV = "HS2_ALLOW_KNEE_SHRINK"
 
@@ -196,10 +197,22 @@ def build_caps(p, cap_min, cap_max, alpha, mmin, mmax):
             c.execute(f"""CREATE TABLE IF NOT EXISTS {CAP_TABLE} (
                 cat BIGINT, calendar_month INT, base_cap INT, season_index DOUBLE PRECISION,
                 cap INT, yearly BIGINT, PRIMARY KEY (cat, calendar_month))""")
+            # Markeer wie deze rijen schreef. Dit script en
+            # backend/healthscore_service.py truncaten allebei dezelfde tabel, met
+            # verschillende vensters (hier hard-gepinde complete maanden, daar
+            # 30,5 dagen) en verschillende logica (_combine_caps daar heeft een
+            # seizoens-vooruitblik die hier ontbreekt). Wie het laatst draaide won,
+            # stil. Print het vorige eigenaarschap zodat een overschrijving opvalt.
+            c.execute(f"ALTER TABLE {CAP_TABLE} ADD COLUMN IF NOT EXISTS engine TEXT")
+            c.execute(f"SELECT DISTINCT engine FROM {CAP_TABLE} WHERE engine IS NOT NULL")
+            prev = [r["engine"] if isinstance(r, dict) else r[0] for r in c.fetchall()]
+            if prev and prev != [ENGINE]:
+                print(f"[caps] LET OP: overschrijft caps van {', '.join(map(str, prev))}",
+                      file=sys.stderr)
             c.execute(f"TRUNCATE {CAP_TABLE}")
             execute_values(c, f"INSERT INTO {CAP_TABLE} "
-                              f"(cat,calendar_month,base_cap,season_index,cap,yearly) VALUES %s",
-                           out_rows, page_size=10000)
+                              f"(cat,calendar_month,base_cap,season_index,cap,yearly,engine) VALUES %s",
+                           [tuple(r) + (ENGINE,) for r in out_rows], page_size=10000)
         pg.commit()
     finally:
         pg.close()

@@ -448,8 +448,13 @@ def preview(categories: list, as_of: date = None, country: str = "nl",
 
             live = kw.get_live(cid, country)
             diff = kw.diff_against_live(payload, country, live=live) if payload["keywords"] else None
+            # De set-comprehensie stond IN de conditie, dus Python bouwde hem
+            # opnieuw voor élk element van `live`: O(live x payload). Gemeten op
+            # 20.000 live x 17.000 payload was dat 11,2 s tegen 1,2 ms gehesen —
+            # en Kantoor heeft 53k live records.
+            payload_urls = {x["url"] for x in payload["keywords"]}
             dropped = [k["url"].rstrip("/") for k in live
-                       if k["url"] not in {x["url"] for x in payload["keywords"]}]
+                       if k["url"] not in payload_urls]
             drop_visits = {u: cat_visits.get(u, {}).get("visits", 0) for u in set(dropped)}
             costly = {u: v for u, v in drop_visits.items() if v > 0}
 
@@ -552,7 +557,11 @@ def push_run(parent_run_id: int, confirm: str, category_ids: list = None,
     if parent["mode"] != "preview" or parent["status"] != "done":
         raise ValueError("only a completed preview run can be pushed")
     cats = (parent.get("detail") or {}).get("categories") or []
-    if category_ids:
+    # `is not None`, niet de waarheidswaarde: category_ids=[] is een lege SELECTIE,
+    # niet "geen filter". Met `if category_ids:` viel een lege lijst door het filter
+    # heen, bleef `cats` de volledige preview en vuurde de guard hieronder nooit —
+    # oftewel: elke categorie live vervangen.
+    if category_ids is not None:
         wanted = {int(x) for x in category_ids}
         cats = [c for c in cats if int(c["id"]) in wanted]
     if not cats:
@@ -569,7 +578,7 @@ def push_run(parent_run_id: int, confirm: str, category_ids: list = None,
     run_id = _create_run("push", parent["scope"], parent.get("label"), as_of, country,
                          [{"id": c["id"], "name": c["name"], "scope": c["scope"]} for c in cats],
                          parent_run_id=parent_run_id)
-    results, ok, failed = [], 0, 0
+    results, ok, failed, mismatch = [], 0, 0, 0
     # Same unit as the preview: one category. A failure still advances the
     # counter — the unit is handled, just not well — or the bar hangs on a run
     # that is finished.
@@ -582,16 +591,13 @@ def push_run(parent_run_id: int, confirm: str, category_ids: list = None,
             entry = {"id": cid, "name": c["name"], "scope": c["scope"],
                      "records": len(c["payload"]["keywords"])}
             try:
-                snap = kw.snapshot_live(cid, country, out_dir=snapshot_dir)
+                snap = kw.snapshot_live(cid, country, out_dir=snapshot_dir,
+                                        run_id=run_id)
                 entry["snapshot"] = {"records": snap["records"], "file": snap.get("file")}
                 resp = kw.push(c["payload"], confirm_token=f"REPLACE {cid}")
-                entry["response"] = {"status_code": resp.get("status_code")}
-                # Read the category back: the API accepts and truncates silently,
-                # so "it returned 200" is not the same as "it stored what we sent".
-                after = kw.get_live(cid, country)
-                entry["live_after"] = len(after)
-                entry["exact"] = ({k["url"] for k in after}
-                                  == {k["url"] for k in c["payload"]["keywords"]})
+                entry["response"] = {"status_code": resp.get("status_code"),
+                                     "body": (resp.get("body") or "")[:300]}
+                # Vanaf hier IS de push geslaagd (push() gooit nu op een niet-2xx).
                 entry["status"] = "ok"
                 ok += 1
             except Exception as e:  # noqa: BLE001 — one category failing must not
@@ -599,18 +605,48 @@ def push_run(parent_run_id: int, confirm: str, category_ids: list = None,
                 entry["error"] = str(e)
                 failed += 1
                 logger.exception("healthscore push failed for category %s", cid)
+                results.append(entry)
+                continue
+
+            # Read the category back: the API accepts and truncates silently, so
+            # "it returned 200" is not the same as "it stored what we sent".
+            # EIGEN try: dit is verificatie, geen onderdeel van de schrijfactie.
+            # get_live() haalt 17k-68k records op met timeout=300 en zonder retry;
+            # een blip daar mag een categorie die wél degelijk vervangen is niet als
+            # 'error' wegzetten, want dan herstelt iemand een snapshot over een
+            # geslaagde push heen.
+            try:
+                after = kw.get_live(cid, country)
+                entry["live_after"] = len(after)
+                entry["exact"] = ({k["url"] for k in after}
+                                  == {k["url"] for k in c["payload"]["keywords"]})
+                if not entry["exact"]:
+                    # 2xx maar een andere set terug = stille truncatie. Dat is geen
+                    # geslaagde push, ook al klaagde de API niet.
+                    entry["status"] = "mismatch"
+                    ok -= 1
+                    mismatch += 1
+            except Exception as e:  # noqa: BLE001
+                entry["readback_error"] = str(e)
+                logger.warning("healthscore read-back failed for category %s: %s", cid, e)
             results.append(entry)
 
         rep(phase="finish", done=total, total=total)
         stats = {"categories": len(results), "pushed_ok": ok, "pushed_failed": failed,
+                 "pushed_mismatch": mismatch,
+                 "readback_unavailable": sum(1 for r in results if r.get("readback_error")),
                  "proposed_records": sum(r["records"] for r in results),
                  "live_records": sum(r.get("live_after") or 0 for r in results),
                  "exact_readback": sum(1 for r in results if r.get("exact")),
                  "problems": 0}
         detail = {"as_of": str(as_of), "country": country, "parent_run_id": parent_run_id,
                   "snapshot_dir": snapshot_dir, "categories": results}
-        _finish_run(run_id, "done" if not failed else "error", stats, detail,
-                    None if not failed else f"{failed} of {len(results)} categories failed")
+        bad = failed + mismatch
+        msg = None
+        if bad:
+            msg = (f"{failed} of {len(results)} categories failed"
+                   + (f", {mismatch} stored a different set than we sent" if mismatch else ""))
+        _finish_run(run_id, "done" if not bad else "error", stats, detail, msg)
         return {"run_id": run_id, "stats": stats, "detail": detail}
     except Exception as e:  # noqa: BLE001
         logger.exception("healthscore push run %s failed", run_id)

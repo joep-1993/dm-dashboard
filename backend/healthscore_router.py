@@ -43,23 +43,46 @@ def _month_end(month: str) -> date:
     return first_next - timedelta(days=1)
 
 
-def _new_job(action: str, params: dict) -> str:
-    job_id = uuid.uuid4().hex[:12]
+def _claim_job(action: str, params: dict) -> Optional[str]:
+    """Registreer een job, maar alleen als er niets anders loopt. None = bezet.
+
+    Check-and-set onder ÉÉN lock. Hiervoor deed _guard_idle() zijn check, liet het
+    lock los, en pakte _new_job() het daarna opnieuw — twee gelijktijdige POSTs op
+    /categories/push zagen dan allebei een lege `active` en werden allebei ingepland.
+    Met de gedeelde snapshotnaam van healthscore_keywords betekende dat: de tweede
+    push overschrijft precies de undo die de eerste zojuist wegschreef.
+    """
     with _JOBS_LOCK:
-        _JOBS[job_id] = {
-            "id": job_id, "action": action, "params": params,
-            "status": "queued", "created_at": datetime.now().isoformat(timespec="seconds"),
-            "started_at": None, "finished_at": None, "result": None, "error": None,
-            # Filled by the worker through _progress_setter so the page can draw a
-            # real progress bar: {"phase": ..., "done": n, "total": n, "what": ...}.
-            "progress": None,
-        }
-        # Trim oldest finished jobs so the dict can't grow without bound.
-        if len(_JOBS) > _MAX_JOBS:
-            done = sorted((j for j in _JOBS.values() if j["status"] in ("done", "error")),
-                          key=lambda j: j["created_at"])
-            for j in done[: len(_JOBS) - _MAX_JOBS]:
-                _JOBS.pop(j["id"], None)
+        active = [j for j in _JOBS.values() if j["status"] in ("queued", "running")]
+        if active:
+            return None
+        return _new_job_locked(action, params)
+
+
+def _busy_409() -> HTTPException:
+    with _JOBS_LOCK:
+        active = [j for j in _JOBS.values() if j["status"] in ("queued", "running")]
+    what = active[0]["action"] if active else "another"
+    return HTTPException(status_code=409, detail=f"a {what} job is already running")
+
+
+def _new_job_locked(action: str, params: dict) -> str:
+    """Registreer een job. Alleen aanroepen met _JOBS_LOCK al vast."""
+    job_id = uuid.uuid4().hex[:12]
+    _JOBS[job_id] = {
+        "id": job_id, "action": action, "params": params,
+        "status": "queued", "created_at": datetime.now().isoformat(timespec="seconds"),
+        "started_at": None, "finished_at": None, "result": None, "error": None,
+        # Filled by the worker through _progress_setter so the page can draw a
+        # real progress bar: {"phase": ..., "done": n, "total": n, "what": ...}.
+        "progress": None,
+    }
+    # Trim oldest finished jobs so the dict can't grow without bound.
+    if len(_JOBS) > _MAX_JOBS:
+        done = sorted((j for j in _JOBS.values() if j["status"] in ("done", "error")),
+                      key=lambda j: j["created_at"])
+        for j in done[: len(_JOBS) - _MAX_JOBS]:
+            _JOBS.pop(j["id"], None)
     return job_id
 
 
@@ -183,15 +206,12 @@ def run(body: RunIn):
         raise HTTPException(status_code=400, detail=f"unknown action '{action}'")
 
     # Guard: only one pipeline job in flight at a time (single worker anyway, but
-    # give the UI a clear signal rather than silently queueing).
-    with _JOBS_LOCK:
-        active = [j for j in _JOBS.values() if j["status"] in ("queued", "running")]
-    if active:
-        raise HTTPException(status_code=409,
-                            detail=f"a {active[0]['action']} job is already running")
-
+    # give the UI a clear signal rather than silently queueing). Dit was een
+    # letterlijke kopie van _guard_idle(), dus de race moest twee keer gefixt worden.
     params = {"month": month, "cap_n": body.cap_n}
-    job_id = _new_job(action, params)
+    job_id = _claim_job(action, params)
+    if job_id is None:
+        raise _busy_409()
 
     if action == "coverage":
         _executor.submit(_run_job, job_id, _coverage_and_write, month)
@@ -233,15 +253,6 @@ class PushIn(BaseModel):
     category_ids: Optional[list[int]] = None
 
 
-def _guard_idle() -> None:
-    """One heavy job at a time; tell the UI instead of silently queueing."""
-    with _JOBS_LOCK:
-        active = [j for j in _JOBS.values() if j["status"] in ("queued", "running")]
-    if active:
-        raise HTTPException(status_code=409,
-                            detail=f"a {active[0]['action']} job is already running")
-
-
 @router.get("/categories")
 def categories(scope: str = Query("deepest", pattern="^(deepest|maincat)$")):
     """Picker options. `as_of` is the selection build every run gets pinned to."""
@@ -261,13 +272,14 @@ def test_bucket():
 
 @router.post("/categories/preview")
 def categories_preview(body: PreviewIn):
-    _guard_idle()
     cats = [c.model_dump() for c in body.categories]
     if not cats:
         raise HTTPException(status_code=400, detail="pick at least one category")
     params = {"categories": len(cats), "country": body.country,
               "label": body.label or (cats[0]["name"] if len(cats) == 1 else f"{len(cats)} cats")}
-    job_id = _new_job("preview", params)
+    job_id = _claim_job("preview", params)
+    if job_id is None:
+        raise _busy_409()
     _executor.submit(_run_job, job_id, hr.preview, cats, None, body.country,
                      body.include_plp, body.preserve_cross_category, body.label,
                      progress=_progress_setter(job_id))
@@ -277,12 +289,13 @@ def categories_preview(body: PreviewIn):
 @router.post("/categories/push")
 def categories_push(body: PushIn):
     """Live write: replaces the sitemap set of every category in the run."""
-    _guard_idle()
     if body.confirm != "REPLACE":
         raise HTTPException(status_code=400, detail="type REPLACE to confirm the push")
     params = {"run_id": body.run_id,
               "categories": len(body.category_ids or []) or None}
-    job_id = _new_job("push", params)
+    job_id = _claim_job("push", params)
+    if job_id is None:
+        raise _busy_409()
     _executor.submit(_run_job, job_id, hr.push_run, body.run_id, body.confirm,
                      body.category_ids, progress=_progress_setter(job_id))
     return {"job_id": job_id, "action": "push", "params": params}

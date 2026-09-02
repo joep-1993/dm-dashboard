@@ -69,7 +69,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import requests
 
@@ -459,7 +459,8 @@ def build_maincat_payload(maincat: int, as_of: date, headings: dict,
             "rows_considered": len(rows)}
 
 
-def snapshot_live(cat: int, country: str = "nl", out_dir: str = None) -> dict:
+def snapshot_live(cat: int, country: str = "nl", out_dir: str = None,
+                  run_id=None) -> dict:
     """Capture a category's current live set verbatim, as a ready-to-POST body.
 
     This is the ONLY undo that exists: POST replaces and there is no DELETE, so
@@ -475,7 +476,14 @@ def snapshot_live(cat: int, country: str = "nl", out_dir: str = None) -> dict:
     out = {"category": cat, "records": len(live), "payload": payload}
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
-        path = os.path.join(out_dir, f"live_snapshot_{cat}_{country}.json")
+        # De bestandsnaam MOET uniek zijn per push. Een vaste naam + open("w")
+        # betekent dat push #2 van dezelfde categorie de stand van vóór push #1
+        # overschrijft met de stand van ná push #1 — en dan is de enige rollback
+        # die bestaat weg, terwijl delete_runs() deze bestanden juist expres laat
+        # staan. run_id en timestamp maken elke snapshot een eigen bestand.
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        suffix = f"_run{run_id}" if run_id is not None else ""
+        path = os.path.join(out_dir, f"live_snapshot_{cat}_{country}{suffix}_{stamp}.json")
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False, indent=2)
         out["file"] = path
@@ -608,6 +616,17 @@ def push(payload: dict, confirm_token: str = "", allow_duplicate_pairs: bool = F
         out["json"] = r.json()
     except Exception:
         pass
+    # health() en get_live() hebben dit allebei al; push() had het niet, en de
+    # aanroeper in healthscore_runs.py zette de categorie daarna onvoorwaardelijk op
+    # "ok". Een 500 of een proxy-foutpagina telde dus als een geslaagde vervanging
+    # van de live set — precies de operatie die geen DELETE kent. Zowel de
+    # HTTP-status als de success-vlag uit de body moeten kloppen.
+    r.raise_for_status()
+    body = out.get("json")
+    if isinstance(body, dict) and body.get("success") is False:
+        raise RuntimeError(
+            f"keywords API weigerde de push voor categorie "
+            f"{payload['deepestCategoryId']}: {out['body']}")
     return out
 
 
