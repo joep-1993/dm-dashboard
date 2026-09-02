@@ -1,6 +1,88 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een score die het bewijs van de kále categorie meet, zakt als je de bestemming verfijnt (2026-09-02, Auto-Redirects)
+
+`/r/opbergkast_voor_balkon/` redirectte naar de kale `meubilair_389371_6383260` (Opbergkasten) met
+score 72. Na V60 — de facetpool was afgekapt op de top-8, dus `ruimte~4945789` ('Balkon') bestond
+niet voor de optimizer — landt hij op `…/c/ruimte~4945789`. Betere match, score 60. Joeps vraag:
+hoe kan de match beter worden en de score slechter?
+
+### Het waren twee losse dingen, en geen van beide was het facet
+
+De hele geschiedenis van die rij staat in `rurl_run_output` (de xlsx per task_id; `rurl_processed`
+houdt alleen de laatste stand):
+
+| datum | bestemming | score | bewijs in de reason |
+|---|---|---|---|
+| 20-08 | Opbergkasten (kaal) | 72 | search-verified AND 80% |
+| 26-08 11:08 | + `/c/ruimte~4945789` | 72 | search-verified AND 84% |
+| 26-08 15:08 | + `/c/ruimte~4945789` | 45 | "unverified" |
+| 28-08 | + `/c/ruimte~4945789` | 60 | search-agreed, 38% share |
+
+De gefacetteerde bestemming heeft zelf óók 72 gescoord — het facet heeft de punten niet gekost.
+Wat ertussen zat is de **7-daagse TTL van de search-cache**: `dom_cat_share` voor
+(meubilair, "opbergkast voor balkon") ging bij de refetch van 0.84 naar 0.37, en live nagemeten is
+het 0.38 — de 84% was dus de verouderde waarde. De ladder van `_cross_maincat_fallback_fields`
+hangt aan die ene drempel (`>= 0.6`), dus de rij viel naar 45, en V64 tilde hem een dag later naar
+60. De echte volgorde is **72 → 45 → 60**: die 60 was al een verbetering, geen afwaardering.
+
+Dus: bij "de score van deze rij is veranderd" is de eerste vraag niet welke code eraan zat, maar of
+het **bewijs** veranderde. Dat staat in de reason (de share met het percentage) en in
+`data/cache/search_derived.sqlite` (`fetched_at` per maincat+keyword). Twee runs met dezelfde code
+en zeven dagen ertussen zijn niet vergelijkbaar.
+
+### De structurele fout: het getal meet een ander object dan het ding dat je scoort
+
+`dom_cat_share` = hoe dominant de KALE categorie is onder haar zusters, over de HÉLE query. Voor
+"opbergkast voor balkon" in meubilair: Opbergkasten 271, Wandkasten 93, Voorraadkasten 88,
+Dressoirs 66, Archiefkasten 50 → 0.38. Het token dat de bestemming beter maakt ('balkon') is een
+**facetwaarde en geen categorienaam**, en kan die share dus niet scherper maken — het verdunt hem
+over alle soorten kasten. Hoe beter je de bestemming maakt met het juiste facet, hoe lager het
+getal dat hem beoordeelt.
+
+Dat los je niet op met 0.5 in plaats van 0.6. Het bewijs gaat over de kale categorie en de
+bestemming is dat niet meer. **Scoor het object dat je verstuurt** (categorie + facet), niet de
+route die het vond en niet een proxy voor de bestemming. `score_search_derived()` doet dat al voor
+de search-derived branches (`target_is_faceted` + een coverage-hertelling over de toegevoegde
+facetwaarden); de cross-maincat fallback stond daar expliciet buiten en had alleen zijn eigen platte
+ladder 80/72/60/45.
+
+V65 geeft die ladder een sport voor dekking: een gefacetteerde bestemming waarvan de H1 élk
+query-token vertegenwoordigt krijgt 72 in plaats van 60. Wél achter V64's guard (de query moet de
+**categorie** noemen en de search-leader moet die categorie zijn), anders is één echoënde
+facetwaarde weer genoeg — 'fietsen berging' → Hogedrukreinigers `/c/t_hdrukrein~'Fietsen'` is
+precies wat V64 dichtzette.
+
+### De bug eronder: een early return slaat de hele staart van de cascade over
+
+Deze rij kwam nooit bij de V55 H1-lift, terwijl 'Opbergkasten Balkon' vs 'opbergkast voor balkon'
+100/100 scoort (+10 punten). De branch (V28-rescue afgewezen → cross-maincat fallback) **returnt op
+de plek zelf**, met `'h1_overlap': 0` hardgecodeerd — ruim vóór het gedeelde finals-blok. Daarom
+stond er in de reviewsheet `h1_match: 0` bij de gefacetteerde variant en `67` bij de kale: de kale
+kwam via de RC5-route, die niet vroegtijdig returnt.
+
+Achter dat gedeelde blok hangt méér dan de lift: ook de V61-fragmentpruning en de V64
+low-coverage-cap staan daar. Een `return` halverwege `process_url_v2` slaat dat allemaal over, en
+niets in de code zegt dat. De les is niet "deze ene lift vergeten" maar **een cascade met returns
+halverwege heeft geen gedeelde staart die je kunt vertrouwen** — vandaar `_v55_lift()` als één
+helper die beide plekken aanroepen. Wie er een return-plek bijmaakt, moet nog steeds zelf de staart
+aanroepen; dat is de volgende opruiming (zie TASKS).
+
+Bijkomend: de lift-vloer (`recall >= 90`) en de cap (>= 3 niet-vertegenwoordigde woorden) sluiten
+elkaar uit, dus dat de cap óók achter die return zit kost hier niets.
+
+### Meetwaarde
+
+A/B over 1.438 URL's — de 738 rijen die deze branch in `rurl_processed` ooit produceerde plus 700
+controlerijen — met dezelfde data-cache en dezelfde warme search-cache, dus elk verschil is puur
+code: **0 bestemmingen gewijzigd, 27 scores omhoog, 0 omlaag, 0 buiten de branch**. Tier D 633 →
+622, C 506 → 508, B 224 → 233, A ongewijzigd. Een willekeurige greep van 5.000 was hier zwakker
+geweest dan de volledige populatie: de wijziging laat `match_type` ongemoeid en kan dus niet
+bepalen wélke rijen in de branch belanden, alleen wat ze scoren zodra ze er zijn.
+
+- **Date**: 2026-09-02
+
 ## Een kindcategorie met een ander producttype zet dat product op 1 (2026-09-02, top-10 pijplijn)
 
 Op "de 10 beste matrassen" stond een **Emma Original Pro Topper**. De ranking had niets fout

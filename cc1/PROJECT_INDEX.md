@@ -734,7 +734,7 @@ Maps dead `/r/` search URLs to the best facet-filtered category page. Two pipeli
 - **`backend/rurl_optimizer_v2/process_global_rurls.py`** — maincat-less "mainpage" R-URLs (`/products/r/{kw}/`, ~10.5k) that the category parser rejects. Matches the keyword across all categories; patches results back into the full dataframe so category rows are preserved. Discovery order: (1) subcat-NAME match ≥95 → full in-subcat facet match; (1.5b) `[global_type_subcat]` — best-scoring type-facet value pinpoints a subcat, then full in-subcat match; (2) cross-type fallback; (3) low-threshold subcat name. Accepts both relative and absolute URL shapes (parser `_invalid_global` + domain-optional `GLOBAL_RURL_PATTERN`).
 - **Service**: `backend/rurl_optimizer_v2_service.py` runs both as subprocesses. Source=Redshift → "Mainpage R-urls" checkbox controls the global pass; manual + file upload → global pass always runs (auto-detects global URLs).
 - **Caches** (`backend/rurl_optimizer_v2/data/cache/search_derived.sqlite`): `search_cache` (V28, `SCHEMA_VERSION`) + `facet_probe_cache` (`PROBE_SCHEMA_VERSION`) — both version-stamped so logic changes auto-re-derive. `facets.csv` is a taxonomy snapshot and can be stale (miss newly-added facet values); niche values are recovered via a live subcat-level probe. Regression corpus: `data/output/e2e.csv` + `data/input/sample.csv`.
-- Deep design notes + gotchas: see cc1/LEARNINGS.md (2026-05-19 "V31 facet-probe", 2026-05-27 "facet-probe reachability / dom_cat semantics / two-pipeline routing", 2026-05-27 session 2 "global R-URL routing + facet-selection quality").
+- Deep design notes + gotchas: see cc1/LEARNINGS.md (2026-05-19 "V31 facet-probe", 2026-05-27 "facet-probe reachability / dom_cat semantics / two-pipeline routing", 2026-05-27 session 2 "global R-URL routing + facet-selection quality", 2026-09-02 "een score die het bewijs van de kále categorie meet" — waarom `dom_cat_share` een gefacetteerde bestemming afstraft, en dat een `return` halverwege `process_url_v2` de hele staart overslaat: V55-lift, V61-pruning én de V64-cap).
 
 ## Additional Documentation
 
@@ -750,4 +750,4 @@ For detailed architectural decisions, design patterns, and technology rationales
 - **cc1/GSD_LL_MYSTERY_RUN.md** — GSD low-linkage mystery run + kill switch.
 
 ---
-_Last updated: 2026-08-19_
+_Last updated: 2026-09-02_

@@ -3,6 +3,61 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-02 (6) — Auto-Redirects V65: de score zakte terwijl de match beter werd
+
+Joeps observatie op `/r/opbergkast_voor_balkon/`: eerst 72 naar de kale Opbergkasten, na de
+facet-fix 60 naar `…/c/ruimte~4945789` — betere match, slechtere score. Diagnose plus fix A+B
+in commit `1a0a897`; uitleg in LEARNINGS (zelfde datum, "Een score die het bewijs van de kále
+categorie meet").
+
+Gedaan:
+
+- [x] **Diagnose: twee losse oorzaken, geen van beide het facet.** De gefacetteerde bestemming
+      scoorde zelf óók 72 (run van 26-08 11:08). Daarna liep de 7-daagse TTL van de search-cache af
+      en ging `dom_cat_share` van 0.84 naar 0.37 (live nagemeten 0.38) → onder de 0.6-drempel → 45,
+      en V64 tilde het naar 60. De echte volgorde is 72 → 45 → 60.
+- [x] **Structurele oorzaak benoemd**: `dom_cat_share` meet de KALE categorie over de hele query,
+      dus een kwalificerend token dat een facetwaarde is ('balkon') kan die share alleen verdunnen
+      (Opbergkasten 271 tegen Wandkasten 93 / Voorraadkasten 88 / Dressoirs 66 / Archiefkasten 50).
+      Het juiste facet verlaagt dus het getal dat de bestemming beoordeelt.
+- [x] **Fix A — de overgeslagen lift**: de V28-reject → cross-maincat-fallback-return schreef
+      `h1_overlap: 0` hard en sloeg het gedeelde finals-blok over, inclusief de V55-lift. Nu
+      `_v55_lift()` als één helper die zowel die return als het finals-blok gebruikt. Dat verklaart
+      ook waarom de reviewsheet `h1_match: 0` toonde bij de gefacetteerde variant en 67 bij de kale.
+- [x] **Fix B — de nieuwe sport** (`_cross_maincat_rung()`, pure functie): een gefacetteerde
+      bestemming waarvan de H1 élk query-token dekt krijgt 72 in plaats van 60, achter V64's guard
+      (query moet de categorie noemen + search-leader moet die categorie zijn). Fragment is al op
+      bestaan getoetst in `_append_facet_to_subcat_redirect`, dus geen dode `/c/` erdoor.
+- [x] **Reason-tekst**: zei "unverified (no search evidence)" terwijl er bewijs wás (0.37, net onder
+      de bar). Nu `unverified: AND-leader is 'Opbergkasten' (38% share, 271 products)` — dat was de
+      diagnose-tijd waard.
+- [x] **A/B over 1.438 URL's** (de 738 rijen die deze branch ooit produceerde + 700 controle),
+      zelfde data-cache en warme search-cache: 0 bestemmingen gewijzigd, 27 scores omhoog, 0 omlaag,
+      0 buiten de branch. Tier D 633 → 622, C 506 → 508, B 224 → 233, A gelijk. Verschuivingen:
+      45→55 (11×), 72→82 (7×), 80→89 (7×), 60→82 (2×).
+- [x] **Joeps rij end-to-end**: 60 C → 82 B, `h1_overlap` 0 → 100, bestemming ongewijzigd.
+- [x] 8 tests in `tests/test_v65_faceted_cross_maincat.py` (ladder + lift, met de fietsen-berging
+      guard erbij).
+
+Nog te doen:
+
+- [ ] **De cross-maincat fallback door `score_search_derived`** met coverage tegen de EINDbestemming
+      (categorie + facetwaarden) en `target_is_faceted=True`, in plaats van de platte ladder
+      80/72/60/45. Dan verslaat een gefacetteerde variant de kale automatisch. Raakt de hele
+      populatie, dus eigen review + A/B.
+- [ ] **De staart van `process_url_v2` is niet gedeeld**: achter het finals-blok hangen de V55-lift,
+      de V61-fragmentpruning en de V64-cap, en elke `return` halverwege slaat ze over. `_v55_lift()`
+      dekt nu één van de drie. Overweeg één `_finalize()` die alle drie doet, zodat een nieuwe
+      return-plek niet stil de helft mist.
+- [ ] **`fetched_at` van het search-bewijs in de reviewsheet**, naast de share die nu in de reason
+      staat. Anders blijft "dezelfde URL scoorde vorige week anders" een handmatige zoektocht in
+      `search_derived.sqlite`.
+- [ ] **Dubbele facetwaarde in de H1** bij een twee-assige append: `Vloerkleden Buiten, Buiten`
+      (`ruimte_woonaccessoires~19960809~~t_vloerkleed~6993703`). Cosmetisch, zichtbaar in de sheet.
+- [ ] **Twee tests falen op HEAD** en stonden er al voor deze sessie:
+      `tests/test_v48_bridge_morphology.py::test_voicing_s_to_z` en `::test_double_vowel`
+      (`bridge("poot", "Poten")` is False). Uitzoeken of de morfologie of de test achterloopt.
+
 ### 2026-09-02 (5) — Top-10 koopgidsen: 14 URL's aangevuld tot 30 en alle 30 gedraaid
 
 Joeps opdracht in drie stappen: zijn lijst van 14 kandidaat-URL's aanvullen tot 30 met zoekvolumes
