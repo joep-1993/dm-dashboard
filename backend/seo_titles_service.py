@@ -1102,17 +1102,33 @@ def _post_page_titles(records, env):
 
 def update_blueprint(cat_id, key, title, h1_title, description):
     """Update the editable fields (title, h1_title, description) of a single
-    blueprint identified by (cat_id, key). Returns {"updated": <rowcount>}."""
+    blueprint identified by (cat_id, key).
+
+    Zet de status terug op 'built', anders bereikt de bewerking de site NOOIT.
+    publish_built() selecteert uitsluitend `status = 'built'`, en op 2026-09-02
+    stonden alle 86.124 rijen op 'pushed' — dus dit was de enige status die de
+    edit-UI ooit tegenkwam. Je kreeg `{"updated": 1}` terug en er gebeurde niets.
+    Zelfde gedrag als upsert_blueprint_built() voor de create-kant.
+
+    `pushed_at` blijft expres staan: dat is "wanneer stond deze tekst voor het
+    laatst live", en samen met status='built' leest de rij nu als "gepusht op X,
+    daarna bewerkt". publish_built() zet hem bij de volgende push zelf goed.
+
+    Returns {"updated": <rowcount>, "status": "built"} — de aanroeper kan daarmee
+    zeggen dat er nog gepubliceerd moet worden.
+    """
     conn = get_db_connection()
     cur = conn.cursor()
     try:
         cur.execute("""
             UPDATE pa.seo_titles_blueprints
-            SET title = %s, h1_title = %s, description = %s
+            SET title = %s, h1_title = %s, description = %s, status = 'built'
             WHERE cat_id = %s AND key = %s
         """, (title, h1_title, description, int(cat_id), key))
         conn.commit()
-        return {"updated": cur.rowcount}
+        n = cur.rowcount
+        return {"updated": n, "status": "built" if n else None,
+                "needs_publish": bool(n)}
     finally:
         cur.close()
         return_db_connection(conn)

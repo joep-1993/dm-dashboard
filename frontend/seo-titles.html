@@ -745,7 +745,19 @@
                     row.title = payload.title;
                     row.h1_title = payload.h1_title;
                     row.description = payload.description;
+                    // De backend zet de rij terug op 'built' — publish_built() kijkt
+                    // uitsluitend naar die status, dus zonder dat bereikte een bewerking
+                    // de site nooit. De lokale rij en de tellers moeten dus mee, en de
+                    // gebruiker moet weten dat er nog een Publish nodig is.
+                    if (d.status) row.status = d.status;
                     renderPreview();
+                    await loadStats();      // Built-teller gaat omhoog
+                    if (d.needs_publish) {
+                        showDoneBanner('publishDone',
+                            'Opgeslagen als <strong>Built</strong>. De wijziging staat nog ' +
+                            'niet live — klik <strong>Publish</strong> om hem naar ' +
+                            '/page-titles te sturen.', 'cancelled');
+                    }
                 }
             } catch (e) {
                 res.className = 'small mb-2 text-danger';
