@@ -37,6 +37,7 @@ import json
 import logging
 import os
 import random
+import html as html_lib
 import re
 from datetime import datetime
 from pathlib import Path
@@ -45,14 +46,19 @@ from urllib.parse import urlsplit
 
 import requests
 
+from backend import taxv2_client as taxv2
 from backend.database import get_db_connection, return_db_connection
 
 logger = logging.getLogger(__name__)
 
 USER_AGENT = "Beslist script voor SEO"
 SITE_BASE = "https://www.beslist.nl"
-TAX_BASE = "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl"
-TAX_HEADERS = {"X-User-Name": "SEO_JOEP", "Accept": "application/json"}
+# Gedeelde client: één base-URL, één headerset, en retry op 502/503/504.
+# Dat laatste is hier niet cosmetisch — _is_category_active() cachet een mislukte
+# lookup als False voor de rest van de run, dus één blip haalde een categorie uit
+# elke steekproef. Zie backend/taxv2_client.py.
+TAX_BASE = taxv2.BASE
+TAX_HEADERS = taxv2.headers()
 TIMEOUT = 30
 FACET_LOOKUP_MAX_TRIES = 60
 
@@ -78,7 +84,22 @@ HTML_SITEMAP_URLS = [
 # parfum_aftershave, xkQIJ on schoenen), so we match the stable prefix.
 SITEMAP_ITEM_CLASS = "sitemap__item--"
 
-NOSCRIPT_TITLE_CLASS = "noScript__title--LfAWg"
+# Alleen de STABIELE prefix, net als SITEMAP_ITEM_CLASS en BASEMENT_LAYOUTS. De
+# `--XXXXX`-suffix is een per-build CSS-module-hash; hier stond die hash bevroren
+# ("noScript__title--LfAWg") als exacte string-needle, en het comment tien regels
+# lager legt precies uit waarom dat de basement-check al een keer sloopte. Bij de
+# volgende site-build zouden check 1 en 2 tegelijk rood zijn gegaan.
+# Ook tolerant voor extra attributen, witruimte en HTML-escaping van de tekst.
+NOSCRIPT_TITLE_CLASS_PREFIX = "noScript__title--"
+
+
+def _noscript_title_re(text: str):
+    esc = re.escape(text)
+    esc_html = re.escape(html_lib.escape(text, quote=False))
+    alt = esc if esc == esc_html else f"(?:{esc}|{esc_html})"
+    return re.compile(
+        r'<div[^>]*class="' + re.escape(NOSCRIPT_TITLE_CLASS_PREFIX) + r'\w+"[^>]*>\s*'
+        + alt + r'\s*</div>')
 
 # Basement links — the block of internal links on a category page. The site is
 # migrating from the old "Trending" markup (`basementlinks__group` holding
@@ -100,6 +121,10 @@ BASEMENT_LAYOUTS = (
     ("basementlinks", re.compile(r"basementlinks__group--\w+"), re.compile(r"basementlinks__link--\w+")),
 )
 
+# Eigen sessie voor de LIVE pagina's van beslist.nl. Bewust niet de taxv2-sessie:
+# die draagt X-User-Name als default-header, en dat hoort niet mee te liften naar
+# de site (waar de WAF op de UA stuurt). De UA wordt per request meegegeven in
+# _fetch(), dus die blijft leidend.
 _SESSION = requests.Session()
 
 # Per-run cache of taxv2 /api/Categories/{id}.isEnabled lookups.
@@ -114,6 +139,23 @@ _HTML_CACHE: Dict[str, Tuple[Optional[str], int]] = {}
 # following 30x redirects) — the title-variable check uses this to skip a URL
 # that no longer serves its own page and sample another instead.
 _REDIRECT_CACHE: Dict[str, Tuple[bool, str]] = {}
+
+# Steekproef-RNG, per run gezaaid. Hiervoor stonden hier twee kale
+# random.shuffle()'s en een ORDER BY random(), waardoor twee runs tegen een
+# ONVERANDERDE site zes totaal andere pagina's toetsten. Run N vergelijken met
+# run N-1 — waar pa.seo_rulings_runs voor bestaat — mat dan steekproefvariantie
+# in plaats van sitegezondheid. De seed gaat mee in de run-samenvatting, dus een
+# afwijking is na te spelen met dezelfde pagina's.
+_RNG = random.Random()
+_SEED: int = 0
+
+
+def _seed_run(seed: Optional[int] = None) -> int:
+    """Zaai de steekproef voor deze run en geef de gebruikte seed terug."""
+    global _SEED
+    _SEED = int(seed) if seed is not None else int(datetime.now().strftime("%Y%m%d"))
+    _RNG.seed(_SEED)
+    return _SEED
 
 
 def _clear_run_caches() -> None:
@@ -132,7 +174,7 @@ def _is_category_active(cat_id: str) -> bool:
     if cat_id in _ACTIVE_CACHE:
         return _ACTIVE_CACHE[cat_id]
     try:
-        r = _SESSION.get(
+        r = taxv2.session().get(
             f"{TAX_BASE}/api/Categories/{cat_id}",
             params={"locale": "nl-NL", "includeSubCategories": "false", "includeFacets": "false"},
             headers=TAX_HEADERS,
@@ -218,7 +260,7 @@ def _iter_live(
     if not pool:
         return
     shuffled = list(pool)
-    random.shuffle(shuffled)
+    _RNG.shuffle(shuffled)
     for row in shuffled[:SAMPLE_MAX_TRIES]:
         cat_id = str(row[cat_id_key])
         if not _is_category_active(cat_id):
@@ -227,6 +269,15 @@ def _iter_live(
         _, status = _fetch(url)
         if status == 404 or status == 0:
             logger.info(f"[SEO_RULINGS] skipping cat {cat_id} ({url}) — status {status}")
+            continue
+        # Een categorie die 301't naar zijn parent of de homepage geeft gewoon 200
+        # terug, en checks 1 en 3 beoordeelden dan de HTML van het DOEL onder de naam
+        # van de gesamplede URL — een homepage met een "Kies categorie"-noscriptkop is
+        # zo een regelrecht vals groen. _fetch vult _REDIRECT_CACHE al; alleen
+        # _check_variable las hem. Nu ook hier: opnieuw sampelen in plaats van beoordelen.
+        redirected, final_url = _REDIRECT_CACHE.get(url, (False, url))
+        if redirected:
+            logger.info(f"[SEO_RULINGS] skipping cat {cat_id} ({url}) — redirect naar {final_url}")
             continue
         yield row, url
 
@@ -400,8 +451,7 @@ def _fetch(url: str) -> Tuple[Optional[str], int]:
 # HTML probes
 # ---------------------------------------------------------------------------
 def _has_noscript_title(html: str, text: str) -> bool:
-    needle = f'<div class="{NOSCRIPT_TITLE_CLASS}">{text}</div>'
-    return needle in html
+    return bool(_noscript_title_re(text).search(html or ""))
 
 
 def _check_sitemaps(urls: List[str]) -> Tuple[bool, List[Dict]]:
@@ -412,8 +462,18 @@ def _check_sitemaps(urls: List[str]) -> Tuple[bool, List[Dict]]:
     details: List[Dict] = []
     for url in urls:
         body, http_status = _fetch(url)
-        present = http_status == 200 and bool(body and body.strip())
-        details.append({"url": url, "present": present, "http_status": http_status})
+        # Niet alleen "200 met iets erin": de docstring belooft XML, en een
+        # sitemap-route die de SPA-shell of een WAF-pagina gaat serveren gaf een
+        # groene regel in Slack. Ook het aantal <loc>'s meenemen, dan is een
+        # afgekapte sitemap zichtbaar.
+        looks_xml = bool(body) and ("<urlset" in body or "<sitemapindex" in body)
+        present = http_status == 200 and looks_xml
+        url_count = body.count("<loc>") if body else 0
+        details.append({"url": url, "present": present, "http_status": http_status,
+                        "url_count": url_count,
+                        "detail": None if present else (
+                            "geen XML in de respons" if http_status == 200 and not looks_xml
+                            else None)})
         if not present:
             failed = True
     return failed, details
@@ -476,7 +536,7 @@ def _iter_priority_facet_combos():
     maincat_by_name = {m["name"]: m for m in maincats}
 
     eligible = [r for r in cat_urls if r["maincat"] in maincat_by_name]
-    random.shuffle(eligible)
+    _RNG.shuffle(eligible)
 
     tries = 0
     for row in eligible:
@@ -487,7 +547,7 @@ def _iter_priority_facet_combos():
         if not _is_category_active(str(cat_id)):
             continue
         try:
-            settings_resp = _SESSION.get(
+            settings_resp = taxv2.session().get(
                 f"{TAX_BASE}/api/CategoryFacetSettings",
                 params={"categoryId": cat_id},
                 headers=TAX_HEADERS,
@@ -506,20 +566,26 @@ def _iter_priority_facet_combos():
             if not prio_facet_ids:
                 continue
 
-            facets_resp = _SESSION.get(
-                f"{TAX_BASE}/api/CategoryFacets",
-                params={"categoryId": cat_id, "locale": "nl-NL"},
+            # /api/Categories/{id}.facets, NIET /api/CategoryFacets. Dat laatste laat
+            # facetten met inheritanceStatus=Dependent stil weg — en dat is precies de
+            # klasse die deze check moet betrappen (een dependent facet krijgt nooit een
+            # SEO-facetlink omdat het geen CategoryFacets-rij heeft). Zolang we daaruit
+            # sampleden kon check 2 zijn eigen bug per constructie niet vinden.
+            # Gemeten op cat 9003374 (2026-09-02): CategoryFacets 25 facetten,
+            # Categories.facets 243 — waarvan 215 Dependent, inclusief facet 3821.
+            # Let op de andere veldnamen: `facetId` in plaats van een genest facet.id.
+            facets_resp = taxv2.session().get(
+                f"{TAX_BASE}/api/Categories/{cat_id}",
+                params={"locale": "nl-NL"},
                 headers=TAX_HEADERS,
                 timeout=TIMEOUT,
             )
             if facets_resp.status_code != 200:
                 continue
-            facets_data = facets_resp.json()
-            facet_items = facets_data if isinstance(facets_data, list) else facets_data.get("items", [])
+            facet_items = (facets_resp.json() or {}).get("facets") or []
             combo = None
-            for cf in facet_items:
-                facet = cf.get("facet") or cf
-                fid = facet.get("id")
+            for facet in facet_items:
+                fid = facet.get("facetId")
                 if fid not in prio_facet_ids:
                     continue
                 labels = facet.get("labels") or []
@@ -539,6 +605,9 @@ def _iter_priority_facet_combos():
                     "cat_url": cat_url,
                     "facet_id": fid,
                     "facet_name": facet_name,
+                    # Handig in de Details-tabel: een Dependent facet dat hier faalt is
+                    # de bekende bug, geen nieuwe regressie.
+                    "inheritance": facet.get("inheritanceStatus"),
                 }
                 break  # only one combo per category
         except Exception as e:
@@ -593,13 +662,14 @@ def _check_variable(
             FROM pa.unique_titles_content c
             JOIN pa.urls u ON c.url_id = u.url_id
             WHERE c.{column} LIKE %s
-            ORDER BY random()
+            ORDER BY md5(u.url || %s)
             LIMIT %s
         """
         # Fetch extra rows so we can skip 404s / redirected URLs AND retry a
         # failed substitution on a fresh URL, and still have enough live
         # candidates left to fill every slot.
-        cur.execute(sql, (f"%{placeholder}%", limit * (RETRY_MAX_ATTEMPTS + 5)))
+        cur.execute(sql, (f"%{placeholder}%", str(_SEED),
+                          limit * (RETRY_MAX_ATTEMPTS + 5)))
         rows = cur.fetchall()
     finally:
         cur.close()
@@ -685,6 +755,11 @@ def _check_variable(
                 # slot isn't silently dropped from the report.
                 used = skipped[-1]
             else:
+                # Zonder deze regel bleef `findings` leeg en gaf any([]) False:
+                # groen zonder één gecontroleerde pagina.
+                findings.append({
+                    "variable": placeholder, "status": "no_candidates",
+                    "detail": "kandidatenpool uitgeput zonder bruikbare pagina"})
                 break  # candidate pool exhausted; stop filling slots
         findings.append({**used, "superseded": attempts[:-1] if attempts else [], "skipped": skipped})
     return findings
@@ -705,7 +780,12 @@ def _check_title_variables() -> Dict:
         extract="title", success_pattern=re.compile(r"(?:19|20)\d{2}"),
     )
 
-    failed = any(f["status"] in ("failed", "no_rows") for f in findings)
+    # Alles wat niet expliciet "ok" is telt als falen. Hiervoor stond hier een
+    # allowlist van twee statussen, terwijl _check_variable ook "fetch_error",
+    # "skipped" en (nieuw) "no_candidates" produceert — als élke kandidaat 404'de
+    # of redirectte ging de check groen. Een lege lijst is ook falen: dan is er
+    # niets gecontroleerd.
+    failed = (not findings) or any(f.get("status") != "ok" for f in findings)
     return {"findings": findings, "failed": failed}
 
 
@@ -785,9 +865,15 @@ CHECK_LABELS = {
 }
 
 
-def run_all_checks() -> Dict:
-    """Run every SEO check and return the full summary."""
+def run_all_checks(seed: Optional[int] = None) -> Dict:
+    """Run every SEO check and return the full summary.
+
+    `seed` bepaalt WELKE pagina's gesampled worden. Default is de datum, zodat een
+    run van vandaag reproduceerbaar is en twee opeenvolgende dagen alsnog andere
+    pagina's zien. Geef een eerdere seed mee om een run exact na te spelen.
+    """
     _clear_run_caches()
+    used_seed = _seed_run(seed)
     started_at = datetime.utcnow()
     results: Dict = {"checks": {}, "details": {}}
 
@@ -922,11 +1008,17 @@ def run_all_checks() -> Dict:
         "passed": passed,
         "failed": failed,
         "retries": retries,
+        # Zonder deze is een run niet na te spelen en run-op-run niet te vergelijken.
+        "seed": used_seed,
         "slack": slack_result,
         "slack_text": slack_text,
     }
     results["started_at"] = started_at.isoformat() + "Z"
     results["finished_at"] = finished_at.isoformat() + "Z"
+    # _HTML_CACHE houdt de volledige HTML van elke opgehaalde pagina vast (tot ~150
+    # categoriepagina's). Uvicorn draait zonder --reload, dus zonder deze regel blijft
+    # dat in het proces staan tot iemand de volgende run start.
+    _clear_run_caches()
 
     try:
         run_id = _persist_run(started_at, finished_at, results)

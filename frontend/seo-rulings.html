@@ -669,13 +669,20 @@
         }
 
         function statusCell(status) {
+            // Alles wat niet "ok" is telt in de backend als falen, dus laat het hier
+            // ook niet als neutraal zien. "pending" alleen voor de statussen die
+            // echt betekenen "nog niets gemeten".
             const map = {
                 ok: "pass",
                 failed: "fail",
                 fetch_error: "fail",
+                skipped: "fail",
+                no_candidates: "fail",
+                no_sample: "fail",
+                no_priority_facets_found: "fail",
                 no_rows: "pending",
             };
-            const cls = map[status] || "pending";
+            const cls = map[status] || "fail";
             return `<span class="check-status ${cls}">${escapeHtml(status || "—")}</span>`;
         }
 
