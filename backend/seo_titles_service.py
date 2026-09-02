@@ -132,12 +132,17 @@ TAIL_TITLE = 'kopen? ✔️ Tot !!DISCOUNT!! korting! | beslist.nl'
 # letterlijke tekens `&#10062;`. In de nog-onvervangen JSON-blob op diezelfde pagina
 # staat de entity wél rauw; het is dus puur de meta-tag-route.
 #
-# LET OP, dit raakt 86.123 bestaande rijen én de legacy-templates in
-# pa.page_titles_existing (8.791 keer dezelfde entity), dus het is niet alleen van ons.
-# Keuze van hét teken: &#10062; is U+274E (❎, rood kruis) — vrijwel zeker niet wat
-# bedoeld was. TAIL_TITLE hierboven gebruikt ✔️, en de description is daar de tegenhanger
-# van, dus die is aangehouden. Eén regel om te wijzigen als Joep iets anders wil.
-DESC_BULLET = '✔️'
+# Keuze van hét teken: &#10062; is U+274E, oftewel ❎. Joep heeft op 2026-09-02 bevestigd
+# dat dat het bedoelde teken is — dus geen inhoudelijke wijziging, alleen de codering:
+# het echte karakter in plaats van de entity. (TAIL_TITLE hierboven gebruikt ✔️; die
+# twee mogen verschillen, titel en description zijn niet hetzelfde blok.)
+#
+# De 86.123 bestaande rijen zijn op 2026-09-02 omgezet met een gerichte
+# REPLACE(description, '&#10062;', '❎') en opnieuw gepusht (18 batches, 0 fouten).
+# Backup: pa.seo_titles_blueprints_bak_20260902. NOG NIET omgezet: de legacy-templates
+# in pa.page_titles_existing, die dezelfde entity 8.791 keer dragen — dat is een andere
+# tabel en een andere beslissing.
+DESC_BULLET = '❎'
 # /page-titles rejects a title over this many characters (400 "too long").
 MAX_TITLE_LEN = 200
 # /page-titles enforces this on h1_title as well (learned the hard way: one 205-char

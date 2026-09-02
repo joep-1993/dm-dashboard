@@ -134,6 +134,46 @@ tegen een limiet van 2 uur.
       dezelfde vorm als de valse-groen-paden uit fase 1. Overweeg `raise_for_status()` op 429 zodra
       er één opduikt.
 
+### 2026-09-02 (4) — SEO Titles: bullet omgezet en 836 titels geregenereerd, allebei live
+
+Vervolg op de audit. Twee re-pushes naar `/page-titles`, allebei met een gate vooraf en een
+backup.
+
+- [x] **De bullet.** `&#10062;` stond als letterlijke tekst in de template; de site substitueert
+      eerst de placeholders en HTML-escapet daarna bij het injecteren in de meta-tag, dus Google
+      las drie keer per description de tekens `&#10062;`. Joep bevestigde dat ❎ (U+274E) het
+      bedoelde teken is, dus dit was alleen een coderingsfix. Gerichte
+      `REPLACE(description, '&#10062;', '❎')` op 86.123 rijen — **bewust niet geregenereerd**,
+      anders had de tekst veel meer veranderd. **18 batches, 0 fouten, 1.792 s.**
+- [x] **836 titels + 547 H1's geregenereerd** en gepusht (1 batch, 0 fouten, 20 s).
+- [x] **Gate beide keren:** één record eerst, dan via `get_store_record()` bevestigen dat de
+      store het echte teken houdt. Dat kon níét via de live pagina — CloudFront cachet deze URL's
+      met `max-age` 7 dagen (`age` was 14.538 s) en querystrings zitten niet in de cache key, dus
+      een cache-buster geeft dezelfde respons. De HTML volgt zodra de TTL verloopt.
+- [x] **Backups:** `pa.seo_titles_blueprints_bak_20260902` (description + status + pushed_at) en
+      `pa.seo_titles_titles_bak_20260902` (title + h1 + status). Terugdraaien is een
+      `UPDATE … FROM` weg. Mogen weg zodra Joep tevreden is.
+
+**Wat ik onderweg moest rechtzetten.** Ik meldde eerst "836 titels die de auditfix repareert".
+Dat klopte niet. Gemeten tegen de code van vóór `24a63ac`: **145 komen door de auditfix**
+(identity-parents, type-facet terug als noun) en **691 zijn oude drift** — grotendeels blueprints
+van vóór `TAIL_TITLE` het vinkje kreeg, plus een paar gewijzigde facet-positieregels. Joep koos
+bewust voor alle 836, zodat store en generator weer gelijklopen. Les: meet het verschil tussen
+"mijn wijziging" en "bestaande achterstand" vóór je een getal noemt.
+
+**Open:**
+
+- [ ] **De legacy-templates in `pa.page_titles_existing`** dragen dezelfde entity 8.791 keer.
+      Andere tabel, andere beslissing — niet aangeraakt.
+- [ ] **Cat 9002870 / `productlijn_koffiepads~s_boon~s_smaak`** heeft nu het juiste teken, maar
+      houdt nog `!!sub_category!!` op de tweede plek in plaats van de volle frase (handmatige
+      ingreep van 27-08, inmiddels achterhaald).
+- [ ] **ST-M5 blijft staan** en is hier bevestigd: `publish_built` kijkt alleen naar
+      `status='built'`, en `update_blueprint` zet die status niet terug. Een bewerking via de UI
+      bereikt de site dus nooit. Ik omzeilde dat door de status in de bulk-UPDATE zelf te zetten.
+- [ ] **Overzicht van de 836** in `Downloads\claude\seo_titles_wijzigingen_20260902.xlsx`
+      (cat_id, key, reden, oud/nieuw voor titel en H1).
+
 ### 2026-09-02 (3) — Audit van de acht nooit-geauditeerde tools, fase 0 t/m 5 — volledig register in `cc1/AUDIT_ACHT_20260902.md`
 
 Joep vroeg eerst welke dashboard-tools nog nooit een `/audit` hadden gehad, daarna om die te
