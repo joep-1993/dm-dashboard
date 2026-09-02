@@ -679,4 +679,11 @@ def delete_history_entry(task_id: str) -> bool:
         pers.delete_run_output(task_id)
     except Exception as e:
         logger.warning(f"delete_run_output failed: {e}")
+    # Drop the parsed copy the doorvoeren screen memoizes, so a task_id that
+    # ever comes back cannot be served rows from a run that no longer exists.
+    try:
+        from backend import rurl_results
+        rurl_results.invalidate(task_id)
+    except Exception as e:
+        logger.warning(f"rurl_results.invalidate failed: {e}")
     return removed

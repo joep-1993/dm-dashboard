@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, Response
 from typing import Optional
 
 from backend import rurl_optimizer_service as svc
+from backend import rurl_results
 
 router = APIRouter(prefix="/api/rurl", tags=["rurl"])
 
@@ -89,6 +90,42 @@ def download(task_id: str):
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
+
+@router.get("/results/{task_id}")
+def results(task_id: str, min_score: int = 90, limit: int = 5000):
+    """Rows of a finished run, for the "doorvoeren" selection screen.
+
+    Reads the run's stored xlsx back (same bytes /download serves), so a run
+    from any point in the history can be pushed, not just the one on screen.
+    """
+    try:
+        data = rurl_results.run_results(task_id, min_score=min_score, limit=limit)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    if data is None:
+        raise HTTPException(404, "No output for this task")
+    return data
+
+
+@router.get("/export")
+def export_runs(task_ids: str):
+    """Combined export of the runs selected in Recent runs.
+
+    `task_ids` is a comma-separated list. The stored-output table is shared
+    between the engine versions, so this serves a mixed v1/v2 selection.
+    """
+    ids = [t.strip() for t in task_ids.split(",") if t.strip()]
+    if not ids:
+        raise HTTPException(400, "No task_ids given")
+    blob = rurl_results.export_runs(ids)
+    if not blob:
+        raise HTTPException(404, "None of the selected runs has stored output")
+    filename, mime, content = blob
+    return Response(
+        content=content,
+        media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 @router.get("/history")
 def history():

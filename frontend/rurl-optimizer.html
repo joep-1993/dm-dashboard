@@ -38,11 +38,52 @@
            omdat btn-outline-danger toen oranje was; die groep is nu ook rood.
            Oranje is in deze tabel de 'cancelled'-status, dus een oranje knop
            ernaast zou de kolom tegenspreken. Disabled blijft grijs (nooit rood),
-           per UI_BLUEPRINT; de regel hieronder haalt alleen Bootstraps opacity
-           weg zodat dat grijs vlak is. */
-        .btn-remove:disabled { opacity: 1; }
+           per UI_BLUEPRINT — `.btn:disabled` in style.css doet dat inmiddels vlak
+           voor elke knopklasse, dus de opacity-regel die hier stond is weg. */
         /* Round checkboxes to match the radio buttons above (File upload / Redshift / Manual input). */
         .form-check-input[type="checkbox"] { border-radius: 50%; }
+        /* --- Push Redirects (push a run's redirects to production) --------
+           Same visual language as the selection table in Canonicals and the
+           Redirect Generator, which feed the same /api/redirect-tool pair. */
+        .url-cell { font-family: monospace; font-size: 0.78rem; word-break: break-all; white-space: normal; }
+        /* Selection counter. A page-local class rather than `.badge.bg-*`:
+           style.css re-themes Bootstrap's colour names to grey and the
+           put-it-back rules are not reliable (UI_BLUEPRINT §Labels / badges). */
+        .sel-count { background-color: #8b7bb5; }
+        /* Body cells get the header's 14px horizontal padding. Bootstrap's
+           .table-sm gives a td 4px, which leaves every value 10px left of its
+           own column head (UI_BLUEPRINT §Tables). Scoped to this table so the
+           Recent runs widths above stay where they are. */
+        #pushTable th, #pushTable td { padding: 6px 14px; }
+        #pushTableWrap { max-height: 520px; }
+        /* Recent runs: fixed widths so a value never bleeds into the next column
+           and the columns stop moving when you sort a different one. Message was
+           soaking up slack it did not need; Input now carries the longer value.
+           The four narrow columns get the px their content actually measures
+           (timestamp, "Version" + its sort glyph, the status badge, the View
+           button); Input takes a share of what is left and Message the rest —
+           so on a wide window Message still shows in full, and on a 1366 laptop
+           it is the one column that ellipsises, which is the right one to lose:
+           it is prose, and the full text is on the cell's title. */
+        #historyTable { table-layout: fixed; width: 100%; }
+        #historyTable th.col-check   { width: 42px; }
+        #historyTable th.col-started { width: 145px; }
+        #historyTable th.col-version { width: 88px; }
+        #historyTable th.col-status  { width: 96px; }
+        #historyTable th.col-input   { width: 21%; }
+        #historyTable th.col-output  { width: 80px; }
+        /* Fixed widths need containment. Single-line ellipsis, with the full
+           value on the cell's title (UI_BLUEPRINT §Tables). */
+        #historyTable td.cell-clip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        /* Score colour = reliability tier (reliability_scorer.get_reliability_tier).
+           Never grey — grey reads as "no value" (UI_BLUEPRINT §Labels).
+           Qualified with the table id on purpose: Bootstrap paints cell text via
+           `.table > :not(caption) > * > *`, which outranks a bare class and left
+           every score the default near-black. */
+        #pushTable td.tier-A { color: #1a7f37; font-weight: 600; }
+        #pushTable td.tier-B { color: #5e4a90; font-weight: 600; }
+        #pushTable td.tier-C { color: #CC5500; font-weight: 600; }
+        #pushTable td.tier-D { color: #c03b3b; font-weight: 600; }
     </style>
 </head>
 <body>
@@ -221,8 +262,70 @@
 
                         <div class="log-output" id="logOutput"></div>
 
-                        <div class="mt-3 d-none d-flex justify-content-end" id="downloadWrap">
-                            <a href="#" class="btn btn-success" id="downloadBtn">Download results Excel</a>
+                        <div class="mt-3 d-none d-flex justify-content-end gap-2" id="downloadWrap">
+                            <a href="#" class="btn btn-outline-orange" id="downloadBtn">Download results Excel</a>
+                            <button type="button" class="btn btn-run" id="pushOpenBtn">View</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-4 d-none" id="pushCard">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Push Redirects</h5>
+                        <span class="text-muted" style="font-size: 0.8rem;" id="pushRunLabel"></span>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="checkbox" id="pushSelectAll" title="Selecteer alle zichtbare rijen">
+                            </div>
+                            <div class="input-group input-group-sm" style="max-width: 265px;">
+                                <span class="input-group-text">Score vanaf</span>
+                                <select id="pushMinScore" class="form-select" title="Toon en selecteer alle redirects met minstens deze betrouwbaarheidsscore. Tier A (>= 90) is wat de engine veilig voor productie noemt."></select>
+                            </div>
+                            <div class="input-group input-group-sm" style="max-width: 260px;">
+                                <span class="input-group-text">Filter</span>
+                                <input type="text" id="pushFilter" class="form-control" placeholder="filter op URL-deel...">
+                                <button class="btn btn-outline-secondary" type="button" id="pushFilterClear">&times;</button>
+                            </div>
+                            <div class="input-group input-group-sm" style="max-width: 170px;">
+                                <span class="input-group-text">Statuscode</span>
+                                <select id="pushStatusCode" class="form-select">
+                                    <option value="301" selected>301</option>
+                                    <option value="302">302</option>
+                                </select>
+                            </div>
+                            <div class="input-group input-group-sm" style="max-width: 155px;">
+                                <span class="input-group-text">Land</span>
+                                <select id="pushCountry" class="form-select">
+                                    <option value="NL+BE" selected>NL+BE</option>
+                                    <option value="NL">NL</option>
+                                    <option value="BE">BE</option>
+                                </select>
+                            </div>
+                            <span id="pushSelCount" class="badge sel-count ms-auto">0 geselecteerd</span>
+                        </div>
+                        <p class="text-muted mb-2" style="font-size: 0.82rem;" id="pushSummary"></p>
+                        <div class="alert alert-warning py-2 px-3 d-none" style="font-size: 0.82rem;" id="pushTruncWarn"></div>
+                        <div class="tool-table-wrap" id="pushTableWrap">
+                            <table class="table table-sm table-hover tool-table" id="pushTable">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th style="width: 40px"></th>
+                                        <th class="col-center" style="width: 70px">Score</th>
+                                        <th>Oude URL (R-url)</th>
+                                        <th>Nieuwe URL</th>
+                                        <th class="col-center" style="width: 90px" title="Producten achter de bestemming">Producten</th>
+                                        <th class="col-center" style="width: 80px">Visits</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pushBody">
+                                    <tr><td colspan="6" class="text-muted text-center p-3">Nog geen run geladen</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="d-flex justify-content-end mt-3">
+                            <button id="pushBtn" class="btn btn-run" disabled>Push</button>
                         </div>
                     </div>
                 </div>
@@ -237,18 +340,27 @@
                             <table class="table table-sm table-hover tool-table" id="historyTable">
                                 <thead class="table-light">
                                     <tr>
-                                        <th class="sortable" data-sort="started_at" onclick="sortHistory('started_at')" title="Times are shown in your local timezone">Started</th>
-                                        <th class="sortable col-center" data-sort="_version" onclick="sortHistory('_version')">Version</th>
-                                        <th class="sortable" data-sort="status" onclick="sortHistory('status')">Status</th>
-                                        <th class="sortable" data-sort="_filename" onclick="sortHistory('_filename')">Input</th>
-                                        <th>Message</th>
-                                        <th>Output</th>
+                                        <th class="col-check"><input class="form-check-input" type="checkbox" id="runSelectAll" title="Select all runs"></th>
+                                        <th class="sortable col-started" data-sort="started_at" onclick="sortHistory('started_at')" title="Times are shown in your local timezone">Started</th>
+                                        <th class="sortable col-center col-version" data-sort="_version" onclick="sortHistory('_version')">Version</th>
+                                        <th class="sortable col-status" data-sort="status" onclick="sortHistory('status')">Status</th>
+                                        <th class="sortable col-input" data-sort="_filename" onclick="sortHistory('_filename')">Input</th>
+                                        <th class="col-message">Message</th>
+                                        <th class="col-output">Output</th>
                                     </tr>
                                 </thead>
                                 <tbody id="historyBody">
-                                    <tr><td colspan="6" class="text-muted text-center p-3">No runs yet</td></tr>
+                                    <tr><td colspan="7" class="text-muted text-center p-3">No runs yet</td></tr>
                                 </tbody>
                             </table>
+                        </div>
+                        <div class="d-flex align-items-center gap-2 mt-3">
+                            <span id="runSelCount" class="badge sel-count">0 selected</span>
+                            <div class="ms-auto d-flex gap-2">
+                                <button type="button" class="btn btn-outline-orange btn-sm" id="runExportBtn" disabled
+                                        title="Download the selected runs. One run gives you its own file; several are merged into one workbook with a leading `run` column.">Export</button>
+                                <button type="button" class="btn btn-outline-red btn-sm" id="runRemoveBtn" disabled>Remove</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -257,6 +369,21 @@
         </div>
     </div>
 
+    <!-- Push Redirects: preflight + confirm, same modal as the Redirect Generator -->
+    <div class="modal fade" id="pushModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header text-white" style="background-color: var(--color-navbar);">
+                    <h5 class="modal-title">Push redirects to production</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Sluiten"></button>
+                </div>
+                <div class="modal-body" id="pushModalBody"></div>
+                <div class="modal-footer" id="pushModalFooter"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         let currentTaskId = null;
         let currentApiBase = null;
@@ -395,8 +522,12 @@
                     document.getElementById('runBtn').disabled = false;
                     document.getElementById('cancelBtn').classList.add('d-none');
                     if (t.status === 'completed') {
+                        const base = currentApiBase || apiBase();
                         document.getElementById('downloadWrap').classList.remove('d-none');
-                        document.getElementById('downloadBtn').href = (currentApiBase || apiBase()) + '/download/' + currentTaskId;
+                        document.getElementById('downloadBtn').href = base + '/download/' + currentTaskId;
+                        const pb = document.getElementById('pushOpenBtn');
+                        pb.dataset.pushBase = base;
+                        pb.dataset.pushTask = currentTaskId;
                     }
                     loadHistory();
                 }
@@ -462,10 +593,14 @@
         let historySortCol = 'started_at';
         let historySortDir = 'desc';   // newest run first
 
+        // Selected runs, keyed by task_id. Kept outside renderHistory so a sort
+        // or a history refresh does not silently drop the selection.
+        let runSelected = new Set();
+
         function historySkeletonRows(n = 5) {
-            // 6 columns: Started, Version, Status, Input, Message, Output
+            // 7 columns: checkbox, Started, Version, Status, Input, Message, Output
             const cell = '<td><span class="skel-bar"></span></td>';
-            return ('<tr class="skel-row">' + cell.repeat(6) + '</tr>').repeat(n);
+            return ('<tr class="skel-row">' + cell.repeat(7) + '</tr>').repeat(n);
         }
 
         function sortHistory(col) {
@@ -492,7 +627,8 @@
         function renderHistory() {
             const tbody = document.getElementById('historyBody');
             if (!historyRows.length) {
-                tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center p-3">No runs yet</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center p-3">No runs yet</td></tr>';
+                updateRunSelectionCount();
                 return;
             }
             const dir = historySortDir === 'asc' ? 1 : -1;
@@ -508,24 +644,32 @@
 
             tbody.innerHTML = rows.map(h => {
                 const started = h.started_at ? new Date(h.started_at).toLocaleString() : '—';
-                const dl = h.status === 'completed' && h.task_id && h.output_in_db
-                    ? `<a href="${h._base}/download/${h.task_id}" class="btn btn-sm btn-outline-purple" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">Export</a>`
-                    : '';
-                const rm = h.task_id
-                    ? `<button type="button" class="btn btn-sm btn-outline-red btn-remove" data-rm-base="${h._base}" data-rm-task="${h.task_id}" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">Remove</button>`
-                    : '';
-                const actions = (dl || rm)
-                    ? `<div style="display: inline-flex; gap: 4px; align-items: center;">${dl}${rm}</div>`
+                // View, Export and Remove all work off the same stored output
+                // bytes, so they are offered under exactly the same condition.
+                const hasOutput = h.status === 'completed' && h.task_id && h.output_in_db;
+                // Outline, not the filled CTA: View only opens the selection
+                // card. The filled Push lives there, on the step that actually
+                // writes to production.
+                const view = hasOutput
+                    ? `<button type="button" class="btn btn-sm btn-outline-orange" data-push-base="${h._base}" data-push-task="${h.task_id}" data-push-run="${escapeHtml(started)}" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">View</button>`
                     : '—';
+                // A run with no task_id has nothing to export or remove, so it
+                // gets no checkbox rather than one that does nothing.
+                const cb = h.task_id
+                    ? `<input class="form-check-input run-select" type="checkbox" data-task="${h.task_id}" data-base="${h._base}" data-out="${hasOutput ? 1 : 0}"${runSelected.has(h.task_id) ? ' checked' : ''}>`
+                    : '';
+                const msg = h.error || h.message || '';
                 return `<tr class="history-row">
-                    <td title="${escapeHtml(String(h.started_at || ''))}">${escapeHtml(started)}</td>
+                    <td>${cb}</td>
+                    <td class="cell-clip" title="${escapeHtml(String(h.started_at || ''))}">${escapeHtml(started)}</td>
                     <td class="col-center">${escapeHtml(h._version || '')}</td>
                     <td>${statusBadge(h.status)}</td>
-                    <td>${escapeHtml(h._filename || '')}</td>
-                    <td>${escapeHtml(h.error || h.message || '')}</td>
-                    <td>${actions}</td>
+                    <td class="cell-clip" title="${escapeHtml(h._filename || '')}">${escapeHtml(h._filename || '')}</td>
+                    <td class="cell-clip" title="${escapeHtml(msg)}">${escapeHtml(msg)}</td>
+                    <td>${view}</td>
                 </tr>`;
             }).join('');
+            updateRunSelectionCount();
 
             // Sort glyph: ⇅ idle, ▲/▼ on the active column.
             document.querySelectorAll('#historyTable th.sortable').forEach(th => {
@@ -558,26 +702,97 @@
             }
         }
 
-        document.getElementById('historyBody').addEventListener('click', async (e) => {
-            const btn = e.target.closest('button[data-rm-task]');
+        document.getElementById('historyBody').addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-push-task]');
             if (!btn) return;
-            const taskId = btn.dataset.rmTask;
-            const base = btn.dataset.rmBase;
-            if (!confirm('Remove this run from the history?')) return;
-            btn.disabled = true;
-            try {
-                const r = await fetch(`${base}/history/${taskId}`, { method: 'DELETE' });
-                if (!r.ok && r.status !== 404) {
-                    const txt = await r.text();
-                    alert('Remove failed: ' + txt);
-                    btn.disabled = false;
-                    return;
-                }
-                loadHistory();
-            } catch (err) {
-                alert('Remove failed: ' + err.message);
-                btn.disabled = false;
+            openPushForRun(btn.dataset.pushBase, btn.dataset.pushTask, btn.dataset.pushRun);
+        });
+
+        document.getElementById('pushOpenBtn').addEventListener('click', (e) => {
+            const b = e.currentTarget;
+            if (!b.dataset.pushTask) return;
+            openPushForRun(b.dataset.pushBase, b.dataset.pushTask, b.dataset.pushRun);
+        });
+
+        // ---- Run selection (bulk Export / Remove) ---------------------------
+        // Export and Remove act on the ticked runs rather than on a button per
+        // row: with 50+ runs in the table the per-row pair was most of the ink.
+
+        function selectedRunBoxes() {
+            return [...document.querySelectorAll('#historyBody .run-select:checked')];
+        }
+
+        function updateRunSelectionCount() {
+            const boxes = selectedRunBoxes();
+            const n = boxes.length;
+            const cnt = document.getElementById('runSelCount');
+            if (cnt) cnt.textContent = `${n} selected`;
+            const exportBtn = document.getElementById('runExportBtn');
+            // Export needs at least one run that actually has stored output;
+            // Remove works on any run, output or not.
+            if (exportBtn) exportBtn.disabled = !boxes.some(b => b.dataset.out === '1');
+            const removeBtn = document.getElementById('runRemoveBtn');
+            if (removeBtn) removeBtn.disabled = n === 0;
+            const all = [...document.querySelectorAll('#historyBody .run-select')];
+            const sa = document.getElementById('runSelectAll');
+            if (sa) {
+                sa.checked = all.length > 0 && n === all.length;
+                sa.indeterminate = n > 0 && n < all.length;
             }
+        }
+
+        document.getElementById('runSelectAll').addEventListener('change', (e) => {
+            document.querySelectorAll('#historyBody .run-select').forEach(b => {
+                b.checked = e.target.checked;
+                if (b.checked) runSelected.add(b.dataset.task);
+                else runSelected.delete(b.dataset.task);
+            });
+            updateRunSelectionCount();
+        });
+
+        document.getElementById('historyBody').addEventListener('change', (e) => {
+            const box = e.target.closest('.run-select');
+            if (!box) return;
+            if (box.checked) runSelected.add(box.dataset.task);
+            else runSelected.delete(box.dataset.task);
+            updateRunSelectionCount();
+        });
+
+        document.getElementById('runExportBtn').addEventListener('click', () => {
+            const boxes = selectedRunBoxes().filter(b => b.dataset.out === '1');
+            if (!boxes.length) return;
+            const skipped = selectedRunBoxes().length - boxes.length;
+            if (skipped && !confirm(`${skipped} of the selected runs have no stored output `
+                + `and will be left out. Export the other ${boxes.length}?`)) return;
+            // One endpoint for a mixed v1/v2 selection: the stored-output table
+            // is shared between the engine versions.
+            const ids = boxes.map(b => b.dataset.task).join(',');
+            window.location.href = '/api/rurl-v2/export?task_ids=' + encodeURIComponent(ids);
+        });
+
+        document.getElementById('runRemoveBtn').addEventListener('click', async (e) => {
+            const boxes = selectedRunBoxes();
+            if (!boxes.length) return;
+            if (!confirm(`Remove ${boxes.length} run(s) from the history?`)) return;
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            const failed = [];
+            for (const box of boxes) {
+                const taskId = box.dataset.task;
+                try {
+                    const r = await fetch(`${box.dataset.base}/history/${taskId}`, { method: 'DELETE' });
+                    // 404 means it is already gone — that is the outcome we wanted.
+                    if (!r.ok && r.status !== 404) failed.push(`${taskId}: ${await r.text()}`);
+                    else {
+                        runSelected.delete(taskId);
+                        if (pushRun && pushRun.taskId === taskId) closePushCard();
+                    }
+                } catch (err) {
+                    failed.push(`${taskId}: ${err.message}`);
+                }
+            }
+            if (failed.length) alert('Remove failed for:\n' + failed.join('\n'));
+            loadHistory();
         });
 
         loadHistory();
@@ -643,6 +858,346 @@
         });
 
         loadFacetsStatus();
+
+        // ================= Push Redirects ===================================
+        // Push a finished run's redirects to production. Deliberately the same
+        // shape as Canonicals and the Redirect Generator — all three feed the
+        // same /api/redirect-tool preview+submit pair, so a difference in how
+        // you select rows here would be a difference with no reason behind it.
+        //
+        // What is specific to this tool: the rows are not on screen from the
+        // run itself (a run only leaves an xlsx behind), they are read back per
+        // run from /results/{task_id}, and the reliability score is the primary
+        // selector — you pick a threshold, then untick the individual rows you
+        // do not want.
+        const REDIRECT_API = '/api/redirect-tool';
+        // Descending: buildScoreOptions accumulates the histogram in one pass.
+        const PUSH_SCORE_STEPS = [100, 95, 90, 85, 80, 75, 70, 60, 50, 25, 0];
+        const PUSH_ROW_LIMIT = 5000;
+
+        let pushRun = null;                 // { base, taskId, runLabel }
+        let pushRows = [];                  // rows currently loaded (score >= threshold)
+        let pushMeta = null;                // last /results payload, rows aside
+        let pushDeselected = new Set();     // old URLs the user explicitly unticked
+        let _redirPreflight = null;
+
+        const fmtInt = (n) => Number(n || 0).toLocaleString('nl-NL');
+        const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+        function tierLabel(score) {
+            if (score >= 90) return 'Tier A';
+            if (score >= 75) return 'Tier B';
+            if (score >= 50) return 'Tier C';
+            return 'Tier D';
+        }
+
+        function closePushCard() {
+            pushRun = null;
+            pushRows = [];
+            pushMeta = null;
+            pushDeselected = new Set();
+            document.getElementById('pushCard').classList.add('d-none');
+            document.getElementById('pushBody').innerHTML =
+                '<tr><td colspan="6" class="text-muted text-center p-3">Nog geen run geladen</td></tr>';
+            updatePushSelectionCount();
+        }
+
+        async function openPushForRun(base, taskId, runLabel) {
+            pushRun = { base, taskId, runLabel };
+            // A new run is a new selection — carrying unticks across runs would
+            // silently drop rows the user never looked at.
+            pushDeselected = new Set();
+            document.getElementById('pushCard').classList.remove('d-none');
+            document.getElementById('pushRunLabel').textContent =
+                'Run ' + (runLabel ? runLabel + ' · ' : '') + taskId;
+            document.getElementById('pushFilter').value = '';
+            // Default to Tier A — the tier the engine itself calls safe for production.
+            await loadPushRows(90, true);
+            document.getElementById('pushCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        async function loadPushRows(minScore, rebuildOptions) {
+            if (!pushRun) return;
+            const tbody = document.getElementById('pushBody');
+            tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center p-3">Resultaten laden...</td></tr>';
+            try {
+                const r = await fetch(`${pushRun.base}/results/${pushRun.taskId}`
+                    + `?min_score=${encodeURIComponent(minScore)}&limit=${PUSH_ROW_LIMIT}`);
+                if (r.status === 404) {
+                    throw new Error('De resultaten van deze run staan nog niet in de database. '
+                        + 'Vlak na een run duurt dat een paar seconden — probeer het zo opnieuw.');
+                }
+                if (!r.ok) throw new Error(await r.text() || 'kon de resultaten niet laden');
+                const data = await r.json();
+                pushRows = data.rows || [];
+                pushMeta = data;
+                // The histogram covers the whole run and never changes, so the
+                // options are built once per run, not per threshold change.
+                if (rebuildOptions) buildScoreOptions(data.histogram, data.min_score);
+                renderPushRows();
+            } catch (err) {
+                pushRows = [];
+                pushMeta = null;
+                tbody.innerHTML = `<tr><td colspan="6" class="text-danger text-center p-3">${escapeHtml(err.message)}</td></tr>`;
+                document.getElementById('pushSummary').textContent = '';
+                document.getElementById('pushTruncWarn').classList.add('d-none');
+                updatePushSelectionCount();
+            }
+        }
+
+        // Label every threshold with how many redirects sit at or above it, so
+        // the choice is made on the numbers rather than on a guess.
+        function buildScoreOptions(histogram, selected) {
+            const desc = (histogram || []).slice().sort((a, b) => b.score - a.score);
+            const cum = new Map();
+            let running = 0, i = 0;
+            for (const step of PUSH_SCORE_STEPS) {
+                while (i < desc.length && desc[i].score >= step) { running += desc[i].count; i++; }
+                cum.set(step, running);
+            }
+            document.getElementById('pushMinScore').innerHTML = PUSH_SCORE_STEPS.map(step => {
+                const label = step === 0 ? 'alles' : tierLabel(step);
+                return `<option value="${step}"${step === selected ? ' selected' : ''}>`
+                    + `&ge; ${step} &middot; ${label} (${fmtInt(cum.get(step))})</option>`;
+            }).join('');
+        }
+
+        function renderPushRows() {
+            const tbody = document.getElementById('pushBody');
+            if (!pushRows.length) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center p-3">Geen redirects boven deze score.</td></tr>';
+            } else {
+                tbody.innerHTML = pushRows.map((r, i) => {
+                    const checked = pushDeselected.has(r.old_url) ? '' : ' checked';
+                    const why = [tierLabel(r.score), r.reason].filter(Boolean).join(' — ');
+                    return `<tr class="push-row" data-idx="${i}">
+                        <td><input type="checkbox" class="push-select form-check-input" data-idx="${i}"${checked}></td>
+                        <td class="col-center tier-${escapeHtml(r.tier || '')}" title="${escapeHtml(why)}">${r.score}</td>
+                        <td class="url-cell" title="${escapeHtml(r.old_url)}">${escapeHtml(r.old_url)}</td>
+                        <td class="url-cell" title="${escapeHtml(r.new_url)}">${escapeHtml(r.new_url)}</td>
+                        <td class="col-center">${r.target_products == null ? '—' : fmtInt(r.target_products)}</td>
+                        <td class="col-center">${r.visits == null ? '—' : fmtInt(r.visits)}</td>
+                    </tr>`;
+                }).join('');
+            }
+            renderPushSummary();
+            applyPushFilter();
+        }
+
+        function renderPushSummary() {
+            const el = document.getElementById('pushSummary');
+            const warn = document.getElementById('pushTruncWarn');
+            if (!pushMeta) { el.textContent = ''; warn.classList.add('d-none'); return; }
+            const sk = pushMeta.skipped || {};
+            const left = [];
+            if (sk.no_target) left.push(`${fmtInt(sk.no_target)} zonder bestemming`);
+            if (sk.no_score) left.push(`${fmtInt(sk.no_score)} zonder score`);
+            if (sk.duplicate) left.push(`${fmtInt(sk.duplicate)} dubbele oude URL`);
+            el.textContent = `${fmtInt(pushMeta.matched)} van ${fmtInt(pushMeta.total)} redirects `
+                + `met score ≥ ${pushMeta.min_score}`
+                + (left.length ? ` · niet te pushen uit deze run: ${left.join(', ')}` : '');
+            // A selection can only ever cover the rows it was shown, so say so
+            // rather than letting the count quietly mean something else.
+            if (pushMeta.truncated) {
+                warn.classList.remove('d-none');
+                warn.textContent = `Alleen de eerste ${fmtInt(pushMeta.returned)} van `
+                    + `${fmtInt(pushMeta.matched)} rijen staan hieronder, en Push werkt `
+                    + `alleen op wat je hier ziet. Kies een hogere score om de rest binnen bereik te brengen.`;
+            } else {
+                warn.classList.add('d-none');
+            }
+        }
+
+        // Select-all acts on the VISIBLE rows only. Filtering to a subset and
+        // ticking the header box should select what you can see, not silently
+        // arm the rows the filter hid.
+        function toggleSelectAllVisible(cb) {
+            document.querySelectorAll('#pushBody tr.push-row').forEach(tr => {
+                if (tr.style.display === 'none') return;
+                const box = tr.querySelector('.push-select');
+                if (!box) return;
+                box.checked = cb.checked;
+                const row = pushRows[+box.dataset.idx];
+                if (!row) return;
+                if (cb.checked) pushDeselected.delete(row.old_url);
+                else pushDeselected.add(row.old_url);
+            });
+            updatePushSelectionCount();
+        }
+
+        function applyPushFilter() {
+            const term = (document.getElementById('pushFilter').value || '').trim().toLowerCase();
+            document.querySelectorAll('#pushBody tr.push-row').forEach(tr => {
+                const r = pushRows[+tr.dataset.idx] || {};
+                const hay = ((r.old_url || '') + ' ' + (r.new_url || '')).toLowerCase();
+                tr.style.display = (!term || hay.includes(term)) ? '' : 'none';
+            });
+            updatePushSelectionCount();
+        }
+
+        function syncPushSelectAll() {
+            const sa = document.getElementById('pushSelectAll');
+            const boxes = [...document.querySelectorAll('#pushBody tr.push-row')]
+                .filter(tr => tr.style.display !== 'none')
+                .map(tr => tr.querySelector('.push-select'))
+                .filter(Boolean);
+            const checked = boxes.filter(b => b.checked).length;
+            sa.checked = boxes.length > 0 && checked === boxes.length;
+            sa.indeterminate = checked > 0 && checked < boxes.length;
+        }
+
+        // Only the visible + ticked rows. A row hidden by the filter is not part
+        // of the push, which is what the counter next to it says as well.
+        function getSelectedPushRows() {
+            return [...document.querySelectorAll('#pushBody tr.push-row')]
+                .filter(tr => tr.style.display !== 'none')
+                .map(tr => tr.querySelector('.push-select:checked'))
+                .filter(Boolean)
+                .map(b => pushRows[+b.dataset.idx])
+                .filter(Boolean);
+        }
+
+        function updatePushSelectionCount() {
+            const n = getSelectedPushRows().length;
+            document.getElementById('pushSelCount').textContent = `${fmtInt(n)} geselecteerd`;
+            document.getElementById('pushBtn').disabled = n === 0;
+            syncPushSelectAll();
+        }
+
+        document.getElementById('pushMinScore').addEventListener('change', (e) => {
+            // Unticks survive a threshold change on purpose: widening the score
+            // must not re-arm a row you already rejected.
+            loadPushRows(Number(e.target.value) || 0, false);
+        });
+        document.getElementById('pushFilter').addEventListener('input', applyPushFilter);
+        document.getElementById('pushFilterClear').addEventListener('click', () => {
+            document.getElementById('pushFilter').value = '';
+            applyPushFilter();
+        });
+        document.getElementById('pushSelectAll').addEventListener('change', (e) => toggleSelectAllVisible(e.target));
+        document.getElementById('pushBody').addEventListener('change', (e) => {
+            const box = e.target.closest('.push-select');
+            if (!box) return;
+            const row = pushRows[+box.dataset.idx];
+            if (row) {
+                if (box.checked) pushDeselected.delete(row.old_url);
+                else pushDeselected.add(row.old_url);
+            }
+            updatePushSelectionCount();
+        });
+
+        // Poll a redirect-tool task to completion. Bounded (~5 min) so a task
+        // stuck in 'running' can't hang the modal forever; total falls back so
+        // the width math never goes NaN.
+        async function _pollTask(statusUrl, progId, totalFallback) {
+            const MAX_POLLS = 600;  // 600 x 500ms ~ 5 minutes
+            for (let i = 0; i < MAX_POLLS; i++) {
+                const s = await fetch(statusUrl);
+                if (!s.ok) throw new Error((await s.json()).detail || 'Status poll failed');
+                const task = await s.json();
+                const total = task.total || totalFallback || 1;
+                const done = task.processed || 0;
+                const el = document.getElementById(progId);
+                if (el) el.style.width = Math.min(100, Math.round(done / total * 100)) + '%';
+                if (task.status === 'completed' || task.status === 'failed') return task;
+                await _sleep(500);
+            }
+            throw new Error('Time-out bij het wachten op de taak');
+        }
+
+        async function pushSelectedToRedirect() {
+            _redirPreflight = null;  // drop any prior preflight so a failed
+                                     // re-preflight can't submit stale data
+            const selected = getSelectedPushRows();
+            if (!selected.length) { alert('Geen redirects geselecteerd'); return; }
+            const statuscode = document.getElementById('pushStatusCode').value || '301';
+            const country = document.getElementById('pushCountry').value || 'NL+BE';
+            const label = `auto-redirects-${new Date().toISOString().split('T')[0]}`;
+            const rows = selected.map(r => ({
+                old: r.old_url, new: r.new_url, statuscode, country, label,
+            }));
+            const minScore = document.getElementById('pushMinScore').value;
+
+            const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('pushModal'));
+            const body = document.getElementById('pushModalBody');
+            const footer = document.getElementById('pushModalFooter');
+            footer.innerHTML = '';
+            body.innerHTML = `<p>Preflight van ${fmtInt(rows.length)} redirect(s), score &ge; ${escapeHtml(minScore)}...</p>
+                <div class="progress"><div id="pushProg" class="progress-bar" role="progressbar" style="width:0%"></div></div>`;
+            modal.show();
+
+            try {
+                const start = await fetch(`${REDIRECT_API}/preview`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rows }),
+                });
+                if (!start.ok) throw new Error((await start.json()).detail || 'Preview mislukt');
+                const { task_id } = await start.json();
+                const task = await _pollTask(`${REDIRECT_API}/preview-status/${task_id}`, 'pushProg', rows.length);
+                if (task.status === 'failed') throw new Error(task.error || 'Preflight mislukt');
+                _redirPreflight = task.result;
+                const st = _redirPreflight.stats || {};
+                const reasons = Object.entries(st.skip_reasons || {})
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([r, n]) => `<li>${fmtInt(n)} — ${escapeHtml(r)}</li>`).join('');
+                body.innerHTML = `
+                    <p class="mb-2">Preflight klaar:</p>
+                    <ul class="mb-3">
+                        <li><strong>${fmtInt(st.submittable)}</strong> klaar om door te voeren</li>
+                        <li>${fmtInt(st.flattened)} ketens platgeslagen</li>
+                    </ul>
+                    ${reasons ? `<p class="mb-1 small text-muted">Overgeslagen:</p><ul class="mb-3 small">${reasons}</ul>` : ''}
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="pushReplace">
+                        <label class="form-check-label" for="pushReplace">Bestaande redirects overschrijven (replace_existing)</label>
+                    </div>
+                    ${st.submittable ? '' : '<div class="alert alert-warning mt-2 mb-0">Niets te pushen in deze selectie.</div>'}`;
+                footer.innerHTML = `
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Annuleren</button>
+                    <button id="pushConfirmBtn" class="btn btn-outline-red" ${st.submittable ? '' : 'disabled'}>Push ${fmtInt(st.submittable)} to production</button>`;
+                // Listener rather than an inline onclick with the label interpolated
+                // into it — the label is generated here, so it never needs to make a
+                // round trip through an HTML attribute.
+                const confirmBtn = document.getElementById('pushConfirmBtn');
+                if (confirmBtn) confirmBtn.addEventListener('click', () => confirmPushToRedirect(label));
+            } catch (e) {
+                body.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(e.message)}</div>`;
+                footer.innerHTML = `<button class="btn btn-secondary" data-bs-dismiss="modal">Sluiten</button>`;
+            }
+        }
+
+        async function confirmPushToRedirect(label) {
+            if (!_redirPreflight) return;
+            const replace = document.getElementById('pushReplace')?.checked || false;
+            const body = document.getElementById('pushModalBody');
+            const footer = document.getElementById('pushModalFooter');
+            footer.innerHTML = '';
+            body.innerHTML = `<p>Pushen naar productie...</p>
+                <div class="progress"><div id="pushProg2" class="progress-bar" role="progressbar" style="width:0%"></div></div>`;
+            try {
+                const start = await fetch(`${REDIRECT_API}/submit`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        processed: _redirPreflight.processed, label,
+                        input_method: 'text', replace_existing: replace,
+                    }),
+                });
+                if (!start.ok) throw new Error((await start.json()).detail || 'Push mislukt');
+                const { task_id } = await start.json();
+                const task = await _pollTask(`${REDIRECT_API}/submit-status/${task_id}`,
+                    'pushProg2', (_redirPreflight.processed || []).length);
+                if (task.status === 'failed') throw new Error(task.error || 'Push mislukt');
+                const res = task.result || {};
+                body.innerHTML = `<div class="alert alert-success mb-2">Klaar — ${fmtInt(res.success)} gelukt, ${fmtInt(res.failed)} mislukt.${res.run_id ? ` Run #${res.run_id}.` : ''}</div>
+                    <p class="small text-muted mb-0">De Redirect Tool &rarr; Recent Results toont de details per rij.</p>`;
+                footer.innerHTML = `<button class="btn btn-secondary" data-bs-dismiss="modal">Sluiten</button>`;
+            } catch (e) {
+                body.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(e.message)}</div>`;
+                footer.innerHTML = `<button class="btn btn-secondary" data-bs-dismiss="modal">Sluiten</button>`;
+            }
+        }
+
+        document.getElementById('pushBtn').addEventListener('click', pushSelectedToRedirect);
     </script>
     <footer class="text-center py-4">
         <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
