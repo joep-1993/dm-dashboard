@@ -67,14 +67,15 @@ from datetime import datetime, timedelta, timezone
 import requests
 from psycopg2.extras import Json, execute_values
 
+from backend import taxv2_client as taxv2
 from backend.database import get_db_connection, return_db_connection
 
 logger = logging.getLogger(__name__)
 
-TAX_BASE = "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl"
+TAX_BASE = taxv2.BASE
 # Every GET is open internally; the header is what makes a read attributable in the
 # audit log we are reading from. See memory taxonomy_api_user_header.
-USER_HEADER = os.getenv("TAXONOMY_USER_NAME", "SEO_JOEP")
+USER_HEADER = taxv2.USER_NAME
 HTTP_TIMEOUT = 90
 DUMP_TIMEOUT = 600          # /api/Facets/values is ~146 MB
 AUDIT_PAGE = 5000           # Take=10000 works; 5000 keeps a page ~2 s
@@ -177,25 +178,21 @@ CREATE TABLE IF NOT EXISTS pa.facet_watch_runs (
 );
 """
 
-_session = None
-_session_lock = threading.Lock()
 
 
 def _sess():
-    global _session
-    with _session_lock:
-        if _session is None:
-            s = requests.Session()
-            s.headers.update({"Accept": "application/json",
-                              "X-User-Name": USER_HEADER})
-            _session = s
-        return _session
+    """Sessie per thread, met retry op 502/503/504 — zie backend/taxv2_client.py.
+
+    Hiervoor was dit één gedeelde Session zonder retry, gedeeld met acht
+    ThreadPoolExecutor-workers. `requests.Session` is niet gedocumenteerd als
+    thread-safe, en het ontbreken van retry is de directe oorzaak van de
+    lookup_failed-events: één 502 werd als feit weggeschreven.
+    """
+    return taxv2.session()
 
 
 def _get(path, params=None, timeout=HTTP_TIMEOUT):
-    r = _sess().get(f"{TAX_BASE}{path}", params=params, timeout=timeout)
-    r.raise_for_status()
-    return r.json()
+    return taxv2.get_json(path, params=params, timeout=timeout)
 
 
 def init_tables():
@@ -390,6 +387,61 @@ def _fetch_facet_meta(facet_id):
         return None, None
 
 
+# Facetten waarvan de main-category-lookup deze run FAALDE (netwerk/5xx), tegenover
+# facetten die aantoonbaar nergens hangen. Het verschil bepaalt of een event
+# repareerbaar is of een feit.
+_LOOKUP_FAILED: set = set()
+
+# category_id -> main_cat_id, opgelopen via parentId. Categorieën verhuizen zelden,
+# dus procesbreed cachen is genoeg; een miss kost één HTTP-call per niveau.
+_CAT_MAINCAT_CACHE: dict = {}
+_CAT_MAINCAT_LOCK = threading.Lock()
+_KNOWN_MAINCATS: set = set()
+
+
+def _known_maincats():
+    """De ids uit pa.facet_watch_maincats, één keer per proces geladen."""
+    global _KNOWN_MAINCATS
+    if _KNOWN_MAINCATS:
+        return _KNOWN_MAINCATS
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT main_cat_id FROM pa.facet_watch_maincats")
+        _KNOWN_MAINCATS = {r["main_cat_id"] for r in cur.fetchall()}
+    except Exception as ex:  # noqa: BLE001
+        logger.warning("kon hoofdcategorieën niet laden: %s", ex)
+    finally:
+        cur.close()
+        return_db_connection(conn)
+    return _KNOWN_MAINCATS
+
+
+def _maincat_of_category(cid, _depth=0):
+    """De maincat waar deze categorie onder valt, door parentId omhoog te lopen."""
+    if cid is None or _depth > 12:
+        return None
+    key = int(cid)
+    with _CAT_MAINCAT_LOCK:
+        if key in _CAT_MAINCAT_CACHE:
+            return _CAT_MAINCAT_CACHE[key]
+    result = None
+    try:
+        d = _get(f"/api/Categories/{key}", {"locale": "nl-NL"}) or {}
+        parent = d.get("parentId")
+        # Geen parent = dit IS een root. Alleen accepteren als het ook echt als
+        # hoofdcategorie bekend staat, anders vervuilen we main_cat_ids.
+        if parent is None:
+            result = key if key in _known_maincats() else None
+        else:
+            result = _maincat_of_category(parent, _depth + 1)
+    except Exception as ex:  # noqa: BLE001
+        logger.warning("maincat-lookup mislukt voor categorie %s: %s", key, ex)
+    with _CAT_MAINCAT_LOCK:
+        _CAT_MAINCAT_CACHE[key] = result
+    return result
+
+
 def _resolve_facets(facet_ids, max_age_days=7):
     """facet_id -> {main_cat_ids, facet_name, facet_slug, ...}, cached in
     pa.facet_watch_facet_maincat. A facet's category attachment changes rarely, so
@@ -428,7 +480,13 @@ def _resolve_facets(facet_ids, max_age_days=7):
             _inc("lookups")
             if mc is None:
                 # Could not tell. Leave it out of the cache so the next run retries
-                # rather than persisting an empty answer as fact.
+                # rather than persisting an empty answer as fact. De EVENTS van deze
+                # run kregen tot nu toe wel gewoon resolution='no_maincat' mee, wat
+                # ze onzichtbaar maakt voor get_overview/get_facets en na één 502
+                # permanent verkeerd toegewezen liet — het standaardvenster is maar
+                # last_ts - 1 dag. Markeren, zodat pass 4 er 'lookup_failed' van maakt
+                # en de volgende run ze repareert.
+                _LOOKUP_FAILED.add(fid)
                 cached[fid] = {"facet_id": fid, "main_cat_ids": [], "facet_name": name,
                                "facet_slug": slug, "category_count": None,
                                "is_enabled_anywhere": None}
@@ -527,6 +585,37 @@ def _extract(ev):
     return facet_id, value_id, cat_id
 
 
+def _repair_lookup_failed(limit=5000):
+    """Vul main_cat_ids alsnog voor events die eerder 'lookup_failed' kregen."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE pa.facet_watch_events e
+               SET main_cat_ids = fm.main_cat_ids,
+                   resolution   = 'resolved'
+              FROM pa.facet_watch_facet_maincat fm
+             WHERE fm.facet_id = e.facet_id
+               AND e.resolution = 'lookup_failed'
+               AND fm.main_cat_ids <> '{}'
+               AND e.audit_id IN (
+                   SELECT audit_id FROM pa.facet_watch_events
+                    WHERE resolution = 'lookup_failed' LIMIT %s)
+        """, (limit,))
+        n = cur.rowcount
+        conn.commit()
+        if n:
+            logger.info("facet-watch: %s eerder onoplosbare events alsnog toegewezen", n)
+        return n
+    except Exception as ex:  # noqa: BLE001
+        conn.rollback()
+        logger.warning("reparatie van lookup_failed-events mislukt: %s", ex)
+        return 0
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
 def ingest(from_date=None, to_date=None, resolve_misses=True):
     """Pull audit events for the window, resolve them to main categories, upsert.
 
@@ -536,10 +625,15 @@ def ingest(from_date=None, to_date=None, resolve_misses=True):
     still paging.
     """
     _stop.clear()
+    _LOOKUP_FAILED.clear()
     _set(status="running", phase="starting", events_seen=0, events_new=0,
          lookups=0, message="", started_at=time.time(), finished_at=None)
     run_id = None
     try:
+        # Repareer eerst wat een eerdere run niet kon opvragen. Zonder deze stap
+        # blijft een event dat één keer op een 502 liep voorgoed op lookup_failed
+        # staan, want het standaardvenster kijkt maar één dag terug.
+        _repair_lookup_failed()
         if from_date is None:
             last = last_event_ts()
             frm = (last - timedelta(days=1)) if last \
@@ -564,15 +658,29 @@ def ingest(from_date=None, to_date=None, resolve_misses=True):
 
         _set(phase="fetching audit log")
         raw = []
+        # Alles buiten FACET_ENTITIES werd zonder enige boekhouding weggegooid, dus
+        # een nieuwe entiteitsoort verdween geruisloos. Geteld over 30 dagen op
+        # 2026-09-02: 3.789 van 70.516 events (5,4%) vallen buiten de tuple, waarvan
+        # 2.497 "Facet Value Dependency" — juist de soort die een productlijn-facet
+        # aan zijn maincats hangt. Zet het in de run-log in plaats van het te laten
+        # verdwijnen.
+        dropped = {}
         skip = 0
         while not _stop.is_set():
             page = _fetch_audit_page(_iso(frm), _iso(to), skip, AUDIT_PAGE)
             items = page.get("items") or []
-            raw.extend(i for i in items if i.get("entityName") in FACET_ENTITIES)
+            for i in items:
+                if i.get("entityName") in FACET_ENTITIES:
+                    raw.append(i)
+                else:
+                    key = str(i.get("entityName"))
+                    dropped[key] = dropped.get(key, 0) + 1
             _inc("events_seen", len(items))
             skip += len(items)
             if len(items) < AUDIT_PAGE or skip >= (page.get("total") or 0):
                 break
+        if dropped:
+            _set(dropped_entities=dict(sorted(dropped.items(), key=lambda kv: -kv[1])))
         _set(phase=f"resolving {len(raw)} facet events")
 
         # ---- pass 1: what the events themselves say
@@ -653,6 +761,19 @@ def ingest(from_date=None, to_date=None, resolve_misses=True):
             if f:
                 all_fids.add(f)
         fmap = _resolve_facets(all_fids)
+        # Een `Category Facet`(-Setting)-event ZEGT dat de koppeling net veranderd is,
+        # dus de gecachete main-categories van dat facet zijn per definitie van vóór
+        # die wijziging. Met de default max_age_days=7 kreeg de ontvangende maincat
+        # daardoor 0 in facets_attached voor precies het event dat die kolom moest
+        # vullen. Voor die facetten opnieuw ophalen en het antwoord laten winnen.
+        attach_fids = set()
+        for ev, fid, vid, _c in pre:
+            if ev.get("entityName") in ("Category Facet", "Category Facet Setting"):
+                f = fid or (vmap.get(vid, (None, None))[0] if vid else None)
+                if f:
+                    attach_fids.add(f)
+        if attach_fids:
+            fmap.update(_resolve_facets(attach_fids, max_age_days=0))
 
         # ---- pass 4: rows
         rows = []
@@ -664,8 +785,24 @@ def ingest(from_date=None, to_date=None, resolve_misses=True):
             meta = fmap.get(fid) or {}
             mcs = list(meta.get("main_cat_ids") or [])
             name = ev.get("entityName")
+            # Het event draagt zelf een CategoryId, en dat werd wel opgeslagen maar
+            # nooit gelezen. Attributie liep volledig via een LIVE lookup van de
+            # huidige main-categories — dus een DELETE gaf 404 (mcs leeg) en een
+            # ontkoppeling werd toegekend aan de maincats die OVERBLIJVEN, nooit aan
+            # de maincat die het facet net verloor. Precies de events waarvoor deze
+            # tool bestaat. Vul aan met de maincat van het event zelf.
+            if cid:
+                own = _maincat_of_category(cid)
+                if own and own not in mcs:
+                    mcs.append(own)
             if mcs:
                 resolution = "resolved"
+            elif fid and fid in _LOOKUP_FAILED:
+                # Onderscheid "dit facet hangt nergens" van "we konden het niet
+                # opvragen". Het tweede is repareerbaar; als no_maincat wegschrijven
+                # maakte een transiënte 502 permanent, want het standaardvenster is
+                # maar last_ts - 1 dag.
+                resolution = "lookup_failed"
             elif name == "Category Facet Setting" and ev.get("action") == "UPDATE" \
                     and not fid:
                 # The documented hole: a settings-row id with no way back to a
@@ -718,9 +855,19 @@ def ingest(from_date=None, to_date=None, resolve_misses=True):
 
         msg = (f"{len(raw)} facet events in window, {new} written, "
                f"{get_run_state()['lookups']} api lookups")
-        _finish_run(run_id, "done" if not _stop.is_set() else "stopped", msg, new)
-        _set(status="done", phase="done", message=msg, finished_at=time.time())
-        return {"success": True, "events": len(raw), "written": new, "message": msg}
+        stopped = _stop.is_set()
+        if stopped:
+            # De pagineerlus breekt midden in het venster af, dus dit is een
+            # GEDEELTELIJKE ingest. De DB-rij wist dat al; de module-state die de
+            # frontend pollt stond hardgecodeerd op "done" met een bericht dat las
+            # als een volledig venster.
+            msg += " — AFGEBROKEN, venster niet compleet"
+        _finish_run(run_id, "stopped" if stopped else "done", msg, new)
+        _set(status="stopped" if stopped else "done",
+             phase="stopped" if stopped else "done",
+             message=msg, finished_at=time.time())
+        return {"success": not stopped, "events": len(raw), "written": new,
+                "stopped": stopped, "message": msg}
     except Exception as e:
         logger.exception("facet-watch ingest failed")
         _finish_run(run_id, "error", str(e), 0)
