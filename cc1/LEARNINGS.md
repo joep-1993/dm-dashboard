@@ -1,6 +1,57 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een kostenraming op aantallen mist de rekening die serieel wachten stuurt (2026-09-02, FAQ Publish 2.0)
+
+Vervolg op [de replace=True-omzetting van 31-08](#een-additieve-api-met-een-zuinige-default-laat-de-content-rotten-2026-08-31-faq--publish-20).
+Die redenering klopte en is nog steeds waar: in `mode="new"` schalen de DELETEs met het
+hergeneratievolume en niet met de 280k gepubliceerde URL's, dus "280k extra round trips" was een
+spookrekensom. Wat de redenering niet deed, is doorrekenen wat het volume dat er wél is *kost*.
+
+~23k URL's per wekelijkse run x ~0,45 s per `DELETE /faq?url=…`, strikt achter elkaar = **~3 uur
+puur wachten**, tegen een `PUBLISH_TIMEOUT` van 2 uur. De POSTs waren nooit het probleem: ~850
+batches van 2000 records is een fractie daarvan. De stap viel dus om op precies het aantal dat ik
+als "verwaarloosbaar" had afgedaan — verwaarloosbaar in requests, drie uur in wall-clock.
+
+### De regel
+
+Een kostenraming die eindigt bij *hoeveel* calls het zijn, is niet af. De vraag erna is of ze
+serieel staan, want dan vermenigvuldigt de latency mee en is dat de echte post. 23k van iets is
+klein als het parallel mag en groot als het niet mag. Bij deze API mocht het: `DELETE` is
+url-scoped en onderling onafhankelijk, dus een `ThreadPoolExecutor(max_workers=20)` maakt van
+drie uur een paar minuten.
+
+### De timeout verhogen is de reparatie niet
+
+`PUBLISH_TIMEOUT` ging mee van 7200 naar 14400, maar als vangnet en niet als fix. Een timeout die
+je optrekt tot de stap er net binnen past, is een meting die je uitzet: hij vertelt je daarna niet
+meer dat er iets scheef staat, hij laat het alleen langer duren. Eerst het werk goedkoper maken,
+dan pas de grens verruimen — en de grens ruim genoeg zetten dat hij alleen nog vuurt als er echt
+iets hangt.
+
+### Waar je een fase plaatst, bepaalt wat Cancel achterlaat
+
+De DELETEs vuurden voorheen op het moment dat een URL uit de cursor kwam, en de POST pas als de
+batch vol was. Tussen die twee momenten kon Cancel vallen — en dan stond een URL leeggegooid op de
+live site met niets teruggezet, tot de volgende `mode="new"`-run. Onzichtbaar, want die URL's
+blijven ongestempeld en komen dus vanzelf terug; alleen zijn ze intussen wél weg bij Google.
+
+Door de URL's op te sparen in `batch_urls_to_delete` en ze pas in `flush()` vlak vóór de
+`_post_batch` af te vuren, ligt delete-dan-post nu strak tegen elkaar aan binnen één batch en
+gooit de cancel-branch de openstaande DELETEs weg samen met de batch. Dat gat was geen
+bekende bug — het kwam gratis mee omdat parallelliseren dwong om te benoemen *wanneer* de
+delete-fase draait. **Een "waar draait dit" die je nooit expliciet hebt gemaakt, is een aanname
+over failure-timing die je nooit hebt getoetst.**
+
+### Wat een parallelle wrapper níet mag veranderen
+
+`_delete_urls_parallel()` geeft alleen de calls terug die een **exceptie** gooiden, niet de
+non-2xx antwoorden — precies zoals de inline `try/except` die hij vervangt. Verleidelijk om er "en
+nu we toch bezig zijn" foutafhandeling bij te bouwen, maar dan verandert een performancefix stil
+ook het rapportagegedrag, en is een run die anders rapporteert niet meer te vergelijken met de
+vorige. Non-2xx blijft geen failure omdat de POST erna de huidige vragen alsnog upsert; de enige
+zichtbare verandering is dat `skipped` nu op completion-volgorde staat in plaats van URL-volgorde.
+
 ## Wat een audit van acht tools opleverde: de code sprak drie keer zijn eigen documentatie tegen (2026-09-02)
 
 Acht dashboard-tools die nooit een audit hadden gehad (GSD Tag Toppers, Healthscore, SEO Priority,

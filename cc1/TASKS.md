@@ -3,6 +3,38 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-02 (4) — FAQ v2 publish: de replace-DELETE's parallel (publish-timeout)
+
+Joep gaf de opdracht kant-en-klaar mee: de publishstap van FAQ v2 haalde de `PUBLISH_TIMEOUT` niet
+omdat `replace=True` één `DELETE /faq?url=…` per URL sequentieel doet. ~23k URL's x ~0,45 s = ~3 uur
+tegen een limiet van 2 uur.
+
+**Gedaan (commit `8e265ec`):**
+
+- [x] `_delete_urls_parallel(urls, env)` in `backend/faq_v2_publisher.py` — fant de DELETEs uit over
+      een `ThreadPoolExecutor(max_workers=DELETE_WORKERS)`, `DELETE_WORKERS = 20` naast `BATCH_SIZE`.
+      Geeft alleen `(url, error)` terug voor calls die een exceptie gooiden; non-2xx blijft géén
+      failure, exact zoals de inline `try/except` die hij vervangt.
+- [x] `publish_faq_v2()`: de URL's gaan in `batch_urls_to_delete` naast `batch`/`batch_state`, en de
+      delete-fase zit nu in `flush()` vlak vóór `_post_batch`. Per URL dus nog steeds strikt
+      delete-dan-post, alleen is het wachten gedeeld. Reset na elke flush én in de cancel-branch.
+- [x] `PUBLISH_TIMEOUT` 7200 → 14400 in `backend/daily_automation.py`, als vangnet.
+- [x] Bijeffect dat een gat dicht doet: de DELETEs vuurden voorheen zodra een URL uit de cursor kwam,
+      dus Cancel kon URL's achterlaten die leeggegooid waren zonder dat er iets teruggepost was. Die
+      staan nu in de weggegooide batch.
+
+**Open:**
+
+- [ ] **Niet live geverifieerd.** De backend op :8003 is niet herstart (draait zonder `--reload`), en
+      er is geen run gedaan — niet tegen staging en niet tegen productie. De volgende dagelijkse
+      automation is het eerste echte bewijs; kijk in het runresultaat naar `duration_sec` en naar
+      `skipped`-regels met `delete failed:`.
+- [ ] **20 workers is een gok, geen meting.** Niemand weet wat website-configuration aan concurrency
+      accepteert; er is geen rate-limit-doc en geen 429-handling in `_delete_url`. Als de DELETEs
+      429's gaan geven, ziet de run dat als "geen exceptie, dus prima" en is de replace stil weg —
+      dezelfde vorm als de valse-groen-paden uit fase 1. Overweeg `raise_for_status()` op 429 zodra
+      er één opduikt.
+
 ### 2026-09-02 (3) — Audit van de acht nooit-geauditeerde tools, fase 0 t/m 5
 
 Joep vroeg eerst welke dashboard-tools nog nooit een `/audit` hadden gehad, daarna om die te
@@ -57,13 +89,33 @@ https://claude.ai/code/artifact/7e69740b-5ad7-41ec-bac9-341128dc3ce5
       bijna-identieke SQL die de tabellen voedt waar live vanuit gepusht wordt — vraagt een
       OLD-vs-NEW-harness met een volledige build tegen Redshift), en de listing-tree-helpers naar
       `google_ads_helpers.py` (de drift die het moest voorkomen is al direct gefixt).
-- [ ] **Zeven modules hebben nog een hardgecodeerde taxv2-base-URL:** `ai_titles_service`,
-      `url_validator_service`, `category_lookup`, `dma_plus_service`, `dma_plus_monthly`,
-      `rurl_optimizer_v2_service`, `keyword_redirect_service`. Vielen buiten de geauditeerde scope.
+- [x] **Zeven modules met een hardgecodeerde taxv2-base-URL** — gemigreerd naar de gedeelde client
+      (`6fe9a7c`). `producttaxonomyunifiedapi-prod` staat nu op precies één plek in de backend.
+      Alle tien consumenten doen uitsluitend reads, dus dit voegt alleen retry en een consistente
+      `X-User-Name` toe; `keyword_redirect_service` deelt zijn sessie met de Search API (alleen de
+      taxv2-call omgezet) en `ai_titles_service` had al eigen retry.
 - [ ] **Backend is niet herstart,** dus niets hiervan draait live op :8003. Uvicorn draait zonder
       `--reload`.
-- [ ] **Het auditrapport noemt 156 s voor GSD Check;** dat is 9,4 s. Corrigeren bij de volgende
-      update van het artifact.
+- [x] **Het auditrapport noemde 156 s voor GSD Check** — gecorrigeerd naar de gemeten 9,4 s, plus
+      een statusblok per fase. Zelfde URL.
+- [x] **De "mogelijke bug" in DMA Exclusions** (`parent_resource` onvoorwaardelijk toegewezen) —
+      nagelopen, NIET bereikbaar: alle drie de leaf-selectors eisen `dim == "custom_attr"` en alleen
+      de root heeft geen case value. Geen drift maar een verschil in taak. De invariant hing wel af
+      van drie selectors elders en is nu expliciet afgedwongen op beide schrijfpaden (`a0a55c7`).
+
+- [ ] **HET GROOTSTE OPENSTAANDE PUNT: de MED- en LOW-bevindingen staan nergens vastgelegd.**
+      De zes fases zijn gebouwd uit de 31 HIGH's plus een handvol structureel meewegende MED's —
+      naar schatting acht tot tien. De overige **ruim zestig MED's en de hele LOW-categorie** zijn
+      nooit in een fase beland en staan alleen in de tien agent-rapporten, die in de context van de
+      sessie van 2026-09-02 leven en dus verdwijnen. Het artifact bevat de HIGH's voluit maar van de
+      MED's alleen de structurele. Voorbeelden die daardoor nu nergens staan: het `!!NR!!`-succes-
+      patroon in SEO Rulings dat op elk cijfer matcht, de meta-description-regex die op een apostrof
+      afkapt, `_extract`'s `setdefault` die de oudste in plaats van de nieuwste FacetId wint,
+      `run_id = len(_run_history) + 1` dat botst zodra de historie zijn cap raakt, de
+      `_coerce_date`-strptime zonder try, de dubbeltelling van `values_added` tegenover
+      `values_deleted`, en de `%`/`_` als onge-escapete LIKE-wildcards in GSD Check.
+      **Actie:** de tien rapporten uitschrijven naar `cc1/AUDIT_ACHT_20260902.md` (zoals
+      `AUDIT_GSD_SEOSTATS_20260801.md`) vóór de sessie sluit, anders is het werk weg.
 
 ### 2026-09-02 (2) — GSD Budgets: de uitsluitingen uit de spreadsheet werden half genegeerd
 
