@@ -3,6 +3,63 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-02 (8) — Auto-Redirects: een run doorvoeren vanuit de tool zelf
+
+Vraag van Joep: dezelfde doorvoer-optie als in Canonicals en de Redirect Generator, met een selector
+voor de score vanaf waar doorgevoerd wordt en de mogelijkheid individuele redirects te (de)selecteren.
+Daarna: labels naar `View` / `Push Redirects`, selectievakjes in Recent runs in plaats van een Export-
+en Remove-knop per rij, en de kolombreedtes herverdeeld. Commit `0a5658c`; de vallen onderweg in
+LEARNINGS (zelfde datum, "Drie vallen die er niet uitzagen als een val").
+
+Gedaan:
+
+- [x] **`backend/rurl_results.py`** — leest de opgeslagen xlsx uit `rurl_run_output` terug als rijen.
+      Daardoor is élke run uit de historie doorvoerbaar, niet alleen die net gedraaid heeft. Leest
+      beide outputschema's (v2 `old url`/`new url`/`score`, v1 `original_url`/`redirect_url`/
+      `reliability_score`), gooit rijen zonder bestemming en zonder score eruit mét tally, dedupliceert
+      op oude URL (hoogste score wint), en houdt de laatste vier geparseerde runs in een LRU omdat de
+      frontend dezelfde run herleest bij elke drempelwissel.
+- [x] **`GET /api/rurl{,-v2}/results/{task_id}`** (`min_score`, `limit`) — rijen plus het volledige
+      score-histogram, zodat de drempelselector zijn aantallen kan tonen vóór je kiest.
+- [x] **`GET /api/rurl{,-v2}/export?task_ids=a,b,c`** — één run streamt zijn eigen bestand byte voor
+      byte terug, meerdere runs worden één werkboek met een `run`-kolom vooraan (outer join, zodat een
+      v1-run naast een v2-run geen kolommen kwijtraakt). Cap op 50 runs.
+- [x] **Kaart "Push Redirects"** in de frontend: drempelselector met aantallen per tier, vinkje per
+      rij (uitvinken overleeft een drempelwissel), filter, statuscode 301/302, land NL+BE/NL/BE, score
+      gekleurd per tier met de reason als tooltip, plus producten achter de bestemming en visits.
+      Preflight → bevestigen loopt via hetzelfde `/api/redirect-tool` preview+submit-paar als de twee
+      andere tools, inclusief `replace_existing` en de uitsplitsing van overgeslagen rijen.
+- [x] **Boven 5.000 rijen wordt afgekapt met een waarschuwing** — een selectie kan niet verder reiken
+      dan wat hij te zien kreeg, dus dat staat er dan ook.
+- [x] **Recent runs**: selectievakje per run + één Export en één Remove eronder, in plaats van twee
+      knoppen per rij (met 57 runs was dat het meeste inkt op de pagina). `View` blijft per rij, want
+      een selectiescherm toont één run. De selectie overleeft sorteren en verversen. Remove loopt de
+      selectie langs op de eigen `_base` van elke rij — de historie staat per engineversie, de
+      opgeslagen output is gedeeld.
+- [x] **Kolombreedtes herverdeeld**: de vier smalle kolommen op de px die hun inhoud meet, Input een
+      deel van wat overblijft, Message de rest. Op ≥1400 px past Message helemaal; op een 1366-laptop
+      is hij de enige die afkapt, met de volle tekst op de `title` van de cel.
+- [x] `Download results Excel` van `btn-success` naar `btn-outline-orange` — die rendert via style.css
+      vol oranje, en als Export hoort hij outline zodat de gevulde knop ernaast de actie is.
+- [x] Getoetst: endpoint op echte runs (clamping, 404, v1-route), preflight van één regel tegen de
+      echte redirect-API (`submittable: 1`, URL's naar pad gestript, land `nl, be`), gecombineerde
+      export (één run byte-identiek op md5, twee runs 6+1 rijen met `run`-kolom), en de UI per
+      screenshot: lege staat, alle vier de tierkleuren, filter- en select-all-semantiek, drempelwissel,
+      404-melding, de modal, en de kolombreedtes op 1400 en 1500 px.
+
+Nog te doen:
+
+- [ ] **De kaart is Nederlands, de kop en de knoppen zijn Engels.** `Push Redirects` / `View` / `Push`
+      staan boven `Score vanaf`, `geselecteerd` en `niet te pushen uit deze run`. Beslissen of de rest
+      van de kaart mee naar Engels gaat (dan loopt hij gelijk met Canonicals en de Redirect Generator)
+      of dat de koppen terug naar Nederlands moeten.
+- [ ] **Nooit een echte push gedaan.** De preflight is end-to-end getoetst, maar `/submit` is alleen
+      met een gestubde response gedraaid — dat pad heeft zijn eerste echte run nog voor de boeg.
+- [ ] **Een run die tijdens het bekijken wordt verwijderd** sluit de kaart alleen als je hem via
+      Remove in díe tabel weggooit. Een andere sessie die dezelfde run verwijdert laat de kaart met
+      rijen achter die niet meer bestaan; de push zelf zou nog werken (de rijen zijn geldig), maar de
+      herkomst klopt dan niet meer.
+
 ### 2026-09-02 (7) — Auto-Redirects V67: de staart als één aanroep, en de ladder ontleed
 
 De twee openstaande punten uit sessie (6). Diagnose en fix in commit `151d800`; de generieke lessen

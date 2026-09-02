@@ -1,6 +1,76 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Drie vallen die er niet uitzagen als een val (2026-09-02, Auto-Redirects doorvoeren)
+
+Bij het bouwen van de doorvoer-flow (`0a5658c`) kostten drie dingen een ronde die alle drie hetzelfde
+kenmerk hebben: **er kwam geen foutmelding, het zag er gewoon uit alsof het werkte.**
+
+### 1. Bootstrap kleurt celtekst met specificiteit (0,1,2) — een kale klasse op een `<td>` doet niets
+
+`.tier-A { color: #1a7f37 }` op een `<td>` had geen enkel effect; elke score bleef Bootstrap-zwart.
+Niet omdat de klasse er niet stond, maar omdat Bootstrap 5.3 in `.table` de celkleur zet via
+
+```css
+.table > :not(caption) > * > * { color: var(--bs-table-color-state, ...); }
+```
+
+Dat is (0,1,2) en wint van een klasse (0,1,0). `getComputedStyle` gaf keurig het zwart terug, dus het
+lás als "mijn CSS wordt niet geladen". Kwalificeer met de tabel-id: `#pushTable td.tier-A`.
+**Elke kleur die je op een tabelcel zet heeft dit nodig** — het geldt niet voor `background`
+(daar heeft Bootstrap zijn eigen `--bs-table-bg`-mechaniek) maar wél voor `color`. Staat nu ook in
+UI_BLUEPRINT §Tables.
+
+### 2. `--virtual-time-budget` maakt `setTimeout` gratis, dus een wachtlus van sleeps wacht niet
+
+Het probe-recept uit [[wsl_screenshot_windows_chrome]] noemt al dat virtual time CSS-transitions
+bevriest. Dit is de andere helft: virtual time laat óók je timers in bijna nul reële tijd afvuren,
+terwijl `fetch` echte tijd kost. Een lus als
+
+```js
+for (let i = 0; i < 60 && !document.querySelector('.row'); i++) await sleep(200);
+```
+
+is dus geen 12 seconden wachten maar ~0, en je meet een pagina die nog op skeletonrijen staat. De
+eerste meting die eruit kwam ("select all → 0 selected") stuurde me een half uur de verkeerde kant op.
+**Wacht op een echte belofte, niet op de klok**: `await loadHistory()` (de eigen async loader van de
+pagina) of `await fetch(...)`. Dat is meteen deterministisch — geen marge nodig.
+
+### 3. Een edit-script dat halverwege een `assert` raakt, schrijft níets
+
+Mijn patch-scripts bouwen de hele nieuwe inhoud in een string op en doen aan het eind één
+`write_text`. Toen de derde van drie vervangingen faalde op zijn assert, was de conclusie "die ene
+moet ik anders aanpakken" — maar de eerste twee waren óók niet weggeschreven. Ik heb daarna alleen
+de derde opnieuw gedaan. Resultaat: `renderHistory()` verwees naar een `runSelected` die nergens
+gedeclareerd stond, wierp een ReferenceError bij elke render, en de Recent-runs-tabel bleef eeuwig
+op skeletonrijen staan. Dat zag eruit als een hangende fetch — ik heb eerst de endpoints getimed
+(0,13 s) voor ik naar de JS keek.
+
+**Remedie: vertrouw de "ok"-print van het script niet, grep na afloop op wat er zou moeten staan.**
+`grep -n "runSelected = new Set\|repeat(7)" frontend/rurl-optimizer.html` had het in één regel laten
+zien. Dezelfde familie als de `git add`-val uit `1afce51`: de bevestiging die je leest gaat over iets
+anders dan de vraag die je stelde.
+
+### En de ontwerpkeuzes die het waard zijn om te onthouden
+
+- **De score is de selector, het vinkje is de correctie.** Het histogram gaat over de héle run mee, dus
+  de drempels staan in het menu mét hun aantal (`≥ 95 · Tier A (380)`) en je kiest op het getal.
+  Uitvinken overleeft een drempelwissel — een rij die je hebt afgewezen mag niet opnieuw scherpstaan
+  als je de score verlaagt. Bijhouden als `deselected`-set, niet als `selected`-set: dan is "nieuw
+  binnengekomen bij een lagere drempel" vanzelf aangevinkt.
+- **Select-all pakt alleen wat zichtbaar is.** Filteren op een deelverzameling en dan de kop aanvinken
+  moet selecteren wat je ziet. Zelfde regel als in Canonicals en de Redirect Generator.
+- **Zeg het als de lijst is afgekapt.** Boven de 5.000 rijen kan een selectie niet verder reiken dan
+  wat hij te zien kreeg, dus staat dat er letterlijk boven in plaats van dat het aantal stil iets
+  anders gaat betekenen.
+- **Een gecombineerde export met één run gekozen moet het oude bestand zijn.** `export_runs()` streamt
+  bij één run de opgeslagen bytes byte-voor-byte terug (geverifieerd op md5) en merget pas vanaf twee,
+  met een `run`-kolom vooraan en als outer join zodat een v1-run naast een v2-run geen kolommen
+  kwijtraakt. Anders verlies je stil de exacte vorm die de per-rij-knop gaf.
+- **Preflight van de Redirect Tool is read-only** (`preflight_rows`: "Pure read-only"), dus je mag hem
+  in een test op één regel afvuren tegen productie. Dat is meteen de goedkoopste end-to-end-gate:
+  hij bewees dat absolute URL's naar pad gestript worden en `NL+BE` als `nl, be` normaliseert.
+
 ## Een cascade met returns halverwege heeft geen staart die je kunt vertrouwen (2026-09-02, Auto-Redirects V67)
 
 Vervolg op [de opbergkast-rij van dezelfde dag](#een-score-die-het-bewijs-van-de-kále-categorie-meet-zakt-als-je-de-bestemming-verfijnt-2026-09-02-auto-redirects).

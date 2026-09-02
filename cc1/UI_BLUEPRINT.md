@@ -130,6 +130,18 @@ other tool uses the grey default. New tools follow the grey default.
       respecteert die als voorkeursbreedte, dus alleen de tekstkolommen bewegen nog mee.
       Doe het ook in de **skeletontabel**, anders springt de breedte alsnog op het moment dat
       de data landt.
+- **Een kleur op een tabelcel heeft de tabel-id (of iets even zwaars) nodig** (Auto-Redirects,
+  2026-09-02). Bootstrap 5.3 zet de celkleur in `.table` via
+  `.table > :not(caption) > * > * { color: ... }` — specificiteit (0,1,2). Een kale klasse op de
+  `<td>` (`.tier-A { color: #1a7f37 }`) is (0,1,0) en verliest, zónder foutmelding:
+  `getComputedStyle` geeft gewoon het Bootstrap-zwart terug, dus het leest als "mijn CSS wordt niet
+  geladen". Schrijf `#pushTable td.tier-A { ... }`. Dit geldt voor `color`; `background` heeft zijn
+  eigen `--bs-table-bg`-mechaniek en gedraagt zich anders. Elke tabel in deze app die tekstkleur
+  gebruikt om betekenis te dragen (tier, delta, status) loopt hier tegenaan.
+- **Een rij-actie is outline, de sectie-CTA is gevuld** (Auto-Redirects, 2026-09-02). `btn-run` is de
+  gevulde oranje knop rechtsonder in een sectie; dezelfde klasse in élke rij van een tabel van 57
+  runs is dertig oranje blokken die met de echte Run-knop concurreren. Een knop die alleen iets
+  *opent* (View) is `btn-outline-orange`; de gevulde blijft bij de stap die daadwerkelijk schrijft.
 - **Filter box + action buttons go in a `.filter-row` above the table**, not in the
   card header — one `d-flex gap-2 align-items-center mb-3` row with the filter input
   on the left and the action buttons pushed right (`ms-auto` on the first right item),
