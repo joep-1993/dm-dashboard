@@ -31,7 +31,7 @@ import logging
 import re
 import threading
 import time
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -242,7 +242,8 @@ def _fetch_shop_campaigns(client, customer_id: str, shop_id: str, shop_name: str
     """
     ga = client.get_service("GoogleAdsService")
     q = f"""
-        SELECT campaign.id, campaign.name, campaign.resource_name, campaign.status
+        SELECT campaign.id, campaign.name, campaign.resource_name, campaign.status,
+               campaign.shopping_setting.merchant_id
         FROM campaign
         WHERE campaign.name LIKE '%shop_id:{shop_id}]%'
           AND campaign.status != 'REMOVED'
@@ -260,6 +261,7 @@ def _fetch_shop_campaigns(client, customer_id: str, shop_id: str, shop_name: str
             "name": name,
             "resource": row.campaign.resource_name,
             "status": row.campaign.status.name,
+            "merchant_id": int(row.campaign.shopping_setting.merchant_id or 0) or None,
         }
         if TAG_TOPPERS_TOKEN in name.lower():
             tag_toppers.append(entry)
@@ -357,7 +359,57 @@ def _read_campaign_tree(client, customer_id: str, campaign_id: int) -> Dict[str,
     return out
 
 
-def _children(nodes: Dict[str, dict], parent_resource: Optional[str]) -> List[dict]:
+_AG_CPC_CACHE: Dict[Tuple[str, str], int] = {}
+_AG_CPC_LOCK = threading.Lock()
+
+
+def _ad_group_cpc(client, customer_id: str, ad_group_id: str) -> int:
+    """Het default cpc_bid_micros van de ad group, gecachet per (klant, ad group).
+
+    Nodig omdat _read_campaign_tree een erfelijk bod als 0 opslaat
+    (`int(agc.cpc_bid_micros or 0)`). Zonder deze terugval kreeg een leaf die zijn
+    bod van de ad group erft bij conversie hardgecodeerd DEFAULT_BID_MICROS (EUR 0,20)
+    opgelegd — op een mogelijk ENABLED niet-tag-toppers-campagne. Zelfde aanpak als
+    dma_exclusions_service._ad_group_cpc.
+    """
+    key = (str(customer_id), str(ad_group_id))
+    with _AG_CPC_LOCK:
+        if key in _AG_CPC_CACHE:
+            return _AG_CPC_CACHE[key]
+    val = 0
+    try:
+        ga = client.get_service("GoogleAdsService")
+        q = (f"SELECT ad_group.cpc_bid_micros FROM ad_group "
+             f"WHERE ad_group.id = {int(ad_group_id)}")
+        for row in ga.search(customer_id=str(customer_id), query=q):
+            val = int(row.ad_group.cpc_bid_micros or 0)
+            break
+    except GoogleAdsException as ex:
+        logger.warning("cpc-lookup mislukt voor ad group %s: %s", ad_group_id, _err(ex))
+    with _AG_CPC_LOCK:
+        _AG_CPC_CACHE[key] = val
+    return val
+
+
+def _children_index(nodes: Dict[str, dict]) -> Dict[Optional[str], List[dict]]:
+    """parent_resource -> kinderen, één keer opgebouwd per boom.
+
+    _children() was een volledige scan over nodes.values(). _item_id_containers()
+    riep daar via _level_dim/_level_spec voor ELKE subdivision op, en
+    _convertible_leaves() voor elke UNIT — dus O(nodes^2) per boom, en dat maal
+    per zuster maal per Excel-rij. Op een ad group met een attribuutniveau van 200
+    waarden over een paar duizend item-ids loopt dat in de miljoenen iteraties.
+    """
+    idx: Dict[Optional[str], List[dict]] = defaultdict(list)
+    for n in nodes.values():
+        idx[n["parent"]].append(n)
+    return idx
+
+
+def _children(nodes: Dict[str, dict], parent_resource: Optional[str],
+              idx: Optional[Dict[Optional[str], List[dict]]] = None) -> List[dict]:
+    if idx is not None:
+        return idx.get(parent_resource, [])
     return [n for n in nodes.values() if n["parent"] == parent_resource]
 
 
@@ -411,7 +463,8 @@ def _plan_tag_toppers_adds(nodes: Dict[str, dict], item_ids: List[str]) -> Dict[
             "missing": missing, "note": note}
 
 
-def _level_spec(nodes: Dict[str, dict], parent_resource: Optional[str]) -> Optional[dict]:
+def _level_spec(nodes: Dict[str, dict], parent_resource: Optional[str],
+                idx: Optional[Dict[Optional[str], List[dict]]] = None) -> Optional[dict]:
     """Hoe is het niveau ónder `parent_resource` opgedeeld: {'dim','index','level'}.
 
     Alle kinderen van één subdivision delen per definitie dezelfde dimensie, maar de
@@ -425,7 +478,7 @@ def _level_spec(nodes: Dict[str, dict], parent_resource: Optional[str]) -> Optio
     must be the same as that of its siblings".
     """
     spec = None
-    for k in _children(nodes, parent_resource):
+    for k in _children(nodes, parent_resource, idx):
         if not k["dim"]:
             continue
         if spec is None:
@@ -435,18 +488,22 @@ def _level_spec(nodes: Dict[str, dict], parent_resource: Optional[str]) -> Optio
     return spec
 
 
-def _level_dim(nodes: Dict[str, dict], parent_resource: Optional[str]) -> Optional[str]:
-    spec = _level_spec(nodes, parent_resource)
+def _level_dim(nodes: Dict[str, dict], parent_resource: Optional[str],
+               idx: Optional[Dict[Optional[str], List[dict]]] = None) -> Optional[str]:
+    spec = _level_spec(nodes, parent_resource, idx)
     return spec["dim"] if spec else None
 
 
-def _item_id_containers(nodes: Dict[str, dict]) -> List[dict]:
+def _item_id_containers(nodes: Dict[str, dict],
+                        idx: Optional[Dict[Optional[str], List[dict]]] = None) -> List[dict]:
     """SUBDIVISIONs waarvan het niveau eronder écht op item-id zit."""
+    idx = idx if idx is not None else _children_index(nodes)
     return [n for n in nodes.values()
-            if n["type"] == "SUBDIVISION" and _level_dim(nodes, n["resource"]) == "item_id"]
+            if n["type"] == "SUBDIVISION" and _level_dim(nodes, n["resource"], idx) == "item_id"]
 
 
-def _convertible_leaves(nodes: Dict[str, dict]) -> Tuple[List[dict], set]:
+def _convertible_leaves(nodes: Dict[str, dict],
+                        idx: Optional[Dict[Optional[str], List[dict]]] = None) -> Tuple[List[dict], set]:
     """(leaves die we mogen omzetten, dimensies die we niet aankunnen).
 
     Een positieve biddable UNIT wordt een SUBDIVISION met item-id OTHERS (positief,
@@ -460,10 +517,11 @@ def _convertible_leaves(nodes: Dict[str, dict]) -> Tuple[List[dict], set]:
     """
     leaves: List[dict] = []
     unsupported: set = set()
+    idx = idx if idx is not None else _children_index(nodes)
     for n in nodes.values():
         if n["type"] != "UNIT" or n["negative"]:
             continue
-        lvl = _level_spec(nodes, n["parent"])
+        lvl = _level_spec(nodes, n["parent"], idx)
         if lvl is None:
             continue  # niveau niet te bepalen: niets doen is hier veiliger dan raden
         if lvl["dim"] == "item_id":
@@ -486,25 +544,33 @@ def _plan_sibling_exclusions(nodes: Dict[str, dict], item_ids: List[str]) -> Dic
       * de leaf is een biddable UNIT -> omzetten naar SUBDIVISION met item-id
                                         OTHERS (positief, originele bid) + negatieven
     """
-    containers = _item_id_containers(nodes)
+    idx = _children_index(nodes)
+    containers = _item_id_containers(nodes, idx)
     appends: List[Dict[str, Any]] = []
     converts: List[Dict[str, Any]] = []
     unsupported: set = set()
 
-    if containers:
-        for c in containers:
-            kids = _children(nodes, c["resource"])
-            # Ook de POSITIEVE item-ids meetellen: één node per case value, dus een
-            # id dat er positief hangt kan er niet negatief bij en levert anders
-            # LISTING_GROUP_ALREADY_EXISTS op.
-            already = {k["item_id"] for k in kids if k["dim"] == "item_id" and k["item_id"]}
-            missing = [i for i in item_ids if i not in already]
-            if missing:
-                appends.append({"parent": c["resource"], "missing": missing})
-    else:
-        leaves, unsupported = _convertible_leaves(nodes)
-        for leaf in leaves:
-            converts.append({"leaf": leaf, "missing": list(item_ids)})
+    # GEEN if/else. Een boom kan BEIDE vormen tegelijk hebben — een tak die al op
+    # item-id niveau zit én een tak die nog een biddable leaf is. Met een else bleef
+    # `converts` in dat geval leeg, rapporteerde de ad group "niets te doen", en
+    # bleef die tweede tak gewoon op de tag-topper-producten bieden. Dat is bereikbaar
+    # in normaal gebruik: een half geconverteerde boom is precies wat de volgende run
+    # inleest na een cancel of een mislukte convert.
+    # Beide helften draaien is in de zuivere gevallen gedragsidentiek, want
+    # _convertible_leaves() slaat een leaf die al op item_id-niveau zit zelf al over.
+    for c in containers:
+        kids = _children(nodes, c["resource"], idx)
+        # Ook de POSITIEVE item-ids meetellen: één node per case value, dus een
+        # id dat er positief hangt kan er niet negatief bij en levert anders
+        # LISTING_GROUP_ALREADY_EXISTS op.
+        already = {k["item_id"] for k in kids if k["dim"] == "item_id" and k["item_id"]}
+        missing = [i for i in item_ids if i not in already]
+        if missing:
+            appends.append({"parent": c["resource"], "missing": missing})
+
+    leaves, unsupported = _convertible_leaves(nodes, idx)
+    for leaf in leaves:
+        converts.append({"leaf": leaf, "missing": list(item_ids)})
 
     return {
         "appends": appends,
@@ -560,14 +626,20 @@ def _pick_negatives_source(siblings: List[dict]) -> Optional[dict]:
 
 
 def _copy_negatives(client, customer_id: str, target_resource: str, target_id: int,
-                    source: dict) -> Tuple[int, List[str]]:
-    """Neemt de negatives van `source` over in de doelcampagne. Idempotent."""
+                    source: dict) -> Tuple[int, int, List[str]]:
+    """Neemt de negatives van `source` over in de doelcampagne. Idempotent.
+
+    Geeft (gepland, toegevoegd, fouten) terug. Gepland is expres apart: hiervoor
+    werd alleen `added` teruggegeven en gaf de aanroeper dat door als ZOWEL planned
+    als applied, waardoor planned per definitie gelijk was aan applied en 40 van de
+    100 gelande negatives als "40 gepland / 40 toegepast / ok" op het scherm kwam.
+    """
     src = _fetch_campaign_negatives(client, customer_id, source["id"])
     dst = _fetch_campaign_negatives(client, customer_id, target_id)
     missing = [v for k, v in src.items() if k not in dst]
     missing.sort(key=lambda x: (NEG_MATCH_ORDER.get(x[1], 9), x[0].lower()))
     if not missing:
-        return 0, []
+        return 0, 0, []
 
     svc = client.get_service("CampaignCriterionService")
     ops = []
@@ -594,8 +666,16 @@ def _copy_negatives(client, customer_id: str, target_resource: str, target_id: i
         except GoogleAdsException as ex:
             errors.append(_err(ex))
             continue
+        # partial_failure staat aan, dus per-operatie-afwijzingen komen NIET als
+        # exception binnen maar in resp.partial_failure_error. Die werd hier nooit
+        # gelezen, zodat een afgekeurd zoekwoord spoorloos verdween.
+        skipped, chunk_errors, failed_idx, retry_idx = _read_partial_failure(client, resp)
+        errors.extend(chunk_errors)
+        if retry_idx:
+            errors.append(f"{len(retry_idx)} negative(s) tijdelijk geweigerd "
+                          f"(concurrent modification) — niet opnieuw geprobeerd")
         added += sum(1 for r in resp.results if r.resource_name)
-    return added, errors
+    return len(missing), added, errors
 
 
 # ---------------------------------------------------------------------------
@@ -743,20 +823,34 @@ def _err(ex: Exception) -> str:
     return f"{type(ex).__name__}: {ex}"[:400]
 
 
+# Transiënte Google-Ads-foutfamilies. Deze lijst is GELIJK aan die van
+# gsd_campaigns_service._is_retryable_gads. Hij liep uiteen: daar werden ook
+# internal_error en quota_error opnieuw geprobeerd, hier alleen
+# CONCURRENT_MODIFICATION — zodat identieke Google-storingen door de ene module
+# werden opgevangen en door de andere als rijfout gerapporteerd. Houd ze samen.
+_RETRYABLE_GADS_FAMILIES = ("database_error", "internal_error", "quota_error")
+_RETRYABLE_GADS_CODES = (
+    "CONCURRENT_MODIFICATION", "INTERNAL_ERROR", "TRANSIENT_ERROR",
+    "RESOURCE_EXHAUSTED", "RESOURCE_TEMPORARILY_EXHAUSTED",
+)
+
+
 def _is_concurrent_modification(ex: GoogleAdsException) -> bool:
-    """CONCURRENT_MODIFICATION is transient: Google was nog bezig met een eerdere
-    mutate op dezelfde ad group. Opnieuw proberen lost het op."""
+    """True bij een transiënte Google-fout die veilig opnieuw te proberen is."""
     try:
         for e in ex.failure.errors:
             code = e.error_code
-            if getattr(code, "database_error", None) and \
-                    code.database_error.name == "CONCURRENT_MODIFICATION":
-                return True
+            for family in _RETRYABLE_GADS_FAMILIES:
+                val = getattr(code, family, 0)
+                name = getattr(val, "name", str(val))
+                if name in _RETRYABLE_GADS_CODES:
+                    return True
             if "same resource at once" in (e.message or ""):
                 return True
     except Exception:
         pass
-    return False
+    msg = str(ex)
+    return "CONCURRENT_MODIFICATION" in msg or "modify the same resource" in msg
 
 
 def _is_already_exists(ex: GoogleAdsException) -> bool:
@@ -964,7 +1058,11 @@ def _apply_sibling_exclusions(client, customer_id: str, ad_group_id: str,
         # de case value van de leaf terug — of die nu op custom attribute, merk of
         # producttype zit — anders verschuift het targeting-pad.
         temp = _Temp()
-        bid = leaf["bid"] or DEFAULT_BID_MICROS
+        # Erft de leaf zijn bod van de ad group, dan leest hij hier als 0 en zette
+        # `or DEFAULT_BID_MICROS` er EUR 0,20 op. Val terug op het echte ad-groepbod;
+        # `or None` erachter is belangrijk voor auto-bidding groepen, die helemaal
+        # geen cpc_bid_micros op de unit willen.
+        bid = leaf["bid"] or _ad_group_cpc(client, customer_id, ad_group_id) or None
         ops = [_remove_op(client, leaf["resource"])]
         sub_op, sub_res = _subdiv_op(client, customer_id, ad_group_id, temp,
                                      leaf["parent"], spec=leaf["spec"])
@@ -1026,33 +1124,29 @@ def _apply_sibling_exclusions(client, customer_id: str, ad_group_id: str,
     return done, skipped, errors
 
 
-def _merchant_id_for_shop(client, customer_id: str, shop_id: str) -> Optional[int]:
-    """Het Merchant Center id dat de bestaande campagnes van deze shop gebruiken.
+def _merchant_id_from_campaigns(campaigns: List[dict]) -> Optional[int]:
+    """Het Merchant Center id uit de AL OP SHOPNAAM GEFILTERDE campagnes van deze shop.
 
-    Elke shop heeft een EIGEN MC-subaccount; het id in COUNTRY_ACCOUNTS is de
-    parent en kan niet aan een campagne gehangen worden — dat geeft
-    "Resource was not found" bij het aanmaken. GSD_tagtoppers.py leest het daarom
-    ook uit een bestaande campagne (get_merchant_id_for_campaign).
+    Vervangt de losse GAQL-lookup, die alleen op `shop_id` matchte. De docstring
+    bovenaan dit bestand zegt waarom dat niet mag: identiteit van een shop is
+    shopnaam EN shop_id — 652237 is zowel Bruna.nl als Hubfootwear.com. Een
+    shop_id-only lookup kon dus het MC-account van een ándere shop teruggeven en
+    daarmee een nieuwe campagne aan het verkeerde account hangen. Deterministisch
+    kiezen: het meest voorkomende id, bij gelijkspel het laagste.
     """
-    ga = client.get_service("GoogleAdsService")
-    q = f"""
-        SELECT campaign.shopping_setting.merchant_id
-        FROM campaign
-        WHERE campaign.name LIKE '%shop_id:{shop_id}]%'
-          AND campaign.status != 'REMOVED'
-    """
-    try:
-        for row in ga.search(customer_id=customer_id, query=q):
-            mid = row.campaign.shopping_setting.merchant_id
-            if mid:
-                return int(mid)
-    except GoogleAdsException as ex:
-        logger.warning("MC-id lookup mislukt voor shop %s: %s", shop_id, _err(ex))
-    return None
+    counts: Dict[int, int] = {}
+    for c in campaigns:
+        mid = c.get("merchant_id")
+        if mid:
+            counts[mid] = counts.get(mid, 0) + 1
+    if not counts:
+        return None
+    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
 
 
 def _create_tag_toppers_campaign(client, customer_id: str, country: str,
-                                 shop_id: str, shop_name: str) -> Tuple[Optional[dict], List[str]]:
+                                 shop_id: str, shop_name: str,
+                                 mc_id: Optional[int] = None) -> Tuple[Optional[dict], List[str]]:
     """Maakt een tag_toppers-campagne aan (PAUSED) met ad group, boomwortel en ad.
 
     Bewust NIET via gsd_campaigns_service.add_standard_shopping_campaign: die zet
@@ -1063,7 +1157,6 @@ def _create_tag_toppers_campaign(client, customer_id: str, country: str,
     base_shop = _clean_shop_name(shop_name)
     campaign_name = (f"[shop:{base_shop}] [shop_id:{shop_id}] "
                      f"[channel:directshopping] [label:tag_toppers]")
-    mc_id = _merchant_id_for_shop(client, customer_id, shop_id)
     if mc_id is None:
         return None, ["geen Merchant Center id gevonden bij de bestaande campagnes "
                       "van deze shop — campagne niet aangemaakt"]
@@ -1405,8 +1498,11 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
         res["negatives_source"] = source["name"] if source else "geen zuster gevonden"
 
         if not dry_run:
+            # MC-id uit de zusters van DEZE shop (naam + shop_id), niet uit een
+            # shop_id-only lookup die een andere shop kan aanwijzen.
             created, errs = _create_tag_toppers_campaign(
-                client, customer_id, country, row["shop_id"], row["shop_name"])
+                client, customer_id, country, row["shop_id"], row["shop_name"],
+                mc_id=_merchant_id_from_campaigns(siblings + camps["tag_toppers"]))
             res["errors"].extend(errs)
             if created is None:
                 target("aanmaken", res["campaign_name"], 1, 0, errors=errs)
@@ -1422,13 +1518,13 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
             target("toevoegen", created["name"], len(item_ids), added,
                    ad_group_id=created["ad_group_id"], errors=errs2, skipped=skipped)
             if source:
-                n, errs3 = _copy_negatives(client, customer_id, created["resource"],
-                                           created["id"], source)
+                planned3, n, errs3 = _copy_negatives(client, customer_id, created["resource"],
+                                                     created["id"], source)
                 res["negatives_copied"] = n
                 res["errors"].extend(errs3)
                 # Geen "bron: <campagnenaam>" in de note: die naam is bijna even lang
                 # als de rij zelf en de zuster is al af te leiden uit de shop.
-                target("negatives", created["name"], n, n, errors=errs3)
+                target("negatives", created["name"], planned3, n, errors=errs3)
         else:
             target("aanmaken", res["campaign_name"], 1, 0, note="PAUSED")
             target("toevoegen", res["campaign_name"], len(item_ids), 0)
@@ -1476,11 +1572,11 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
                     source = _pick_negatives_source(siblings)
                     res["negatives_source"] = source["name"] if source else "geen zuster gevonden"
                     if source:
-                        n_neg, errs3 = _copy_negatives(
+                        planned_neg, n_neg, errs3 = _copy_negatives(
                             client, customer_id, tt["resource"], tt["id"], source)
                         res["negatives_copied"] = n_neg
                         res["errors"].extend(errs3)
-                        target("negatives", tt["name"], n_neg, n_neg, errors=errs3)
+                        target("negatives", tt["name"], planned_neg, n_neg, errors=errs3)
             elif plan["parent"] is None:
                 # Boomvorm die we niet veilig kunnen aanvullen: melden in plaats van de
                 # ids naast een sibling van een andere dimensie hangen.
@@ -1603,7 +1699,13 @@ def _summarize(results: List[Dict[str, Any]]) -> Dict[str, Any]:
 def _run(rows: List[Dict[str, Any]], dry_run: bool) -> None:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    client = _get_client()
+    # _get_client() MOET binnen de try staan die _state["running"] weer vrijgeeft.
+    # Stond hij ervoor, dan liet een ontbrekende of ongeldige credential de thread
+    # sterven vóór de finally: de vlag bleef staan, elke volgende run kreeg 409
+    # "Er loopt al een run", en omdat uvicorn zonder --reload draait haalde alleen
+    # een handmatige herstart dat weg. `client` is een closure-variabele van work(),
+    # dat pas binnen de try wordt aangeroepen, dus dit is verder gedragsneutraal.
+    client = None
     results: List[Dict[str, Any]] = []
     done_count = 0
 
@@ -1627,7 +1729,9 @@ def _run(rows: List[Dict[str, Any]], dry_run: bool) -> None:
                 time.sleep(wacht)
         return _failed_row(row, _err(laatste))
 
+    fatal: Optional[str] = None
     try:
+        client = _get_client()
         with ThreadPoolExecutor(max_workers=RUN_WORKERS) as pool:
             futures = {pool.submit(work, r): r for r in rows}
             for fut in as_completed(futures):
@@ -1640,8 +1744,15 @@ def _run(rows: List[Dict[str, Any]], dry_run: bool) -> None:
                     _state["results"] = sorted(results, key=lambda r: r["excel_row"] or 0)
                     _state["summary"] = _summarize(results)
         results.sort(key=lambda r: r["excel_row"] or 0)
+    except Exception as ex:  # noqa: BLE001
+        # De thread is een daemon, dus een exceptie hier verdween spoorloos en de
+        # UI zag alleen een run die nul rijen opleverde. Vastleggen in de samenvatting.
+        fatal = _err(ex) if isinstance(ex, GoogleAdsException) else f"{type(ex).__name__}: {ex}"
+        logger.exception("tag-toppers run afgebroken")
     finally:
         summary = _summarize(results)
+        if fatal:
+            summary["fatal_error"] = fatal
         with _state_lock:
             _state["running"] = False
             _state["results"] = list(results)
