@@ -1,6 +1,78 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Eén label dat zowel toestand als lidmaatschap is, kun je niet "gewoon laten staan" (2026-09-03, GSD low-linkage)
+
+Joep vroeg waarom `GSD_LL_PAUSED` bij het weer activeren verwijderd wordt, en of het niet kon
+blijven staan zodat je ziet welke campagnes in de LL-set zitten. Het antwoord is dat dat ene label
+twee dingen doet, en dat je pas ziet wat er stuk gaat als je de consumers opsomt. Drie:
+
+1. **Het IS de enable-side selector.** `_find_labeled_campaigns` filtert op
+   `label.name = 'GSD_LL_PAUSED' AND campaign.status != 'REMOVED'` — let op: **géén**
+   `= 'PAUSED'`. Bleef het label staan, dan levert die query ook de al-actieve campagnes op en de
+   enable-tak stuurt daar onvoorwaardelijk `_set_status(..., "ENABLED")` op af. Google Ads
+   accepteert die no-op zonder klagen, dus je merkt het niet aan een fout maar aan de boekhouding:
+   één mutatie + één rij in `pa.jvs_gsd_ll_campaigns` + één bump van
+   `pa.jvs_gsd_ll_shop_cycles` per campagne per dag, voor elke herstelde shop.
+2. **`gsd_campaigns_service` leest het als eigendomsclaim** (regel ~3491) vóór het een gepauzeerde
+   campagne van een net-weer-aangezette shop activeert: "low-linkage owns its status".
+3. **`undo_ll_run` rekent op de symmetrie** van de twee richtingen (zie de entry over `/undo`).
+
+**De fix is twee labels, niet één slimmere regel.** `GSD_LL_PAUSED` blijft transiënte TOESTAND
+("staat nu uit dóór LL"), nieuw is `GSD_LL` als permanent LIDMAATSCHAP ("valt onder LL"), dat er
+nooit meer af gaat. De alternatieve route — één label houden en `AND campaign.status = 'PAUSED'`
+aan de selector toevoegen — werkt ook, maar dan bepaalt de statuskolom de betekenis van het label
+en vergeet de volgende die een query schrijft die filter. Waarom het twee labels zijn staat nu als
+comment bij de constanten.
+
+**Het lidmaatschapslabel mag status-blind aangebracht worden, en dat is precies de winst.** De
+pause-lookup filtert op `ENABLED`, dus alles wat al uitstond toen LL een shop voor het eerst zag
+kreeg nooit een label en is daarmee voor élke toekomstige enable-run onzichtbaar. `GSD_LL` gaat op
+alles wat niet REMOVED is, want het brengt een label aan en muteert geen status.
+
+**Een dry run mag ook geen LABEL aanmaken.** `_ensure_label()` creëerde er stilletjes een als hij
+ontbrak; daarom staat er nu een read-only `_lookup_label()` naast en gebruikt de preview die (mag
+None teruggeven). Een preview belooft nul mutaties, ook van de bookkeeping-soort.
+
+**PAUSED-zonder-toestandslabel is een revieuwlijst, geen actielijst.** Verleidelijk om de
+enable-selector te verbreden naar "lid én PAUSED", maar dan zet je de bewust uitgezette
+`[macro]`/`[macro+micro]`/`[limit]`-generaties aan — bij Afzuigkapfilterexpert.nl alleen al tien
+campagnes. De tool kan een gestrande campagne niet van een gepensioneerde onderscheiden, dus hij
+rapporteert (`dark_unowned`) en raakt niets aan.
+
+**Voor een sweep over de hele estate: één query per account, niet één per shop.** De per-shop
+lookups filteren server-side op `[shop_id:X]`, wat klopt voor een handvol shops maar over ~2.080
+shops × maximaal 3 accounts duizenden round trips kost — de feed-sweep van 58 shops deed er al 75s
+over. `backfill_member_labels()` haalt in plaats daarvan elk account één keer op (16.280 campagnes
+in **11s**), matcht de shop-ids lokaal met een regex op de campagnenaam, doet één Redshift-call
+voor de GSD-vlaggen en zet de attaches in batches van 1000 met `partial_failure=True`. Echt
+gedraaid: **12.768 gelabeld** (NL 7.055 / BE 4.709 / DE 1.004), 0 mislukt, 41s. Tel de successen
+via `sum(1 for r in resp.results if r.resource_name)` — bij partial failure komen de mislukte ops
+met een lege `resource_name` terug.
+
+**Meet zo'n backfill na met een tweede pass en met een onafhankelijke query.** De tweede
+dry-run-pass rapporteerde 12.768 al-lid en 0 te labelen (dus idempotent), en een losse
+`FROM campaign_label WHERE label.name = 'GSD_LL'` per account gaf exact 7.055 / 4.709 / 1.004 —
+niet de teller van de functie die het zelf schreef.
+
+**De feed is een probleemlijst, niet de roster.** Vandaag 58 rijen waarvan 57 met `gsd = 0`, want
+er komen alleen shops op die tegen de linkage-drempel aan zitten. `run_low_linkage()` sweept dus
+alleen die shops en het lidmaatschapslabel vult zich shop-voor-shop; wie de set compleet wil moet
+de backfill draaien. Scope daar: accounts uit `COUNTRY_CUSTOMER_IDS`, dus **niet** het
+gepensioneerde BE-account uit `PAUSE_EXTRA_CUSTOMER_IDS` — geen pause- of enable-run bereikt dat,
+dus lidmaatschap claimen zou daar liegen.
+
+**En de aangekondigde tweede stap bleek niet nodig.** Ik had de guard in `gsd_campaigns_service`
+als vervolg aangekondigd, maar die leest `GSD_LL_PAUSED` en dat label houdt in dit ontwerp exact
+zijn oude betekenis. Alle labelchecks in die service zijn "zit dít resource in de lijst" —
+additief, geen aanname over de volledige set — dus een extra label breekt er niets. Zeg dat dan,
+in plaats van een cosmetische edit maken om de aankondiging waar te maken.
+
+Sluit aan op de entry van 17-07 over de ad-hoc bulk-labeling: die noteerde al dat
+`GSD_LL_PAUSED` een re-enable-trigger is en niet een tag. Dat is nu structureel gescheiden.
+
+---
+
 ## De ankerdrift op de Keywords API komt uit de titel-keten, niet uit HS1.0 (2026-09-03, Healthscore)
 
 Live-check van de 12 testbuckets, 16 dagen na de re-push van 18 aug. **11 van de 12 url-sets zijn

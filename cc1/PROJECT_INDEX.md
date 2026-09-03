@@ -599,6 +599,47 @@ Check 4 (title variables) now samples 3 URLs each for `!!DISCOUNT!!`, `!!NR!!`, 
 - `GET /api/gsd-budgets/history/{run_id}` - Full detail for a specific run (used for history row re-render + XLSX export)
 - `DELETE /api/gsd-budgets/history` - Clear history
 
+### GSD Campaigns — low-linkage (dm-dashboard)
+Prefix `/api/gsd-campaigns`. Code: `backend/gsd_ll_service.py` + `backend/gsd_campaigns_router.py`.
+Achtergrond bij de dagelijkse 09:50-runs: `cc1/GSD_LL_MYSTERY_RUN.md`.
+
+**Twee labels, twee betekenissen — niet samenvoegen** (sinds 2026-09-03, commit `b060ab1`):
+- `GSD_LL_PAUSED` = transiënte **toestand**, "staat nu uit dóór low-linkage". Aan bij pause, weg
+  bij enable. Het **is** de enable-side selector (`_find_labeled_campaigns`, die niet op
+  `status = 'PAUSED'` filtert), en `gsd_campaigns_service` leest het als eigendomsclaim voordat het
+  een gepauzeerde campagne van een net-weer-aangezette shop activeert. Een gepauzeerde campagne
+  zónder dit label is voor élke toekomstige enable-run onzichtbaar — daarom rolt een mislukte
+  label-apply de pause terug.
+- `GSD_LL` = permanent **lidmaatschap**, "valt onder low-linkage". Status-blind aangebracht op elke
+  niet-REMOVED Shopping-campagne van een verwerkte shop, en **nooit** verwijderd. Puur informatief:
+  filterbaar in de Ads-UI en de basis voor de `dark_unowned`-rapportage.
+
+- `POST /api/gsd-campaigns/ll/run?dry_run=&date=&source=feed|excel&shop_names=&included=` - Feed
+  ophalen en pauzeren/heractiveren. **`dry_run` staat default op False.** Doet sinds 03-09 ook de
+  membership-sweep; een dry run muteert niets en maakt zelfs het label niet aan. Resultaat draagt
+  naast `paused`/`enabled`/`skipped`/`errors` nu `members_labeled`, `member_label_failures` en
+  `dark_unowned` (+ `_count`-varianten).
+- `POST /api/gsd-campaigns/ll/apply` - Body = de aangevinkte previewrijen. Doet de membership-sweep
+  óók, één keer per (account, shop): zonder dat zou het lidmaatschapslabel bij de gebruikelijke
+  preview→Apply-flow nooit echt aangebracht worden.
+- `GET /api/gsd-campaigns/ll/progress` - Voortgang van de enige lopende run (in-process).
+- `GET /api/gsd-campaigns/ll/history` / `GET /api/gsd-campaigns/ll/shop-cycles` - Auditlog uit
+  `pa.jvs_gsd_ll_campaigns` resp. de pause/enable-cyclusteller `pa.jvs_gsd_ll_shop_cycles`.
+- `POST /api/gsd-campaigns/ll/undo-backfill` - Reverse een run via `undo_ll_run()` →
+  `apply_selected()` met elke actie omgeklapt, zodat de labels in beide richtingen goed blijven.
+- `GET|POST /api/gsd-campaigns/ll/kill-switch` - Blokkeert echte mutaties door `dry_run` te
+  forceren.
+- `GET|POST /api/gsd-campaigns/ll/excel-schedule[/toggle]`, `POST /ll/excel-load`,
+  `GET /ll/excel-data`, `GET /ll/excel-dates`, `POST /ll/excel-dates/backfill` - De dagelijkse
+  Excel-load (09:50 Amsterdam) en de 7-daagse snapshots in `pa.jvs_gsd_ll_excel_snapshots`. De
+  scheduler doet **alleen** laden, nooit muteren.
+
+**Geen endpoint**: `backfill_member_labels(dry_run=True)` in `gsd_ll_service.py` — eenmalige (en
+idempotente) sweep die `GSD_LL` over de hele estate zet. Nodig omdat de feed een probleemlijst is
+(~58 shops/dag) en geen GSD-roster, dus zonder backfill vult het lidmaatschap zich shop-voor-shop.
+Eén query per account i.p.v. per shop; accounts uit `COUNTRY_CUSTOMER_IDS`, dus bewust niet het
+gepensioneerde BE-account uit `PAUSE_EXTRA_CUSTOMER_IDS`.
+
 ### DMA+
 - `POST /api/dma-plus/start` - Start DMA+ operation (form: operation, country, file/shop_name, dry_run)
 - `GET /api/dma-plus/status/{task_id}` - Poll task progress

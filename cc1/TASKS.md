@@ -3,6 +3,68 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-03 (7) — GSD low-linkage: welke campagnes missen het label, en waarom het label niet mocht blijven
+
+Commit `b060ab1`. Lessen in LEARNINGS, zelfde datum. Aanleiding: Sokken-online.nl
+(`[shop_id:652601]`) heeft campagnes zonder het LL-label terwijl je dat wel zou verwachten.
+
+Gedaan — **diagnose**:
+
+- [x] **Oorzaak gevonden en het is structureel.** Het label wordt alleen bij het pauzeren
+      aangebracht en `_find_enabled_campaigns()` filtert op `status = 'ENABLED'`. Alles wat op dat
+      moment al uitstond — door de shop-off-flow in `gsd_campaigns_service`, een script, of met de
+      hand — krijgt nooit `GSD_LL_PAUSED` en is daarmee voor élke enable-run onzichtbaar.
+- [x] **Sokken-online uitgezocht.** Op 03-08 pauzeerde LL vijf NL-campagnes (linkage 33,3) mét
+      label; op 03-09 08:26 (linkage 71,4 → `gsd = 1`) zijn die weer aangezet en het label
+      verwijderd. De vijf BE-campagnes stonden op 03-08 al uit — laatste spend 02-08, geen
+      status-wijziging in het 29-daagse `change_event`-venster — dus die zijn nooit gelabeld en
+      staan ondanks `gsd = 1` nog dark. De drie NL `[limit]`-campagnes zijn een oudere generatie.
+- [x] **De eigen boekhouding van de tool is dicht.** Van de 458 campagnes waarvan de laatste
+      LL-actie `Paused` is, mist er **nul** het label. Het gat zit puur bij campagnes die de tool
+      nooit zelf gepauzeerd heeft.
+- [x] **Spiegelbeeld ook geteld**: 43 ENABLED campagnes dragen `GSD_LL_PAUSED` nog (Nomad.nl,
+      Babista.nl, Rubbermatten24.nl, Jekashop.nl, Sleepworld.be) — buiten de tool om aangezet.
+      Sinds het lidmaatschapslabel is dat geen anomalie meer maar "lid, staat aan".
+
+Gedaan — **twee labels + backfill**:
+
+- [x] **`GSD_LL` naast `GSD_LL_PAUSED`.** Toestand blijft toestand, lidmaatschap is permanent en
+      gaat er nooit af. `_sync_member_labels()` labelt status-blind, muteert nooit een status, en
+      loopt in `run_low_linkage()` **én** `apply_selected()` (die tweede is niet optioneel: bij de
+      preview→Apply-flow zou het label anders alleen in de dry run "aangebracht" worden).
+- [x] **`_lookup_label()` uit `_ensure_label()` gesplitst** — een dry run maakt nu ook geen label
+      meer aan.
+- [x] **`backfill_member_labels()`** maakt de set in één keer compleet: één query per account
+      (16.280 campagnes in 11s) i.p.v. per shop, batches van 1000 met `partial_failure=True`.
+      Gedraaid: **12.768 gelabeld** (NL 7.055 / BE 4.709 / DE 1.004), 0 mislukt, 41s. Nagemeten met
+      een losse `campaign_label`-query per account op precies die aantallen, en een tweede pass
+      rapporteert 0 te labelen → idempotent. Buiten de set: 3.511 campagnes van shops zonder
+      `is_gsd_<land>_shop = 1`, en het gepensioneerde BE-account 7565255758.
+- [x] **Frontend**: gele tegel "dark, niet van LL" die de tabel filtert, `Dark`-badge, en de
+      subregel meldt hoeveel campagnes het `GSD_LL`-label kregen. Dark-rijen zijn niet
+      selecteerbaar, dus "Run selected" kan er nooit iets mee.
+- [x] **Guard in `gsd_campaigns_service` blijkt niet te hoeven** — die leest `GSD_LL_PAUSED` en dat
+      label houdt zijn oude betekenis; alle labelchecks daar zijn additief.
+
+Open:
+
+- [ ] **30 shop+land-combi's / 159 campagnes zijn VOLLEDIG dark** (nul actieve campagnes) terwijl
+      `bt.shop_list` de shop nog als GSD-shop voor dat land vlagt, en geen enkele draagt een
+      LL-toestandslabel — dus geen enable-run haalt ze ooit terug. Per shop een beslissing:
+      aanzetten of laten. De duurste is `Aliexpress.com|NL CSS` (665193, NL, € 30.973 in 365d,
+      laatste spend 24-08); daarna `XXXFatbikeskopen.nl` (653190, € 1.046) en `Berger-camping.nl`
+      (650991, NL+BE, € 794). Negen van de 30 zijn `OUD_`/`XXX`-shops, waar dark correct is en de
+      `shop_list`-vlag achterloopt. **Sokken-online BE is de enige die vandaag ook echt aan hoort
+      te staan** (`gsd = 1`).
+- [ ] **De andere 1.413 dark-zonder-eigenaar** zitten bij shops die ook live campagnes hebben; 683
+      daarvan zijn `[macro]`/`[macro+micro]`/`[limit]`-naamvarianten. Vermoedelijk afgesloten
+      experimenten — maar niemand heeft dat expliciet besloten. Eén keer doorlopen en opruimen of
+      accepteren.
+- [ ] **Deploy op win-htz-006:3003.** De labels zitten al in Google Ads (die mutatie liep via de
+      API), maar de nieuwe tegel en de sweep-in-de-run komen pas mee na een deploy.
+- [ ] **Overweeg de backfill periodiek te draaien** i.p.v. eenmalig — nieuwe campagnes van een
+      LL-shop krijgen hun lidmaatschap nu pas als die shop weer in de feed opduikt.
+
 ### 2026-09-03 (6) — Healthscore live-check, en het selectiemechanisme van Auto-Redirects naar acht tools
 
 Drie vragen van Joep op één dag. Commits `a4498ae` (frontend + endpoints) en `f1af046`
