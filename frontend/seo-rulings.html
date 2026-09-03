@@ -184,6 +184,18 @@
                     </div>
                     <div class="card-body p-0">
                         <div id="recentRunsBody" class="p-3"></div>
+                        <!-- Bulk-select bar under the table, same shape as Auto-Redirects:
+                             the count on the left, Export and Remove on the right, both
+                             disabled until a run is ticked. -->
+                        <div id="runSelBar" class="d-flex align-items-center gap-2 px-3 py-2 d-none"
+                             style="border-top: 1px solid var(--flat-border);">
+                            <span id="runSelCount" class="sel-count">0 selected</span>
+                            <div class="ms-auto d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-purple" id="runExportBtn" disabled
+                                        title="Download the selected runs. One run gives you its own file; several are merged into one.">Export</button>
+                                <button type="button" class="btn btn-sm btn-outline-red" id="runRemoveBtn" disabled>Remove</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -195,6 +207,13 @@
         <small>Digital Marketing tools by Joep van Schagen - 2026</small>
     </footer>
 
+    <style>
+        /* Selection count next to the bulk bar. Brand purple, because grey reads as
+           "no value" (UI_BLUEPRINT §Labels). */
+        .sel-count { color: var(--color-navbar); font-size: 0.82rem; font-weight: 600; }
+        .col-check { width: 36px; text-align: center; }
+        .col-check .form-check-input { margin: 0; vertical-align: middle; }
+    </style>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         const CHECK_LABELS = {
@@ -302,10 +321,11 @@
             table.innerHTML = `
                 <thead>
                     <tr>
-                        <th style="width: 25%; text-align: center;">Finished at</th>
-                        <th style="width: 25%; text-align: center;">Result</th>
-                        <th style="width: 25%; text-align: center;">Run ID</th>
-                        <th style="width: 25%; text-align: center;">Actions</th>
+                        <th class="col-check"><input class="form-check-input" type="checkbox" id="runSelectAll" title="Select all runs"></th>
+                        <th style="text-align: center;">Finished at</th>
+                        <th style="text-align: center;">Result</th>
+                        <th style="text-align: center;">Run ID</th>
+                        <th style="width: 90px; text-align: center;">Actions</th>
                     </tr>
                 </thead>
                 <tbody></tbody>
@@ -320,13 +340,13 @@
                     : `<span class="check-status pass">all passed</span>`;
                 const tr = document.createElement("tr");
                 tr.innerHTML = `
+                    <td class="col-check"><input class="form-check-input run-select" type="checkbox"
+                            data-run="${r.run_id}"${runSelected.has(r.run_id) ? " checked" : ""}></td>
                     <td style="text-align: center;">${escapeHtml(finished)}</td>
                     <td style="text-align: center;">${resultPill} <span class="text-muted small">${passed}/${passed+failed} ok</span></td>
                     <td style="text-align: center;"><code>${r.run_id}</code></td>
                     <td style="text-align: center;">
-                        <button class="btn btn-sm btn-outline-orange me-1" onclick="viewRun(${r.run_id})">View</button>
-                        <button class="btn btn-sm btn-outline-purple me-1" onclick="exportRun(${r.run_id})">Export</button>
-                        <button class="btn btn-sm btn-outline-red" onclick="removeRun(${r.run_id})">Remove</button>
+                        <button class="btn btn-sm btn-outline-orange" onclick="viewRun(${r.run_id})">View</button>
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -335,6 +355,55 @@
             body.innerHTML = "";
             body.appendChild(wrap);
             panel.classList.remove("d-none");
+            document.getElementById("runSelBar").classList.remove("d-none");
+            wireRunSelection();
+        }
+
+        // ---- Run selection (bulk Export / Remove) ---------------------------
+        // Export and Remove act on the ticked runs instead of a button pair per row.
+        // Keyed on the run's own id, so the selection survives a reload of the list.
+        const runSelected = new Set();
+
+        function selectedRunBoxes() {
+            return [...document.querySelectorAll("#recentRunsBody .run-select:checked")];
+        }
+
+        function updateRunSelectionCount() {
+            const n = selectedRunBoxes().length;
+            const cnt = document.getElementById("runSelCount");
+            if (cnt) cnt.textContent = `${n} selected`;
+            document.getElementById("runExportBtn").disabled = n === 0;
+            document.getElementById("runRemoveBtn").disabled = n === 0;
+            const all = [...document.querySelectorAll("#recentRunsBody .run-select")];
+            const sa = document.getElementById("runSelectAll");
+            if (sa) {
+                sa.checked = all.length > 0 && n === all.length;
+                sa.indeterminate = n > 0 && n < all.length;
+            }
+        }
+
+        function wireRunSelection() {
+            // A run that is gone must not stay in the selection.
+            const alive = new Set([...document.querySelectorAll("#recentRunsBody .run-select")]
+                .map(b => +b.dataset.run));
+            [...runSelected].forEach(id => { if (!alive.has(id)) runSelected.delete(id); });
+            const sa = document.getElementById("runSelectAll");
+            if (sa) sa.onchange = e => {
+                document.querySelectorAll("#recentRunsBody .run-select").forEach(b => {
+                    b.checked = e.target.checked;
+                    if (b.checked) runSelected.add(+b.dataset.run);
+                    else runSelected.delete(+b.dataset.run);
+                });
+                updateRunSelectionCount();
+            };
+            document.querySelectorAll("#recentRunsBody .run-select").forEach(box => {
+                box.onchange = () => {
+                    if (box.checked) runSelected.add(+box.dataset.run);
+                    else runSelected.delete(+box.dataset.run);
+                    updateRunSelectionCount();
+                };
+            });
+            updateRunSelectionCount();
         }
 
         async function viewRun(runId) {
@@ -351,36 +420,70 @@
             }
         }
 
-        async function exportRun(runId) {
+        function downloadJson(obj, filename) {
+            const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // One run downloads as its own file; several are merged into one, the same
+        // rule Auto-Redirects uses for its multi-run export.
+        async function exportSelectedRuns() {
+            const ids = selectedRunBoxes().map(b => +b.dataset.run);
+            if (!ids.length) return;
+            const btn = document.getElementById("runExportBtn");
+            btn.disabled = true;
             try {
-                const resp = await fetch(`/api/seo-rulings/runs/${runId}`);
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                const run = await resp.json();
-                const blob = new Blob([JSON.stringify(run, null, 2)], { type: "application/json" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                const ts = run.finished_at ? run.finished_at.replace(/[:.]/g, "-") : Date.now();
-                a.href = url;
-                a.download = `seo-rulings-run-${runId}-${ts}.json`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
+                const runs = [];
+                for (const id of ids) {
+                    const resp = await fetch(`/api/seo-rulings/runs/${id}`);
+                    if (!resp.ok) throw new Error(`run ${id}: HTTP ${resp.status}`);
+                    runs.push(await resp.json());
+                }
+                if (runs.length === 1) {
+                    const run = runs[0];
+                    const ts = run.finished_at ? run.finished_at.replace(/[:.]/g, "-") : Date.now();
+                    downloadJson(run, `seo-rulings-run-${ids[0]}-${ts}.json`);
+                } else {
+                    const stamp = new Date().toISOString().slice(0, 10);
+                    downloadJson(runs, `seo-rulings-runs-${stamp}.json`);
+                }
             } catch (err) {
                 alert("Failed to export run: " + err.message);
+            } finally {
+                updateRunSelectionCount();
             }
         }
 
-        async function removeRun(runId) {
-            if (!confirm(`Delete run #${runId} from history? This can't be undone.`)) return;
-            try {
-                const resp = await fetch(`/api/seo-rulings/runs/${runId}`, { method: "DELETE" });
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                loadRecentRuns();
-            } catch (err) {
-                alert("Failed to delete run: " + err.message);
+        async function removeSelectedRuns() {
+            const ids = selectedRunBoxes().map(b => +b.dataset.run);
+            if (!ids.length) return;
+            if (!confirm(`Delete ${ids.length} run(s) from history? This can't be undone.`)) return;
+            const btn = document.getElementById("runRemoveBtn");
+            btn.disabled = true;
+            const failed = [];
+            for (const id of ids) {
+                try {
+                    const resp = await fetch(`/api/seo-rulings/runs/${id}`, { method: "DELETE" });
+                    // 404 means it is already gone — that is the outcome we wanted.
+                    if (!resp.ok && resp.status !== 404) failed.push(`#${id}: HTTP ${resp.status}`);
+                    else runSelected.delete(id);
+                } catch (err) {
+                    failed.push(`#${id}: ${err.message}`);
+                }
             }
+            if (failed.length) alert("Failed to delete:\n" + failed.join("\n"));
+            loadRecentRuns();
         }
+
+        document.getElementById("runExportBtn").addEventListener("click", exportSelectedRuns);
+        document.getElementById("runRemoveBtn").addEventListener("click", removeSelectedRuns);
 
         function renderResult(data, finishedAtIso) {
             document.getElementById("loadingPanel").classList.add("d-none");

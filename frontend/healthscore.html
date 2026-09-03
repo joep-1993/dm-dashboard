@@ -117,11 +117,17 @@
            zodat de cijfers ondanks het centreren onder elkaar blijven staan. */
         .tool-table .col-center { font-variant-numeric: tabular-nums; }
         .tool-table tbody tr.run-row { cursor: pointer; }
-        /* Selectievakjes verschijnen pas als je op Export klikt: de kolom staat er
-           altijd in de DOM en wordt door deze klasse zichtbaar. Dat scheelt een
-           hertekening van de kop en houdt colspan overal 12. */
+        /* Selectievakjes staan er altijd, net als in Auto-Redirects: een kolom die
+           pas verschijnt nadat je op Export hebt geklikt verbergt dat je hier iets
+           kunt aanvinken. Export en Verwijder staan onder de tabel en worden pas
+           actief zodra er een run is aangevinkt. */
         .col-check { width: 36px; text-align: center; }
-        #runsTable:not(.select-mode) .col-check { display: none; }
+        /* Telling links in de balk onder de tabel. Merkpaars, want grijs leest als
+           "geen waarde" (UI_BLUEPRINT §Labels). */
+        .sel-count { color: var(--color-navbar); font-size: 0.82rem; font-weight: 600; }
+        /* De balk zelf hoort visueel bij de tabel, dus een lijn erboven i.p.v. een
+           losse marge — zelfde vorm als de Recent runs-balk in Auto-Redirects. */
+        .sel-bar { border-top: 1px solid var(--flat-border); }
         .tool-table tbody tr.row-selected > td { background: #f7f4fd; }
         .col-check .form-check-input { margin: 0; vertical-align: middle; }
         /* Geen eigen hover: .table-hover geeft de blauwe interactietint uit het
@@ -214,17 +220,6 @@
            labelmaat gebracht en in het huispaars. */
         .job-line { font-size: 0.85rem; display: flex; align-items: center; gap: 10px; }
         .job-line .spinner-border { width: 0.95rem; height: 0.95rem; border-width: 2px; color: #5e4a90; }
-
-        /* `hidden` en `d-flex` vechten, en `d-flex` wint — daarom deze regel. Bootstraps
-           reboot heeft `[hidden] { display: none !important }`, maar de display-utility
-           `.d-flex { display: flex !important }` staat LATER in diezelfde stylesheet en
-           heeft dezelfde specificiteit (0,1,0), dus die wint. Zonder deze regel staat de
-           selectiebalk permanent open terwijl de vinkjes verborgen zijn — precies wat een
-           schermshot van de kale pagina liet zien (2026-08-19). Een id-selector verslaat
-           beide. Let op bij een volgende `hidden`-toggle: een element ZONDER `d-*`-klasse
-           (`#runCard`, de twee actieknoppen) heeft dit niet nodig, want daar is
-           `[hidden]` de enige !important-regel die meedoet. */
-        #exportBar[hidden] { display: none !important; }
 
         /* Een leeg uitvoerpaneel mag geen ruimte kosten: de marge komt pas als er
            een balk of een banner in staat. */
@@ -442,28 +437,10 @@
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <h5 class="mb-0">Recent runs</h5>
-                <div class="d-flex gap-2">
-                    <button class="btn btn-sm btn-outline-purple" id="btnRunsRefresh">&#8635; Refresh</button>
-                    <!-- Verwijderen en Export zetten dezelfde selectiemodus aan (Joep,
-                         2026-08-19); alleen de actie in de balk onder de kop verschilt,
-                         en de selectie blijft staan als je tussen de twee wisselt. Nog
-                         een keer op dezelfde knop klikken zet de modus uit. -->
-                    <button class="btn btn-sm btn-outline-red" id="btnRunsDelete"
-                            title="Kies met vinkjes welke runs je verwijdert">Verwijder</button>
-                    <button class="btn btn-sm btn-outline-orange" id="btnRunsExport"
-                            title="Kies met vinkjes welke runs je exporteert">Export</button>
-                </div>
+                <button class="btn btn-sm btn-outline-purple" id="btnRunsRefresh">&#8635; Refresh</button>
             </div>
             <div class="card-body">
-                <!-- Bulk-selectiebalk boven de tabel, niet in de kaartkop
-                     (UI_BLUEPRINT §Buttons): de teller links, de acties rechts. -->
                 <div id="runsNote"></div>
-                <div id="exportBar" class="d-flex flex-wrap align-items-center gap-2 mb-2" hidden>
-                    <span class="muted-sm" id="exportCount"></span>
-                    <button class="btn btn-sm btn-outline-secondary ms-auto" id="btnExportCancel">Annuleren</button>
-                    <button class="btn btn-sm btn-outline-orange" id="btnExportGo" disabled>Exporteer selectie</button>
-                    <button class="btn btn-sm btn-outline-red" id="btnDeleteGo" disabled hidden>Verwijder selectie</button>
-                </div>
                 <div class="tool-table-wrap">
                     <table class="table table-sm table-hover tool-table" id="runsTable">
                         <thead class="table-light"><tr>
@@ -478,6 +455,19 @@
                         </tr></thead>
                         <tbody id="runsBody"></tbody>
                     </table>
+                </div>
+                <!-- Bulk-selectiebalk onder de tabel, zelfde vorm als Auto-Redirects:
+                     de telling links, Export en Verwijder rechts. Allebei disabled tot
+                     er iets is aangevinkt — het `disabled`-attribuut regelt de grijze
+                     staat, nooit met de hand herstylen (UI_BLUEPRINT §Buttons). -->
+                <div class="sel-bar d-flex align-items-center gap-2 mt-3 pt-3">
+                    <span id="runSelCount" class="sel-count">0 geselecteerd</span>
+                    <div class="ms-auto d-flex gap-2">
+                        <button type="button" class="btn btn-sm btn-outline-purple" id="btnExportGo" disabled
+                                title="Download de aangevinkte runs als CSV.">Export</button>
+                        <button type="button" class="btn btn-sm btn-outline-red" id="btnDeleteGo" disabled
+                                title="Verwijder de aangevinkte runs uit de historie.">Verwijder</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -986,13 +976,16 @@
     function showRun(run, opts) {
         if (!run) { hideRunCard(); return; }
         const isPreview = run.mode === 'preview';
-        const statusLbl = run.status === 'done' ? 'lbl-green'
-                        : run.status === 'error' ? 'lbl-red' : 'lbl-amber';
         document.getElementById('runCard').hidden = false;
+        // Geen "done"-label in de titel (Joep, 2026-09-03): dat de run klaar is, zie je
+        // al aan de kaart die eronder staat. Een status die NIET done is zegt wél iets,
+        // dus die blijft staan.
+        const statusLbl = run.status === 'error' ? 'lbl-red' : 'lbl-amber';
         document.getElementById('runCardTitle').innerHTML =
             `Run #${run.run_id} `
-            + `<span class="badge lbl ${isPreview ? 'lbl-blue' : 'lbl-pink'}">${esc(run.mode)}</span> `
-            + `<span class="badge lbl ${statusLbl}">${esc(run.status)}</span>`;
+            + `<span class="badge lbl ${isPreview ? 'lbl-blue' : 'lbl-pink'}">${esc(run.mode)}</span>`
+            + (run.status === 'done' ? ''
+               : ` <span class="badge lbl ${statusLbl}">${esc(run.status)}</span>`);
         renderRunBody(run, document.getElementById('runCardBody'), opts || {});
         // De rij in Recent runs die bij deze run hoort, blijft aangewezen.
         document.querySelectorAll('tr.run-row').forEach(x =>
@@ -1205,17 +1198,15 @@
     // Recent runs
     // ------------------------------------------------------------------ //
     let RUNS = [];
-    // Selectiemodus voor Export én Verwijder. Eén selectie, twee acties: wisselen
-    // tussen de knoppen houdt je vinkjes staan. De selectie hangt aan het run_id —
-    // niet aan de rij-index, want dan verschuift hij zodra de lijst herlaadt
-    // (UI_BLUEPRINT §Bulk-select bar).
-    let SEL_MODE = null;                 // null | 'export' | 'delete'
+    // Eén selectie, twee acties (Export en Verwijder), altijd zichtbaar — zoals in
+    // Auto-Redirects. De selectie hangt aan het run_id en niet aan de rij-index,
+    // want die verschuift zodra de lijst herlaadt (UI_BLUEPRINT §Bulk-select bar).
     const SEL = new Set();
 
     // Shimmerende placeholderrijen i.p.v. een spinner: een skeletonrij is even hoog
     // als een echte rij, dus de tabel klapt niet in en springt niet bij het laden
     // (UI_BLUEPRINT §Tables; .skel-row/.skel-bar staan in style.css).
-    const RUNS_COLS = 11;                // incl. de verborgen selectiekolom
+    const RUNS_COLS = 11;                // incl. de selectiekolom
     function skeletonRows(cols, n = 4) {
         const cell = '<td><span class="skel-bar"></span></td>';
         return ('<tr class="skel-row">' + cell.repeat(Math.max(cols, 1)) + '</tr>').repeat(n);
@@ -1277,14 +1268,9 @@
             </tr>`;
         }).join('');
         tb.querySelectorAll('tr.run-row').forEach(tr => {
-            const id = +tr.dataset.run;
-            // In selectiemodus is een rijklik een vinkje, geen "open de run": je bent
-            // dan rijen aan het aanwijzen, niet aan het lezen.
-            tr.onclick = e => {
-                if (!SEL_MODE) { openRun(id); return; }
-                if (e.target.classList.contains('run-chk')) return;   // die handelt zelf af
-                toggleSel(id, !SEL.has(id));
-            };
+            // Een rijklik opent de run; aanvinken doe je op het vinkje zelf, dat zijn
+            // klik tegenhoudt. Zo hoeft er geen modus meer aan te staan.
+            tr.onclick = () => openRun(+tr.dataset.run);
         });
         tb.querySelectorAll('.run-chk').forEach(box => {
             box.onclick = e => e.stopPropagation();
@@ -1304,28 +1290,11 @@
         syncSelBar();
     }
 
-    function setSelMode(mode) {
-        SEL_MODE = mode;
-        document.getElementById('runsTable').classList.toggle('select-mode', !!mode);
-        document.getElementById('exportBar').hidden = !mode;
-        document.getElementById('btnRunsExport').classList.toggle('active', mode === 'export');
-        document.getElementById('btnRunsDelete').classList.toggle('active', mode === 'delete');
-        document.getElementById('btnExportGo').hidden = mode !== 'export';
-        document.getElementById('btnDeleteGo').hidden = mode !== 'delete';
-        if (!mode) SEL.clear();
-        renderRuns();
-    }
-
     function syncSelBar() {
         const n = SEL.size, all = RUNS.length;
-        document.getElementById('exportCount').textContent =
-            `${fmtN(n)} van ${fmtN(all)} geselecteerd`;
-        const go = document.getElementById('btnExportGo');
-        go.disabled = !n;
-        go.textContent = n ? `Exporteer ${fmtN(n)}` : 'Exporteer selectie';
-        const del = document.getElementById('btnDeleteGo');
-        del.disabled = !n;
-        del.textContent = n ? `Verwijder ${fmtN(n)}` : 'Verwijder selectie';
+        document.getElementById('runSelCount').textContent = `${fmtN(n)} geselecteerd`;
+        document.getElementById('btnExportGo').disabled = !n;
+        document.getElementById('btnDeleteGo').disabled = !n;
         const box = document.getElementById('runsAllChk');
         box.checked = n === all && all > 0;
         box.indeterminate = n > 0 && n < all;
@@ -1353,7 +1322,6 @@
         }
         lines.push('', 'Dit is niet ongedaan te maken.');
         if (!confirm(lines.join('\n'))) return;
-        const bar = document.getElementById('exportBar');
         try {
             const j = await jpost('/runs/delete', {ids});
             SEL.clear();
@@ -1361,7 +1329,6 @@
             // Stond de verwijderde run open in de run-kaart? Dan die ook weg.
             const openId = +(document.getElementById('runCard').dataset.run || 0);
             if (ids.includes(openId)) { document.getElementById('runCard').dataset.run = ''; hideRunCard(); }
-            setSelMode(null);
             showDoneBanner(document.getElementById('runsNote'),
                 `<strong>${fmtN(j.deleted)} run(s) verwijderd.</strong>`, 'done');
         } catch (e) {
@@ -1402,11 +1369,6 @@
             r.onchange = rebuildPickers;
         });
         document.getElementById('btnRunsRefresh').onclick = loadRuns;
-        document.getElementById('btnRunsExport').onclick = () =>
-            setSelMode(SEL_MODE === 'export' ? null : 'export');
-        document.getElementById('btnRunsDelete').onclick = () =>
-            setSelMode(SEL_MODE === 'delete' ? null : 'delete');
-        document.getElementById('btnExportCancel').onclick = () => setSelMode(null);
         document.getElementById('btnExportGo').onclick = exportSelection;
         document.getElementById('btnDeleteGo').onclick = deleteSelection;
         document.getElementById('runsAllChk').onchange = e => {

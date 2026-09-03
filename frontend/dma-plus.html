@@ -19,6 +19,11 @@
         .history-row td, #historyTable th { vertical-align: middle; }
         .log-output { max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 0.8rem; white-space: pre-wrap; background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px; }
         .tab-content { padding-top: 1rem; }
+        /* Run history: same checkbox column and selection count as Auto-Redirects. */
+        #historyTable th.col-check, #historyTable td.col-check { width: 36px; text-align: center; }
+        #historyTable .col-check .form-check-input { margin: 0; vertical-align: middle; cursor: pointer; }
+        /* Brand purple, because grey reads as "no value" (UI_BLUEPRINT §Labels). */
+        .sel-count { color: var(--color-navbar); font-size: 0.82rem; font-weight: 600; }
     </style>
 </head>
 <body>
@@ -267,16 +272,27 @@
                             <table class="table table-sm table-hover tool-table" id="historyTable">
                                 <thead class="table-light">
                                     <tr>
+                                        <th class="col-check"><input class="form-check-input" type="checkbox" id="runSelectAll" title="Select all runs"></th>
                                         <th>Time</th>
                                         <th>Operation</th>
                                         <th>Country</th>
                                         <th>Status</th>
                                         <th>Summary</th>
-                                        <th style="width: 70px;">Export</th>
                                     </tr>
                                 </thead>
                                 <tbody id="historyBody"><tr><td colspan="6" class="text-muted text-center">No history yet</td></tr></tbody>
                             </table>
+                        </div>
+                        <!-- Bulk-select bar under the table, same shape as Auto-Redirects:
+                             one Export and one Remove for the ticked runs instead of that
+                             button pair on every row. -->
+                        <div class="d-flex align-items-center gap-2 px-3 py-2" style="border-top: 1px solid var(--flat-border);">
+                            <span id="runSelCount" class="sel-count">0 selected</span>
+                            <div class="ms-auto d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-purple" id="runExportBtn" disabled
+                                        title="Download the selected runs — one workbook per run, because the run shapes differ too much to merge into one sheet.">Export</button>
+                                <button type="button" class="btn btn-sm btn-outline-red" id="runRemoveBtn" disabled>Remove</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -619,6 +635,7 @@
             const tbody = document.getElementById('historyBody');
             if (!historyData.length) {
                 tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center">No history yet</td></tr>';
+                wireRunSelection();
                 return;
             }
             tbody.innerHTML = historyData.map((h, idx) => {
@@ -643,18 +660,23 @@
                 const dryRunBadge = h.dry_run
                     ? ' <span class="badge" style="border: 1px solid #b45309; color: #b45309; background: transparent; margin-left: 4px;">DRY RUN</span>'
                     : '';
+                // A run without a task_id cannot be removed server-side, so its box is
+                // DISABLED with the reason in the title rather than absent — an empty
+                // cell would just look like a hole (UI_BLUEPRINT §Bulk-select bar).
+                const id = h.task_id || '';
+                const cb = id
+                    ? `<input class="form-check-input run-select" type="checkbox" data-run="${escAttr(id)}"${runSelected.has(id) ? ' checked' : ''}>`
+                    : '<input class="form-check-input" type="checkbox" disabled title="This run predates task ids, so it cannot be exported or removed">';
                 return `<tr class="history-row">
+                    <td class="col-check">${cb}</td>
                     <td style="padding: 6px 12px;">${time}</td>
                     <td style="padding: 6px 12px;">${OP_LABELS[h.operation] || h.operation}${dryRunBadge}</td>
                     <td style="padding: 6px 12px;">${h.country}</td>
                     <td style="padding: 6px 12px;">${statusBadge}</td>
                     <td style="padding: 6px 12px;">${(h.summary && typeof h.summary !== 'object') ? h.summary : '-'}</td>
-                    <td style="padding: 6px 12px; text-align: center; white-space: nowrap;">
-                        <button class="btn btn-sm btn-outline-purple" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;" onclick="exportRow(${idx})">Export</button>
-                        <button class="btn btn-sm btn-outline-red" style="font-size: 0.75rem; padding: 0.15rem 0.5rem; margin-left: 4px;" onclick="removeRow(${idx})">Remove</button>
-                    </td>
                 </tr>`;
             }).join('');
+            wireRunSelection();
         } catch (e) {
             console.error('History error:', e);
             // Must replace the skeleton, or a failed load shimmers forever.
@@ -669,17 +691,87 @@
         loadHistory();
     }
 
-    async function removeRow(idx) {
-        const h = historyData[idx];
-        if (!h || !h.task_id) return;
-        if (!confirm(`Remove this ${h.operation} run from history?`)) return;
-        const r = await fetch(`${API}/api/dma-plus/history/${encodeURIComponent(h.task_id)}`, { method: 'DELETE' });
-        if (!r.ok) {
-            alert('Failed to remove — check server log.');
-            return;
-        }
-        loadHistory();
+    // Task ids come from the backend, but an id lands in an HTML attribute here,
+    // so it gets escaped like any other interpolated value.
+    const escAttr = v => String(v == null ? '' : v).replace(/[&<>"']/g,
+        c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+    // ---- Run selection (bulk Export / Remove) ---------------------------
+    // Export and Remove act on the ticked runs instead of a button pair per row.
+    // Keyed on task_id, not on the row index, so the selection survives a reload.
+    const runSelected = new Set();
+
+    function selectedRunIds() {
+        return [...document.querySelectorAll('#historyBody .run-select:checked')].map(b => b.dataset.run);
     }
+
+    function updateRunSelectionCount() {
+        const n = selectedRunIds().length;
+        const cnt = document.getElementById('runSelCount');
+        if (cnt) cnt.textContent = `${n} selected`;
+        document.getElementById('runExportBtn').disabled = n === 0;
+        document.getElementById('runRemoveBtn').disabled = n === 0;
+        const all = [...document.querySelectorAll('#historyBody .run-select')];
+        const sa = document.getElementById('runSelectAll');
+        if (sa) {
+            sa.checked = all.length > 0 && n === all.length;
+            sa.indeterminate = n > 0 && n < all.length;
+        }
+    }
+
+    function wireRunSelection() {
+        // A run that is gone must not linger in the selection.
+        const alive = new Set([...document.querySelectorAll('#historyBody .run-select')].map(b => b.dataset.run));
+        [...runSelected].forEach(id => { if (!alive.has(id)) runSelected.delete(id); });
+        document.querySelectorAll('#historyBody .run-select').forEach(box => {
+            box.onchange = () => {
+                if (box.checked) runSelected.add(box.dataset.run);
+                else runSelected.delete(box.dataset.run);
+                updateRunSelectionCount();
+            };
+        });
+        updateRunSelectionCount();
+    }
+
+    document.getElementById('runSelectAll').addEventListener('change', (e) => {
+        document.querySelectorAll('#historyBody .run-select').forEach(b => {
+            b.checked = e.target.checked;
+            if (b.checked) runSelected.add(b.dataset.run);
+            else runSelected.delete(b.dataset.run);
+        });
+        updateRunSelectionCount();
+    });
+
+    document.getElementById('runExportBtn').addEventListener('click', () => {
+        const ids = selectedRunIds();
+        if (!ids.length) return;
+        // One workbook per run: the two run shapes (row_results vs affected) have
+        // different sheets, so merging them would produce a sheet that fits neither.
+        for (const id of ids) {
+            const idx = historyData.findIndex(h => h.task_id === id);
+            if (idx >= 0) exportRow(idx);
+        }
+    });
+
+    document.getElementById('runRemoveBtn').addEventListener('click', async (e) => {
+        const ids = selectedRunIds();
+        if (!ids.length) return;
+        if (!confirm(`Remove ${ids.length} run(s) from history?`)) return;
+        e.currentTarget.disabled = true;
+        const failed = [];
+        for (const id of ids) {
+            try {
+                const r = await fetch(`${API}/api/dma-plus/history/${encodeURIComponent(id)}`, { method: 'DELETE' });
+                // 404 means it is already gone — that is the outcome we wanted.
+                if (!r.ok && r.status !== 404) failed.push(`${id}: HTTP ${r.status}`);
+                else runSelected.delete(id);
+            } catch (err) {
+                failed.push(`${id}: ${err.message}`);
+            }
+        }
+        if (failed.length) alert('Failed to remove — check server log:\n' + failed.join('\n'));
+        loadHistory();
+    });
 
     function exportRow(idx) {
         if (typeof XLSX === 'undefined') {

@@ -43,6 +43,11 @@
         /* Apply bar + selection column */
         .apply-bar { border-bottom: 1px solid #eee; background: #fbfbfc; }
         #resultsTable th.col-check, #resultsTable td.col-check { width: 36px; padding: 6px 8px; }
+        /* Run History: same checkbox column and selection count as Auto-Redirects. */
+        .runs-table th.col-check, .runs-table td.col-check { width: 36px; text-align: center; }
+        .runs-table .col-check .form-check-input { margin: 0; vertical-align: middle; cursor: pointer; }
+        /* Brand purple, because grey reads as "no value" (UI_BLUEPRINT §Labels). */
+        .sel-count { color: var(--color-navbar); font-size: 0.82rem; font-weight: 600; }
         #resultsTable td.col-check .form-check-input { cursor: pointer; }
         #resultsTable tbody tr.row-selected { background: #f3f0fa; }
         #resultsTable tbody tr.row-applied td { color: #6c757d; }
@@ -339,6 +344,7 @@
                         <table class="table table-sm table-bordered mb-0 runs-table">
                             <thead>
                                 <tr style="background:#f0f0f0; border-bottom: 2px solid #dee2e6;">
+                                    <th class="col-check" style="padding: 8px 12px;"><input class="form-check-input" type="checkbox" id="runSelectAll" title="Select all runs"></th>
                                     <th style="padding: 8px 12px;">Run</th>
                                     <th style="padding: 8px 12px;">Started</th>
                                     <th style="padding: 8px 12px;">Status</th>
@@ -348,9 +354,20 @@
                                 </tr>
                             </thead>
                             <tbody id="runsBody">
-                                <tr><td colspan="6" class="text-center text-muted py-3">Loading…</td></tr>
+                                <tr><td colspan="7" class="text-center text-muted py-3">Loading…</td></tr>
                             </tbody>
                         </table>
+                        <!-- Bulk-select bar under the table, same shape as Auto-Redirects:
+                             one Export and one Remove for the ticked runs instead of that
+                             button pair on every row. -->
+                        <div class="d-flex align-items-center gap-2 px-3 py-2" style="border-top: 1px solid var(--flat-border);">
+                            <span id="runSelCount" class="sel-count">0 selected</span>
+                            <div class="ms-auto d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-purple" id="runExportBtn" disabled
+                                        title="Download the selected runs. One run gives you its own file; several are merged into one workbook with a leading `run` column.">Export</button>
+                                <button type="button" class="btn btn-sm btn-outline-red" id="runRemoveBtn" disabled>Remove</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -618,7 +635,8 @@ async function loadRuns() {
     const data = await r.json();
     body.innerHTML = '';
     if (!data.runs.length) {
-        body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No runs yet.</td></tr>';
+        body.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">No runs yet.</td></tr>';
+        updateRunSelectionCount();
         return;
     }
     for (const run of data.runs) {
@@ -633,6 +651,8 @@ async function loadRuns() {
         const scopeHtml = scope
             ? `<div class="text-muted" style="font-size:0.75rem;">${escapeAttr(scope)}</div>` : '';
         tr.innerHTML = `
+            <td class="col-check"><input class="form-check-input run-select" type="checkbox"
+                    data-run="${escapeAttr(run.run_id)}" data-done="${run.status === 'completed' ? 1 : 0}"${runSelected.has(run.run_id) ? ' checked' : ''}></td>
             <td class="font-monospace small"><a href="#" onclick="event.preventDefault(); resumeWatch('${run.run_id}')" class="text-decoration-none">${run.run_id}</a></td>
             <td>${run.started_at ? new Date(run.started_at).toLocaleString() : ''}</td>
             <td><span class="badge ${badgeClass} status-badge">${run.status}</span></td>
@@ -640,31 +660,104 @@ async function loadRuns() {
             <td class="small">${dateRange}${scopeHtml}</td>
             <td>
                 ${run.status === 'completed'
-                    ? `<button class="btn btn-sm btn-outline-purple me-1" onclick="resumeWatch('${run.run_id}')">Results</button>
-                       <a class="btn btn-sm btn-outline-purple me-1" href="/api/seo-prio/export/${run.run_id}">Export</a>`
+                    ? `<button class="btn btn-sm btn-outline-purple" onclick="resumeWatch('${run.run_id}')">Results</button>`
                     : ''}
-                <button class="btn btn-sm btn-outline-red" onclick="removeRun('${run.run_id}')">Remove</button>
             </td>`;
         body.appendChild(tr);
     }
+    wireRunSelection();
 }
 
-async function removeRun(runId) {
-    if (!confirm(`Remove run ${runId}? This deletes the run and all its results.`)) return;
-    const r = await fetch('/api/seo-prio/runs/' + runId, {method: 'DELETE'});
-    if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        alert(err.detail || 'Failed to remove run');
-        return;
-    }
-    if (_activeRunId === runId) {
-        _activeRunId = null;
-        document.getElementById('resultsCard').classList.add('d-none');
-        document.getElementById('statusCard').classList.add('d-none');
-        document.getElementById('summaryCard').classList.add('d-none');
-    }
-    loadRuns();
+// ---- Run selection (bulk Export / Remove) -------------------------------
+// Export and Remove act on the ticked runs instead of a button pair per row.
+// Keyed on the run's own id, so sorting or a reload cannot scramble it.
+const runSelected = new Set();
+
+function selectedRunIds() {
+    return [...document.querySelectorAll('#runsBody .run-select:checked')].map(b => b.dataset.run);
 }
+
+function updateRunSelectionCount() {
+    const n = selectedRunIds().length;
+    const cnt = document.getElementById('runSelCount');
+    if (cnt) cnt.textContent = `${n} selected`;
+    const exportBtn = document.getElementById('runExportBtn');
+    // Only a completed run has results to export; Remove works on any run.
+    const exportable = [...document.querySelectorAll('#runsBody .run-select:checked')]
+        .filter(b => b.dataset.done === '1').length;
+    if (exportBtn) exportBtn.disabled = exportable === 0;
+    const removeBtn = document.getElementById('runRemoveBtn');
+    if (removeBtn) removeBtn.disabled = n === 0;
+    const all = [...document.querySelectorAll('#runsBody .run-select')];
+    const sa = document.getElementById('runSelectAll');
+    if (sa) {
+        sa.checked = all.length > 0 && n === all.length;
+        sa.indeterminate = n > 0 && n < all.length;
+    }
+}
+
+function wireRunSelection() {
+    // A run that is gone must not linger in the selection.
+    const alive = new Set([...document.querySelectorAll('#runsBody .run-select')].map(b => b.dataset.run));
+    [...runSelected].forEach(id => { if (!alive.has(id)) runSelected.delete(id); });
+    document.querySelectorAll('#runsBody .run-select').forEach(box => {
+        box.onchange = () => {
+            if (box.checked) runSelected.add(box.dataset.run);
+            else runSelected.delete(box.dataset.run);
+            updateRunSelectionCount();
+        };
+    });
+    updateRunSelectionCount();
+}
+
+document.getElementById('runSelectAll').addEventListener('change', (e) => {
+    document.querySelectorAll('#runsBody .run-select').forEach(b => {
+        b.checked = e.target.checked;
+        if (b.checked) runSelected.add(b.dataset.run);
+        else runSelected.delete(b.dataset.run);
+    });
+    updateRunSelectionCount();
+});
+
+document.getElementById('runExportBtn').addEventListener('click', () => {
+    const boxes = [...document.querySelectorAll('#runsBody .run-select:checked')];
+    const done = boxes.filter(b => b.dataset.done === '1').map(b => b.dataset.run);
+    if (!done.length) return;
+    const skipped = boxes.length - done.length;
+    if (skipped && !confirm(`${skipped} of the selected runs never completed and have no `
+        + `results. Export the other ${done.length}?`)) return;
+    window.location.href = '/api/seo-prio/export?run_ids=' + encodeURIComponent(done.join(','));
+});
+
+document.getElementById('runRemoveBtn').addEventListener('click', async (e) => {
+    const ids = selectedRunIds();
+    if (!ids.length) return;
+    if (!confirm(`Remove ${ids.length} run(s)? This deletes the runs and all their results.`)) return;
+    e.currentTarget.disabled = true;
+    const failed = [];
+    for (const runId of ids) {
+        try {
+            const r = await fetch('/api/seo-prio/runs/' + runId, {method: 'DELETE'});
+            // 404 means it is already gone — that is the outcome we wanted.
+            if (!r.ok && r.status !== 404) {
+                const err = await r.json().catch(() => ({}));
+                failed.push(`${runId}: ${err.detail || r.status}`);
+            } else {
+                runSelected.delete(runId);
+                if (_activeRunId === runId) {
+                    _activeRunId = null;
+                    document.getElementById('resultsCard').classList.add('d-none');
+                    document.getElementById('statusCard').classList.add('d-none');
+                    document.getElementById('summaryCard').classList.add('d-none');
+                }
+            }
+        } catch (err) {
+            failed.push(`${runId}: ${err.message}`);
+        }
+    }
+    if (failed.length) alert('Failed to remove:\n' + failed.join('\n'));
+    loadRuns();
+});
 
 function resumeWatch(runId) {
     // Toggle: if Watch clicked again for the same run, hide the results table.

@@ -918,6 +918,43 @@ applied") — a row you cannot act on still tells you something, an absent check
 a hole. Keep the selection keyed on the row's own identity (the same key the backend
 looks the row up by), not on its page index, or it scrambles the moment someone sorts.
 
+**Een run-historie zet die balk ONDER de tabel** (Joep, 2026-09-03; Auto-Redirects is de
+referentie). Bij een werkvoorraad staat de balk boven de tabel omdat je van boven naar
+beneden leest en dán handelt; bij een historie is de tabel zelf het antwoord en zijn Export
+en Verwijder een naschrift. Vorm:
+
+```html
+<div class="d-flex align-items-center gap-2 mt-3 pt-3" style="border-top: 1px solid var(--flat-border);">
+    <span id="runSelCount" class="sel-count">0 selected</span>
+    <div class="ms-auto d-flex gap-2">
+        <button class="btn btn-sm btn-outline-purple" id="runExportBtn" disabled>Export</button>
+        <button class="btn btn-sm btn-outline-red"    id="runRemoveBtn" disabled>Remove</button>
+    </div>
+</div>
+```
+
+`.sel-count` is merkpaars (`var(--color-navbar)`, 0.82rem, 600) — grijs leest als "geen
+waarde". **Export is outlined PAARS, niet oranje** (2026-09-03): oranje is de kleur van
+"dit doet iets", en downloaden doet niets aan de data. Verwijderen blijft `btn-outline-red`.
+
+Vier regels die er in de praktijk toe deden:
+- **Geen selectiemodus.** De vinkkolom staat er altijd; een kolom die pas verschijnt nadat
+  je op Export klikt, verbergt juist dát je iets kunt aanvinken. Healthscore had die modus
+  en is er in dezelfde ronde vanaf gehaald.
+- **Eén rij aanklikken opent de run**, het vinkje selecteert hem. Zet daarom
+  `onclick="event.stopPropagation()"` op de `td.col-check` van een klikbare rij.
+- **Een run zonder bruikbare uitvoer krijgt een disabled vinkje mét reden in `title`**,
+  geen leeg vakje. Kan hij wél weg maar niet geëxporteerd worden, laat Remove dan aan en
+  zet Export uit op basis van een `data-`vlag op het vinkje (`data-out`, `data-done`).
+- **Meerdere runs exporteren = één bestand met een kolom `run` vooraan.** Eén run houdt
+  zijn eigen bestandsnaam. Zonder die kolom weet je in een samengevoegde export niet meer
+  waar een rij vandaan komt. Kunnen twee runvormen niet in één blad (DMA+), exporteer dan
+  één bestand per run en zeg dat in de `title` van de knop.
+
+Toegepast op Auto-Redirects, Redirect Generator, Healthscore, GSD Budgets, GSD Tag Toppers,
+DMA+, DMA Bidding, SEO Prio, SEO Rulings en Canonicals (die laatste heeft geen export, dus
+alleen Delete).
+
 **Unavailable always wins over colour.** A `disabled` button rendert **vlak grijs**
 (paneelvulling `#f4f5f9`, rand `#d6d8d7`, tekst `#9aa0a6`) ongeacht zijn beschikbare
 kleur — inclusief rode/destructieve knoppen (Stop, Remove, Cancel). Rood is alleen te zien

@@ -85,6 +85,11 @@
         /* De paarse flatpickr-kalender staat sinds 2026-08-14 in css/style.css: dit
            blok van negen regels stond op zes pagina's byte-identiek. Hier iets wijzigen
            doet dus niets meer — pas het daar aan. */
+        /* Run History: same checkbox column and selection count as Auto-Redirects. */
+        #historyTable th.col-check, #historyTable td.col-check { width: 36px; text-align: center; }
+        #historyTable .col-check .form-check-input { margin: 0; vertical-align: middle; cursor: pointer; }
+        /* Brand purple, because grey reads as "no value" (UI_BLUEPRINT §Labels). */
+        .sel-count { color: var(--color-navbar); font-size: 0.82rem; font-weight: 600; }
     </style>
 </head>
 <body>
@@ -284,16 +289,27 @@
                             <table class="table table-sm table-hover tool-table" id="historyTable" style="min-width: 720px;">
                                 <thead class="table-light">
                                     <tr>
+                                        <th class="col-check"><input class="form-check-input" type="checkbox" id="runSelectAll" title="Select all runs"></th>
                                         <th class="sortable" data-sort="timestamp" onclick="sortHistory('timestamp')">Time</th>
                                         <th class="sortable" data-sort="country" onclick="sortHistory('country')">Country</th>
                                         <th>Date Range</th>
                                         <th class="sortable col-center" data-sort="_changes" onclick="sortHistory('_changes')">Changes</th>
                                         <th class="sortable" data-sort="status" onclick="sortHistory('status')">Status</th>
-                                        <th class="col-center" style="width: 150px;">Export</th>
                                     </tr>
                                 </thead>
                                 <tbody id="historyTableBody"></tbody>
                             </table>
+                        </div>
+                        <!-- Bulk-select bar under the table, same shape as Auto-Redirects:
+                             one Export and one Remove for the ticked runs instead of that
+                             button pair on every row. -->
+                        <div class="d-flex align-items-center gap-2 mt-3 pt-3" style="border-top: 1px solid var(--flat-border);">
+                            <span id="runSelCount" class="sel-count">0 selected</span>
+                            <div class="ms-auto d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-purple" id="runExportBtn" disabled
+                                        title="Download the selected runs. One run gives you its own file; several are merged into one workbook with a leading `run` column.">Export</button>
+                                <button type="button" class="btn btn-sm btn-outline-red" id="runRemoveBtn" disabled>Remove</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -654,70 +670,147 @@
             exportRunToExcel(lastRunResult);
         }
 
+        // Takes one run or a list of them. Several runs merge into one workbook
+        // with a leading `run` column, the same rule the Auto-Redirects bulk
+        // export follows — otherwise a merged sheet cannot say where a row is from.
         function exportRunToExcel(runData) {
+            const runs = Array.isArray(runData) ? runData : [runData];
+            const multi = runs.length > 1;
             const header = ['Actie', 'Shopnaam', 'Shop ID', 'Marge', 'Rev/Click', 'Rev/Click-4wkn', 'Δ %',
                             'Transacties', 'Linkage', 'Campagne', 'Oud Budget (€)', 'Nieuw Budget (€)',
                             'Mutation Status'];
-            const rows = [header];
-            for (const shop of (runData.results || [])) {
-                if (!shop.action) continue;
-                if ((shop.campaigns || []).length === 0) {
-                    rows.push([shop.action, shop.shop_name, shop.shop_id, shop.marge, shop.rev_click,
-                               shop.rev_click_old, shop.rev_click_delta, shop.transactions, shop.linkage,
-                               '', '', '', '(no matching campaigns)']);
-                    continue;
+            const rows = [multi ? ['run'].concat(header) : header];
+            const ol = [multi ? ['run', 'Shopnaam', 'Shop ID', 'Marge'] : ['Shopnaam', 'Shop ID', 'Marge']];
+            const pre = run => multi ? [run.run_id] : [];
+            for (const run of runs) {
+                for (const shop of (run.results || [])) {
+                    if (!shop.action) continue;
+                    if ((shop.campaigns || []).length === 0) {
+                        rows.push(pre(run).concat([shop.action, shop.shop_name, shop.shop_id, shop.marge, shop.rev_click,
+                                   shop.rev_click_old, shop.rev_click_delta, shop.transactions, shop.linkage,
+                                   '', '', '', '(no matching campaigns)']));
+                        continue;
+                    }
+                    for (const c of shop.campaigns) {
+                        rows.push(pre(run).concat([shop.action, shop.shop_name, shop.shop_id, shop.marge, shop.rev_click,
+                                   shop.rev_click_old, shop.rev_click_delta, shop.transactions, shop.linkage,
+                                   c.campaign_name, c.budget_old, c.budget_new,
+                                   c.mutation_status || (c.skip_reason || '')]));
+                    }
                 }
-                for (const c of shop.campaigns) {
-                    rows.push([shop.action, shop.shop_name, shop.shop_id, shop.marge, shop.rev_click,
-                               shop.rev_click_old, shop.rev_click_delta, shop.transactions, shop.linkage,
-                               c.campaign_name, c.budget_old, c.budget_new,
-                               c.mutation_status || (c.skip_reason || '')]);
+                for (const r of (run.over_loss_25 || [])) {
+                    ol.push(pre(run).concat([r.shop_name, r.shop_id, r.marge]));
                 }
             }
-            const ws = XLSX.utils.aoa_to_sheet(rows);
             const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'GSD Budgets');
-
-            if ((runData.over_loss_25 || []).length > 0) {
-                const ol = [['Shopnaam', 'Shop ID', 'Marge']].concat(
-                    runData.over_loss_25.map(r => [r.shop_name, r.shop_id, r.marge])
-                );
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'GSD Budgets');
+            if (ol.length > 1) {
                 XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ol), '> €25 verlies');
             }
 
-            const country = (runData.country || 'NL').toLowerCase();
-            const mode = runData.dry_run ? 'dry' : 'live';
-            const date = (runData.timestamp || '').split('T')[0];
-            XLSX.writeFile(wb, `gsd-budgets-${country}-${mode}-${date}-run${runData.run_id}.xlsx`);
+            if (multi) {
+                const stamp = new Date().toISOString().slice(0, 10);
+                XLSX.writeFile(wb, `gsd-budgets-${runs.length}-runs-${stamp}.xlsx`);
+                return;
+            }
+            const one = runs[0];
+            const country = (one.country || 'NL').toLowerCase();
+            const mode = one.dry_run ? 'dry' : 'live';
+            const date = (one.timestamp || '').split('T')[0];
+            XLSX.writeFile(wb, `gsd-budgets-${country}-${mode}-${date}-run${one.run_id}.xlsx`);
         }
 
-        async function removeHistoryRun(event, runId) {
-            if (event) event.stopPropagation();
-            if (!confirm(`Remove run #${runId} from history? This only deletes the local history record — already-applied budget mutations are NOT rolled back.`)) return;
-            try {
-                const res = await fetch(`${API_BASE}/api/gsd-budgets/history/${runId}`, { method: 'DELETE' });
-                if (!res.ok) {
-                    const text = await res.text();
-                    throw new Error(`HTTP ${res.status}: ${text}`);
-                }
-                loadHistory();
-            } catch (err) {
-                alert(`Remove failed: ${err.message}`);
+        // ---- Run selection (bulk Export / Remove) -------------------------
+        // Export and Remove act on the ticked runs instead of a button pair per
+        // row. Keyed on the run's own id, so sorting the table cannot scramble it.
+        const runSelected = new Set();
+
+        function selectedRunIds() {
+            return [...document.querySelectorAll('#historyTableBody .run-select:checked')]
+                .map(b => Number(b.dataset.run));
+        }
+
+        function updateRunSelectionCount() {
+            const n = selectedRunIds().length;
+            const cnt = document.getElementById('runSelCount');
+            if (cnt) cnt.textContent = `${n} selected`;
+            const exportBtn = document.getElementById('runExportBtn');
+            if (exportBtn) exportBtn.disabled = n === 0;
+            const removeBtn = document.getElementById('runRemoveBtn');
+            if (removeBtn) removeBtn.disabled = n === 0;
+            const all = [...document.querySelectorAll('#historyTableBody .run-select')];
+            const sa = document.getElementById('runSelectAll');
+            if (sa) {
+                sa.checked = all.length > 0 && n === all.length;
+                sa.indeterminate = n > 0 && n < all.length;
             }
         }
 
-        async function downloadHistoryRun(event, runId) {
-            event.stopPropagation();
+        function wireRunSelection() {
+            // A run that is gone must not linger in the selection.
+            const alive = new Set([...document.querySelectorAll('#historyTableBody .run-select')]
+                .map(b => Number(b.dataset.run)));
+            [...runSelected].forEach(id => { if (!alive.has(id)) runSelected.delete(id); });
+            document.querySelectorAll('#historyTableBody .run-select').forEach(box => {
+                box.onchange = () => {
+                    if (box.checked) runSelected.add(Number(box.dataset.run));
+                    else runSelected.delete(Number(box.dataset.run));
+                    updateRunSelectionCount();
+                };
+            });
+            updateRunSelectionCount();
+        }
+
+        document.getElementById('runSelectAll').addEventListener('change', (e) => {
+            document.querySelectorAll('#historyTableBody .run-select').forEach(b => {
+                b.checked = e.target.checked;
+                if (b.checked) runSelected.add(Number(b.dataset.run));
+                else runSelected.delete(Number(b.dataset.run));
+            });
+            updateRunSelectionCount();
+        });
+
+        document.getElementById('runExportBtn').addEventListener('click', async (e) => {
+            const ids = selectedRunIds();
+            if (!ids.length) return;
+            const btn = e.currentTarget;
+            btn.disabled = true;
             try {
-                const res = await fetch(`${API_BASE}/api/gsd-budgets/history/${runId}`);
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                exportRunToExcel(data);
+                const runs = [];
+                for (const runId of ids) {
+                    const res = await fetch(`${API_BASE}/api/gsd-budgets/history/${runId}`);
+                    if (!res.ok) throw new Error(`run ${runId}: HTTP ${res.status}`);
+                    runs.push(await res.json());
+                }
+                exportRunToExcel(runs);
             } catch (err) {
                 console.error('Failed to download run:', err);
                 alert('Download mislukt: ' + err.message);
+            } finally {
+                updateRunSelectionCount();
             }
-        }
+        });
+
+        document.getElementById('runRemoveBtn').addEventListener('click', async (e) => {
+            const ids = selectedRunIds();
+            if (!ids.length) return;
+            if (!confirm(`Remove ${ids.length} run(s) from history? This only deletes the local `
+                + `history records — already-applied budget mutations are NOT rolled back.`)) return;
+            e.currentTarget.disabled = true;
+            const failed = [];
+            for (const runId of ids) {
+                try {
+                    const res = await fetch(`${API_BASE}/api/gsd-budgets/history/${runId}`, { method: 'DELETE' });
+                    // 404 means it is already gone — that is the outcome we wanted.
+                    if (!res.ok && res.status !== 404) failed.push(`#${runId}: HTTP ${res.status}`);
+                    else runSelected.delete(runId);
+                } catch (err) {
+                    failed.push(`#${runId}: ${err.message}`);
+                }
+            }
+            if (failed.length) alert('Remove failed for:\n' + failed.join('\n'));
+            loadHistory();
+        });
 
         // --- Run History table ----------------------------------------------
         let historyRuns = [];
@@ -725,7 +818,7 @@
         let historySortDir = 'desc';   // newest run first
 
         function historySkeletonRows(n = 5) {
-            // 6 columns: Time, Country, Date Range, Changes, Status, Export
+            // 6 columns: checkbox, Time, Country, Date Range, Changes, Status
             const cell = '<td><span class="skel-bar"></span></td>';
             return ('<tr class="skel-row">' + cell.repeat(6) + '</tr>').repeat(n);
         }
@@ -744,6 +837,7 @@
             const tbody = document.getElementById('historyTableBody');
             if (!historyRuns.length) {
                 tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-3">No runs yet</td></tr>';
+                wireRunSelection();
                 return;
             }
             const dir = historySortDir === 'asc' ? 1 : -1;
@@ -770,17 +864,16 @@
                     ? ' <span class="badge" style="border: 1px solid #b45309; color: #b45309; background: transparent; margin-left: 4px;">DRY RUN</span>'
                     : '';
                 return `<tr class="history-row" style="cursor:pointer" onclick="showHistoryDetail(${r.run_id})">
+                    <td class="col-check" onclick="event.stopPropagation()"><input class="form-check-input run-select"
+                            type="checkbox" data-run="${r.run_id}"${runSelected.has(r.run_id) ? ' checked' : ''}></td>
                     <td title="${escHtml(String(r.timestamp || ''))}">${escHtml(ts)}</td>
                     <td>${escHtml(r.country || 'NL')}</td>
                     <td>${range}</td>
                     <td class="col-center">${r._changes}</td>
                     <td>${statusBadge}${dryRunBadge}</td>
-                    <td class="col-center" style="white-space: nowrap;">
-                        <button class="btn btn-sm btn-outline-purple" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;" onclick="downloadHistoryRun(event, ${r.run_id})">Export</button>
-                        <button class="btn btn-sm btn-outline-danger btn-remove" style="font-size: 0.75rem; padding: 0.15rem 0.5rem; margin-left: 4px;" onclick="removeHistoryRun(event, ${r.run_id})">Remove</button>
-                    </td>
                 </tr>`;
             }).join('');
+            wireRunSelection();
 
             // Sort glyph: ⇅ idle, ▲/▼ on the active column.
             document.querySelectorAll('#historyTable th.sortable').forEach(th => {

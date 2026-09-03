@@ -57,6 +57,11 @@
 
         .summary-badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
         .summary-badges .badge { font-size: 0.85rem; padding: 0.5rem 0.75rem; }
+        /* Run history: same checkbox column and selection count as Auto-Redirects. */
+        #historyTable th.col-check, #historyTable td.col-check { width: 36px; text-align: center; }
+        #historyTable .col-check .form-check-input { margin: 0; vertical-align: middle; cursor: pointer; }
+        /* Brand purple, because grey reads as "no value" (UI_BLUEPRINT §Labels). */
+        .sel-count { color: var(--color-navbar); font-size: 0.82rem; font-weight: 600; }
     </style>
 </head>
 <body>
@@ -245,16 +250,26 @@
                             <table class="table table-sm table-hover tool-table" id="historyTable" style="min-width: 720px;">
                                 <thead class="table-light">
                                     <tr>
+                                        <th class="col-check"><input class="form-check-input" type="checkbox" id="runSelectAll" title="Select all runs"></th>
                                         <th class="sortable" data-sort="timestamp" onclick="sortHistory('timestamp')">Time</th>
                                         <th class="sortable" data-sort="country" onclick="sortHistory('country')">Country</th>
                                         <th>Date Range</th>
                                         <th class="sortable col-center" data-sort="_changes" onclick="sortHistory('_changes')">Changes</th>
                                         <th class="sortable" data-sort="status" onclick="sortHistory('status')">Status</th>
-                                        <th class="col-center" style="width: 90px;">Export</th>
                                     </tr>
                                 </thead>
                                 <tbody id="historyTableBody"></tbody>
                             </table>
+                        </div>
+                        <!-- Bulk-select bar under the table, same shape as Auto-Redirects:
+                             one Export and one Remove for the ticked runs. -->
+                        <div class="d-flex align-items-center gap-2 mt-3 pt-3" style="border-top: 1px solid var(--flat-border);">
+                            <span id="runSelCount" class="sel-count">0 selected</span>
+                            <div class="ms-auto d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-purple" id="runExportBtn" disabled
+                                        title="Download the selected runs. One run gives you its own file; several are merged into one workbook with a leading `run` column.">Export</button>
+                                <button type="button" class="btn btn-sm btn-outline-red" id="runRemoveBtn" disabled>Remove</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -513,13 +528,22 @@
             exportRunToExcel(lastRunResult);
         }
 
+        // Takes one run or a list of them. Several runs merge into one workbook
+        // with a leading `run` column, the same rule the Auto-Redirects bulk export
+        // follows — otherwise a merged sheet cannot say where a row is from.
         function exportRunToExcel(runData) {
-            const rows = [['Categorie', 'Campagne', 'Account', 'Marge', 'OPB', 'Klikken', 'ROAS', 'Kosten', 'DMA/CLA Omzet']];
+            const runs = Array.isArray(runData) ? runData : [runData];
+            const multi = runs.length > 1;
+            const header = ['Categorie', 'Campagne', 'Account', 'Marge', 'OPB', 'Klikken', 'ROAS', 'Kosten', 'DMA/CLA Omzet'];
+            const rows = [multi ? ['run'].concat(header) : header];
 
-            for (const [key, label] of Object.entries(labelMap)) {
-                for (const item of (runData.changes[key] || [])) {
-                    rows.push([label, item.campaign_name, item.account_name || item.account || '',
-                               item.marge, item.opb, item.clicks, item.roas, item.cost, item.dma_cla_omzet]);
+            for (const run of runs) {
+                const pre = multi ? [run.run_id] : [];
+                for (const [key, label] of Object.entries(labelMap)) {
+                    for (const item of ((run.changes || {})[key] || [])) {
+                        rows.push(pre.concat([label, item.campaign_name, item.account_name || item.account || '',
+                                   item.marge, item.opb, item.clicks, item.roas, item.cost, item.dma_cla_omzet]));
+                    }
                 }
             }
 
@@ -527,24 +551,106 @@
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'DMA Bidding');
 
-            const country = (runData.country || 'NL').toLowerCase();
-            const mode = runData.dry_run ? 'dry' : 'live';
-            const date = runData.timestamp.split('T')[0];
-            XLSX.writeFile(wb, `dma-bidding-${country}-${mode}-${date}-run${runData.run_id}.xlsx`);
+            if (multi) {
+                const stamp = new Date().toISOString().slice(0, 10);
+                XLSX.writeFile(wb, `dma-bidding-${runs.length}-runs-${stamp}.xlsx`);
+                return;
+            }
+            const one = runs[0];
+            const country = (one.country || 'NL').toLowerCase();
+            const mode = one.dry_run ? 'dry' : 'live';
+            const date = (one.timestamp || '').split('T')[0];
+            XLSX.writeFile(wb, `dma-bidding-${country}-${mode}-${date}-run${one.run_id}.xlsx`);
         }
 
-        async function downloadHistoryRun(event, runId) {
-            event.stopPropagation();
+        // ---- Run selection (bulk Export / Remove) -------------------------
+        // Export and Remove act on the ticked runs instead of a button per row.
+        // Keyed on the run's own id, so sorting the table cannot scramble it.
+        const runSelected = new Set();
+
+        function selectedRunIds() {
+            return [...document.querySelectorAll('#historyTableBody .run-select:checked')]
+                .map(b => Number(b.dataset.run));
+        }
+
+        function updateRunSelectionCount() {
+            const n = selectedRunIds().length;
+            const cnt = document.getElementById('runSelCount');
+            if (cnt) cnt.textContent = `${n} selected`;
+            document.getElementById('runExportBtn').disabled = n === 0;
+            document.getElementById('runRemoveBtn').disabled = n === 0;
+            const all = [...document.querySelectorAll('#historyTableBody .run-select')];
+            const sa = document.getElementById('runSelectAll');
+            if (sa) {
+                sa.checked = all.length > 0 && n === all.length;
+                sa.indeterminate = n > 0 && n < all.length;
+            }
+        }
+
+        function wireRunSelection() {
+            // A run that is gone must not linger in the selection.
+            const alive = new Set([...document.querySelectorAll('#historyTableBody .run-select')]
+                .map(b => Number(b.dataset.run)));
+            [...runSelected].forEach(id => { if (!alive.has(id)) runSelected.delete(id); });
+            document.querySelectorAll('#historyTableBody .run-select').forEach(box => {
+                box.onchange = () => {
+                    if (box.checked) runSelected.add(Number(box.dataset.run));
+                    else runSelected.delete(Number(box.dataset.run));
+                    updateRunSelectionCount();
+                };
+            });
+            updateRunSelectionCount();
+        }
+
+        document.getElementById('runSelectAll').addEventListener('change', (e) => {
+            document.querySelectorAll('#historyTableBody .run-select').forEach(b => {
+                b.checked = e.target.checked;
+                if (b.checked) runSelected.add(Number(b.dataset.run));
+                else runSelected.delete(Number(b.dataset.run));
+            });
+            updateRunSelectionCount();
+        });
+
+        document.getElementById('runExportBtn').addEventListener('click', async (e) => {
+            const ids = selectedRunIds();
+            if (!ids.length) return;
+            e.currentTarget.disabled = true;
             try {
-                const res = await fetch(`${API_BASE}/api/dma-bidding/history/${runId}`);
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                exportRunToExcel(data);
+                const runs = [];
+                for (const runId of ids) {
+                    const res = await fetch(`${API_BASE}/api/dma-bidding/history/${runId}`);
+                    if (!res.ok) throw new Error(`run ${runId}: HTTP ${res.status}`);
+                    runs.push(await res.json());
+                }
+                exportRunToExcel(runs);
             } catch (err) {
                 console.error('Failed to download run:', err);
                 alert('Download mislukt: ' + err.message);
+            } finally {
+                updateRunSelectionCount();
             }
-        }
+        });
+
+        document.getElementById('runRemoveBtn').addEventListener('click', async (e) => {
+            const ids = selectedRunIds();
+            if (!ids.length) return;
+            if (!confirm(`Remove ${ids.length} run(s) from history? This only deletes the local `
+                + `history records — bid-strategy changes already made are NOT rolled back.`)) return;
+            e.currentTarget.disabled = true;
+            const failed = [];
+            for (const runId of ids) {
+                try {
+                    const res = await fetch(`${API_BASE}/api/dma-bidding/history/${runId}`, { method: 'DELETE' });
+                    // 404 means it is already gone — that is the outcome we wanted.
+                    if (!res.ok && res.status !== 404) failed.push(`#${runId}: HTTP ${res.status}`);
+                    else runSelected.delete(runId);
+                } catch (err) {
+                    failed.push(`#${runId}: ${err.message}`);
+                }
+            }
+            if (failed.length) alert('Remove failed for:\n' + failed.join('\n'));
+            loadHistory();
+        });
 
         // --- History ---
         let historyRuns = [];
@@ -552,7 +658,7 @@
         let historySortDir = 'desc';   // newest run first
 
         function historySkeletonRows(n = 5) {
-            // 6 columns: Time, Country, Date Range, Changes, Status, Export
+            // 6 columns: checkbox, Time, Country, Date Range, Changes, Status
             const cell = '<td><span class="skel-bar"></span></td>';
             return ('<tr class="skel-row">' + cell.repeat(6) + '</tr>').repeat(n);
         }
@@ -571,6 +677,7 @@
             const tbody = document.getElementById('historyTableBody');
             if (!historyRuns.length) {
                 tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-3">No runs yet</td></tr>';
+                wireRunSelection();
                 return;
             }
             const dir = historySortDir === 'asc' ? 1 : -1;
@@ -597,16 +704,16 @@
                     ? ' <span class="badge" style="border: 1px solid #b45309; color: #b45309; background: transparent; margin-left: 4px;">DRY RUN</span>'
                     : '';
                 return `<tr class="history-row" style="cursor:pointer" onclick="showHistoryDetail(${r.run_id})">
+                    <td class="col-check" onclick="event.stopPropagation()"><input class="form-check-input run-select"
+                            type="checkbox" data-run="${r.run_id}"${runSelected.has(r.run_id) ? ' checked' : ''}></td>
                     <td title="${escHtml(String(r.timestamp || ''))}">${escHtml(ts)}</td>
                     <td>${escHtml(r.country || 'NL')}</td>
                     <td>${range}</td>
                     <td class="col-center">${r._changes}</td>
                     <td>${statusBadge}${dryRunBadge}</td>
-                    <td class="col-center" style="white-space: nowrap;">
-                        <button class="btn btn-sm btn-outline-purple" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;" onclick="downloadHistoryRun(event, ${r.run_id})">Export</button>
-                    </td>
                 </tr>`;
             }).join('');
+            wireRunSelection();
 
             // Sort glyph: ⇅ idle, ▲/▼ on the active column.
             document.querySelectorAll('#historyTable th.sortable').forEach(th => {

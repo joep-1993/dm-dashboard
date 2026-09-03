@@ -103,6 +103,29 @@ def _history_prepend(entry: Dict[str, Any]):
         _save_run_history_to_disk()
 
 
+def _history_delete(run_id: int) -> bool:
+    """Drop one run by id. Returns False when it was not there."""
+    with _history_lock:
+        before = len(_run_history)
+        _run_history[:] = [r for r in _run_history if r.get("run_id") != run_id]
+        if len(_run_history) == before:
+            return False
+        _save_run_history_to_disk()
+        return True
+
+
+def _next_run_id() -> int:
+    """One past the highest id ever seen in the list.
+
+    NOT `len(history) + 1`: runs can be deleted one at a time now, and a length
+    based id would then hand a new run an id that an older run still carries —
+    after which /history/{run_id} returns whichever one it finds first.
+    """
+    with _history_lock:
+        ids = [r.get("run_id") or 0 for r in _run_history]
+        return (max(ids) if ids else 0) + 1
+
+
 def _history_clear():
     """Wipe all runs and persist the empty state."""
     with _history_lock:
@@ -448,7 +471,7 @@ def run_dma_bidding(
     2. For each campaign on a DMA level, evaluate rules and change bid strategy
     3. Return structured result with changes
     """
-    run_id = len(_run_history) + 1
+    run_id = _next_run_id()
     start_time = datetime.now()
 
     logger.info(f"Starting DMA bidding run #{run_id} (country={country}, "

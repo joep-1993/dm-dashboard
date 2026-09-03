@@ -1411,24 +1411,40 @@ EXCEL_COLUMNS = [
 RESULT_COLUMNS = [c for c, _ in EXCEL_COLUMNS] + ["applied_value", "applied_error"]
 
 
-def export_excel(run_id: str) -> bytes:
+def export_excel(run_id) -> bytes:
+    """One run's results, or several merged into one sheet.
+
+    `run_id` takes a single id or a list of them. With more than one the sheet
+    gets a leading `run` column, so a merged export still says which row came
+    from where — the same rule the Auto-Redirects multi-run export follows.
+    """
+    run_ids = [run_id] if isinstance(run_id, str) else list(run_id)
+    if not run_ids:
+        raise ValueError("export_excel needs at least one run_id")
+    multi = len(run_ids) > 1
+
     conn = get_db_connection()
     cur = conn.cursor()
     try:
         cols_sql = ", ".join(c for c, _ in EXCEL_COLUMNS)
         cur.execute(
-            f"""SELECT {cols_sql} FROM pa.seo_prio_results
-                WHERE run_id = %s
-                ORDER BY total_visits DESC""",
-            (run_id,),
+            f"""SELECT run_id, {cols_sql} FROM pa.seo_prio_results
+                WHERE run_id = ANY(%s)
+                ORDER BY run_id, total_visits DESC""",
+            (run_ids,),
         )
         rows = [dict(r) for r in cur.fetchall()]
     finally:
         cur.close()
         return_db_connection(conn)
 
-    df = pd.DataFrame(rows, columns=[c for c, _ in EXCEL_COLUMNS])
-    df.columns = [label for _, label in EXCEL_COLUMNS]
+    cols = [c for c, _ in EXCEL_COLUMNS]
+    labels = [label for _, label in EXCEL_COLUMNS]
+    if multi:
+        cols = ["run_id"] + cols
+        labels = ["run"] + labels
+    df = pd.DataFrame(rows, columns=cols)
+    df.columns = labels
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         df.to_excel(w, sheet_name="seo_prio", index=False)

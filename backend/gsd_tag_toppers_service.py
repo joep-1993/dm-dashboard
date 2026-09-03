@@ -1908,6 +1908,24 @@ def get_run_detail(run_id: int) -> Optional[Dict[str, Any]]:
         return_db_connection(conn)
 
 
+def delete_run(run_id: int) -> bool:
+    """Verwijder één run uit de historie. False als hij er niet (meer) was.
+
+    Dit gooit alleen de vastlegging weg — campagnes en uitsluitingen die de run
+    in Google Ads heeft aangemaakt blijven staan.
+    """
+    _ensure_runs_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM gsd_tag_toppers_runs WHERE id = %s", (run_id,))
+            deleted = cur.rowcount
+        conn.commit()
+        return bool(deleted)
+    finally:
+        return_db_connection(conn)
+
+
 def get_runs(limit: int = 100) -> List[Dict[str, Any]]:
     """Recente runs, nieuwste eerst. Tijden zijn UTC (de shared Postgres draait Etc/UTC)."""
     try:

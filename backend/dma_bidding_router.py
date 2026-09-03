@@ -144,6 +144,16 @@ async def clear_history():
     return {"cleared": count}
 
 
+@router.delete("/history/{run_id}")
+async def delete_history_run(run_id: int):
+    """Remove one run from the history. Deleting the analysis does not touch the
+    bid-strategy changes it made — those live in Google Ads."""
+    from backend.dma_bidding_service import _history_delete
+    if not _history_delete(run_id):
+        raise HTTPException(status_code=404, detail=f"Run #{run_id} not found")
+    return {"deleted": run_id}
+
+
 @router.get("/history/{run_id}")
 async def get_history_detail(run_id: int):
     """Return details for a specific DMA bidding run."""

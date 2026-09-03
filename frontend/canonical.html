@@ -24,6 +24,11 @@
            "+ Add Rule"-knoppen dragen nu btn-outline-orange, dus deze twee regels
            hadden geen gebruiker meer. Kleuren staan in style.css, niet per pagina. */
         #canonPushBtn:disabled { opacity: 0.65; cursor: not-allowed; }
+        /* Saved runs: same checkbox column and selection count as Auto-Redirects. */
+        #canonRunsContainer th.col-check, #canonRunsContainer td.col-check { width: 36px; text-align: center; }
+        #canonRunsContainer .col-check .form-check-input { margin: 0; vertical-align: middle; cursor: pointer; }
+        /* Brand purple, because grey reads as "no value" (UI_BLUEPRINT §Labels). */
+        .sel-count { color: var(--color-navbar); font-size: 0.82rem; font-weight: 600; }
     </style>
 </head>
 <body>
@@ -870,17 +875,20 @@
                         <table class="table table-sm table-hover tool-table" style="table-layout: fixed;">
                             <thead class="table-light">
                                 <tr>
+                                    <th class="col-check"><input class="form-check-input" type="checkbox" id="runSelectAll" title="Select all runs"></th>
                                     <th class="col-center" style="width: 70px">#</th>
                                     <th style="width: 150px" title="Europe/Amsterdam (opgeslagen als UTC)">Date</th>
                                     <th>Label</th>
                                     <th class="col-center" style="width: 100px">Changed</th>
                                     <th class="col-center" style="width: 90px">Total</th>
-                                    <th class="col-center" style="width: 165px"></th>
+                                    <th class="col-center" style="width: 90px"></th>
                                 </tr>
                             </thead>
                             <tbody>
                                 ${runs.map(r => `
                                     <tr>
+                                        <td class="col-check"><input class="form-check-input run-select" type="checkbox"
+                                                data-run="${Number(r.id) || 0}"${runSelected.has(Number(r.id) || 0) ? ' checked' : ''}></td>
                                         <td class="col-center">${escapeHtml(String(r.id))}</td>
                                         <td title="${escapeHtml(String(r.created_at || ''))} UTC (opgeslagen waarde)">${escapeHtml(formatRunDate(r.created_at))}</td>
                                         <td>${escapeHtml(r.label || '—')}</td>
@@ -888,14 +896,21 @@
                                         <td class="col-center">${escapeHtml(String(r.total))}</td>
                                         <td class="col-center">
                                             <button class="btn btn-sm btn-outline-purple" onclick="loadCanonicalRun(${Number(r.id) || 0})">Load</button>
-                                            <button class="btn btn-sm btn-outline-red" onclick="deleteCanonicalRun(${Number(r.id) || 0})">Delete</button>
                                         </td>
                                     </tr>
                                 `).join('')}
                             </tbody>
                         </table>
                     </div>
+                    <!-- Bulk-select bar under the table, same shape as Auto-Redirects.
+                         No Export here: a saved run has no export endpoint — Load puts it
+                         back in the results table, which is where the copy buttons live. -->
+                    <div class="d-flex align-items-center gap-2 mt-3 pt-3" style="border-top: 1px solid var(--flat-border);">
+                        <span id="runSelCount" class="sel-count">0 selected</span>
+                        <button type="button" class="btn btn-sm btn-outline-red ms-auto" id="runRemoveBtn" disabled>Delete</button>
+                    </div>
                 `;
+                wireRunSelection();
             } catch (e) {
                 container.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(e.message)}</div>`;
             }
@@ -942,15 +957,80 @@
             }
         }
 
-        async function deleteCanonicalRun(runId) {
-            if (!confirm(`Delete saved run #${runId}? This cannot be undone.`)) return;
-            try {
-                const resp = await fetch(`/api/canonical/runs/${runId}`, { method: 'DELETE' });
-                if (!resp.ok) throw new Error((await resp.json()).detail || 'Failed to delete run');
-                loadCanonicalRuns();
-            } catch (e) {
-                alert(e.message);
+        // ---- Run selection (bulk Delete) ---------------------------------
+        // Delete acts on the ticked runs instead of a button per row. Keyed on the
+        // run's own id, so a reload of the list cannot scramble the selection.
+        const runSelected = new Set();
+
+        function selectedRunIds() {
+            return [...document.querySelectorAll('#canonRunsContainer .run-select:checked')]
+                .map(b => Number(b.dataset.run));
+        }
+
+        function updateRunSelectionCount() {
+            const n = selectedRunIds().length;
+            const cnt = document.getElementById('runSelCount');
+            if (cnt) cnt.textContent = `${n} selected`;
+            const removeBtn = document.getElementById('runRemoveBtn');
+            if (removeBtn) removeBtn.disabled = n === 0;
+            const all = [...document.querySelectorAll('#canonRunsContainer .run-select')];
+            const sa = document.getElementById('runSelectAll');
+            if (sa) {
+                sa.checked = all.length > 0 && n === all.length;
+                sa.indeterminate = n > 0 && n < all.length;
             }
+        }
+
+        // The runs table is re-rendered from scratch on every load, so the handlers
+        // are wired there rather than once at startup.
+        function wireRunSelection() {
+            const alive = new Set([...document.querySelectorAll('#canonRunsContainer .run-select')]
+                .map(b => Number(b.dataset.run)));
+            [...runSelected].forEach(id => { if (!alive.has(id)) runSelected.delete(id); });
+            const sa = document.getElementById('runSelectAll');
+            if (sa) sa.onchange = e => {
+                document.querySelectorAll('#canonRunsContainer .run-select').forEach(b => {
+                    b.checked = e.target.checked;
+                    if (b.checked) runSelected.add(Number(b.dataset.run));
+                    else runSelected.delete(Number(b.dataset.run));
+                });
+                updateRunSelectionCount();
+            };
+            document.querySelectorAll('#canonRunsContainer .run-select').forEach(box => {
+                box.onchange = () => {
+                    if (box.checked) runSelected.add(Number(box.dataset.run));
+                    else runSelected.delete(Number(box.dataset.run));
+                    updateRunSelectionCount();
+                };
+            });
+            const removeBtn = document.getElementById('runRemoveBtn');
+            if (removeBtn) removeBtn.onclick = deleteSelectedRuns;
+            updateRunSelectionCount();
+        }
+
+        async function deleteSelectedRuns() {
+            const ids = selectedRunIds();
+            if (!ids.length) return;
+            if (!confirm(`Delete ${ids.length} saved run(s)? This cannot be undone.`)) return;
+            const btn = document.getElementById('runRemoveBtn');
+            btn.disabled = true;
+            const failed = [];
+            for (const runId of ids) {
+                try {
+                    const resp = await fetch(`/api/canonical/runs/${runId}`, { method: 'DELETE' });
+                    // 404 means it is already gone — that is the outcome we wanted.
+                    if (!resp.ok && resp.status !== 404) {
+                        const err = await resp.json().catch(() => ({}));
+                        failed.push(`#${runId}: ${err.detail || resp.status}`);
+                    } else {
+                        runSelected.delete(runId);
+                    }
+                } catch (e) {
+                    failed.push(`#${runId}: ${e.message}`);
+                }
+            }
+            if (failed.length) alert('Failed to delete:\n' + failed.join('\n'));
+            loadCanonicalRuns();
         }
 
         function copyToClipboard(text, element) {

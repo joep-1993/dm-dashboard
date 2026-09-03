@@ -73,6 +73,11 @@
         .lbl-solid.lbl-teal   { background: #0f766e; color: #fff; }
         .lbl-solid.lbl-amber  { background: #b26a00; color: #fff; }
         .lbl-solid.lbl-orange { background: #e8730c; color: #fff; }
+        /* Recent runs: dezelfde vinkkolom en telling als in Auto-Redirects. */
+        #runsTable th.col-check, #runsTable td.col-check { width: 36px; text-align: center; }
+        #runsTable .col-check .form-check-input { margin: 0; vertical-align: middle; cursor: pointer; }
+        /* Merkpaars, want grijs leest als "geen waarde" (UI_BLUEPRINT §Labels). */
+        .sel-count { color: var(--color-navbar); font-size: 0.82rem; font-weight: 600; }
     </style>
 </head>
 <body>
@@ -257,6 +262,7 @@
                             <table class="table table-sm tool-table mb-0" id="runsTable">
                                 <thead>
                                     <tr>
+                                        <th class="col-check"><input class="form-check-input" type="checkbox" id="runSelectAll" title="Alle runs selecteren"></th>
                                         <th class="sortable" data-sort="started_at" onclick="sortRunsBy('started_at')">Datum</th>
                                         <th class="sortable" data-sort="dry_run" onclick="sortRunsBy('dry_run')">Type</th>
                                         <th class="sortable" data-sort="n_rows" onclick="sortRunsBy('n_rows')">Rijen</th>
@@ -265,13 +271,24 @@
                                         <th class="sortable" data-sort="ids_added" onclick="sortRunsBy('ids_added')">Ids geland</th>
                                         <th class="sortable" data-sort="exclusions_added" onclick="sortRunsBy('exclusions_added')">Uitsl. geland</th>
                                         <th class="sortable" data-sort="rows_with_errors" onclick="sortRunsBy('rows_with_errors')">Fouten</th>
-                                        <th>Export</th>
                                     </tr>
                                 </thead>
                                 <tbody id="runsBody"></tbody>
                             </table>
                         </div>
                         <div id="runsEmpty" class="text-muted small mt-2" style="display:none;">Nog geen runs vastgelegd.</div>
+                        <!-- Bulk-selectiebalk onder de tabel, zelfde vorm als Auto-Redirects:
+                             de telling links, Export en Verwijder rechts, allebei disabled
+                             tot er een run is aangevinkt. -->
+                        <div class="d-flex align-items-center gap-2 mt-3 pt-3" style="border-top: 1px solid var(--flat-border);">
+                            <span id="runSelCount" class="sel-count">0 geselecteerd</span>
+                            <div class="ms-auto d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-purple" id="runExportBtn" disabled
+                                        title="Download de aangevinkte runs. Eén run wordt zijn eigen bestand; meerdere komen samen in één CSV met een kolom `run` vooraan.">Export</button>
+                                <button type="button" class="btn btn-sm btn-outline-red" id="runRemoveBtn" disabled
+                                        title="Haal de aangevinkte runs uit de historie. Wat ze in Google Ads hebben aangemaakt blijft staan.">Verwijder</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -741,14 +758,16 @@ const EXPORT_COLS = [
     ['status', 'Status'],
 ];
 
-function toCsv(rows) {
+function toCsv(rows, withRunCol) {
     // Puntkomma + BOM: Excel-NL splitst een komma-CSV niet op kolommen.
     const esc = v => {
         const s = v === null || v === undefined ? '' : String(v);
         return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     };
-    const head = EXPORT_COLS.map(c => esc(c[1])).join(';');
-    const body = rows.map(r => EXPORT_COLS.map(c => esc(r[c[0]])).join(';'));
+    // Bij een samengevoegde export komt er één kolom bij: welke run de rij is.
+    const cols = withRunCol ? [['run', 'run']].concat(EXPORT_COLS) : EXPORT_COLS;
+    const head = cols.map(c => esc(c[1])).join(';');
+    const body = rows.map(r => cols.map(c => esc(r[c[0]])).join(';'));
     return '\ufeff' + [head].concat(body).join('\r\n');
 }
 
@@ -760,23 +779,50 @@ function downloadCsv(text, name) {
     URL.revokeObjectURL(url);
 }
 
-async function exportRun(runId) {
+// Eén run wordt zijn eigen bestand; meerdere komen samen in één CSV met een kolom
+// `run` vooraan — dezelfde regel als de bulk-export van Auto-Redirects, want zonder
+// die kolom weet je in een samengevoegd bestand niet meer waar een rij vandaan komt.
+async function exportSelectedRuns(e) {
+    const ids = selectedRunIds();
+    if (!ids.length) return;
+    const btn = e.currentTarget;
+    btn.disabled = true;
     try {
-        const r = await fetch('/api/gsd-tag-toppers/runs/' + runId + '/results');
-        const j = await r.json();
-        if (!r.ok) throw new Error(j.detail || 'Export mislukt');
-        const rows = j.results || [];
-        if (!rows.length) {
-            alert('Deze run heeft geen opgeslagen rijen. Runs van vóór de export-functie ' +
-                  'bewaarden alleen de samenvatting.');
+        const perRun = [];
+        for (const runId of ids) {
+            const r = await fetch('/api/gsd-tag-toppers/runs/' + runId + '/results');
+            const j = await r.json();
+            if (!r.ok) throw new Error(j.detail || 'Export mislukt');
+            perRun.push([runId, j.results || []]);
+        }
+        const withRows = perRun.filter(([, rows]) => rows.length);
+        if (!withRows.length) {
+            alert('Geen van de gekozen runs heeft opgeslagen rijen. Runs van vóór de '
+                + 'export-functie bewaarden alleen de samenvatting.');
             return;
         }
-        const run = RUNS.find(x => x.id === runId);
-        const stamp = (run && run.started_at ? run.started_at.slice(0, 16) : '')
-            .replace('T', '_').replace(/:/g, '');
-        downloadCsv(toCsv(rows), 'gsd_tag_toppers_run' + runId + '_' + stamp + '.csv');
-    } catch (e) {
-        alert('Fout: ' + e.message);
+        const skipped = perRun.length - withRows.length;
+        if (skipped && !confirm(skipped + ' van de gekozen runs heeft geen opgeslagen rijen '
+            + 'en valt weg. De andere ' + withRows.length + ' exporteren?')) return;
+
+        if (withRows.length === 1) {
+            const [runId, rows] = withRows[0];
+            const run = RUNS.find(x => x.id === runId);
+            const stamp = (run && run.started_at ? run.started_at.slice(0, 16) : '')
+                .replace('T', '_').replace(/:/g, '');
+            downloadCsv(toCsv(rows), 'gsd_tag_toppers_run' + runId + '_' + stamp + '.csv');
+            return;
+        }
+        const merged = [];
+        for (const [runId, rows] of withRows) {
+            for (const row of rows) merged.push(Object.assign({ run: runId }, row));
+        }
+        const stamp = new Date().toISOString().slice(0, 10);
+        downloadCsv(toCsv(merged, true), 'gsd_tag_toppers_' + withRows.length + '_runs_' + stamp + '.csv');
+    } catch (err) {
+        alert('Fout: ' + err.message);
+    } finally {
+        updateRunSelectionCount();
     }
 }
 
@@ -819,6 +865,9 @@ function renderRuns() {
     document.getElementById('runsBody').innerHTML = rows.map(r =>
         '<tr style="cursor:pointer;" onclick="viewRun(' + r.id + ')"' +
         ' title="Klik om deze run terug te zien in het resultatenscherm">' +
+        '<td class="col-check" onclick="event.stopPropagation()">' +
+            '<input class="form-check-input run-select" type="checkbox" data-run="' + r.id + '"' +
+            (RUN_SEL.has(r.id) ? ' checked' : '') + '></td>' +
         '<td>' + esc(fmtTime(r.started_at)) + '</td>' +
         '<td>' + (r.dry_run
             ? '<span class="badge lbl lbl-purple">Preview</span>'
@@ -831,8 +880,79 @@ function renderRuns() {
         '<td>' + (r.rows_with_errors
             ? '<span class="badge lbl lbl-red">' + r.rows_with_errors + '</span>'
             : '<span class="badge lbl lbl-green">0</span>') + '</td>' +
-        '<td><button class="btn btn-sm btn-outline-orange" onclick="event.stopPropagation(); exportRun(' + r.id + ')">Export</button></td>' +
         '</tr>').join('');
+    wireRunSelection();
+}
+
+// ---- Run-selectie (bulk Export / Verwijder) --------------------------------
+// Export en Verwijder werken op de aangevinkte runs in plaats van op een knop per
+// rij. De selectie hangt aan het run-id, niet aan de rijpositie — anders schuift
+// hij zodra je de tabel sorteert.
+const RUN_SEL = new Set();
+
+function selectedRunIds() {
+    return [...document.querySelectorAll('#runsBody .run-select:checked')].map(b => Number(b.dataset.run));
+}
+
+function updateRunSelectionCount() {
+    const n = selectedRunIds().length;
+    const cnt = document.getElementById('runSelCount');
+    if (cnt) cnt.textContent = n + ' geselecteerd';
+    document.getElementById('runExportBtn').disabled = n === 0;
+    document.getElementById('runRemoveBtn').disabled = n === 0;
+    const all = [...document.querySelectorAll('#runsBody .run-select')];
+    const sa = document.getElementById('runSelectAll');
+    if (sa) {
+        sa.checked = all.length > 0 && n === all.length;
+        sa.indeterminate = n > 0 && n < all.length;
+    }
+}
+
+function wireRunSelection() {
+    // Een verwijderde run mag niet in de selectie blijven hangen.
+    const alive = new Set([...document.querySelectorAll('#runsBody .run-select')].map(b => Number(b.dataset.run)));
+    [...RUN_SEL].forEach(id => { if (!alive.has(id)) RUN_SEL.delete(id); });
+    document.querySelectorAll('#runsBody .run-select').forEach(box => {
+        box.onchange = () => {
+            if (box.checked) RUN_SEL.add(Number(box.dataset.run));
+            else RUN_SEL.delete(Number(box.dataset.run));
+            updateRunSelectionCount();
+        };
+    });
+    updateRunSelectionCount();
+}
+
+document.getElementById('runSelectAll').addEventListener('change', (e) => {
+    document.querySelectorAll('#runsBody .run-select').forEach(b => {
+        b.checked = e.target.checked;
+        if (b.checked) RUN_SEL.add(Number(b.dataset.run));
+        else RUN_SEL.delete(Number(b.dataset.run));
+    });
+    updateRunSelectionCount();
+});
+
+document.getElementById('runExportBtn').addEventListener('click', exportSelectedRuns);
+document.getElementById('runRemoveBtn').addEventListener('click', removeSelectedRuns);
+
+async function removeSelectedRuns(e) {
+    const ids = selectedRunIds();
+    if (!ids.length) return;
+    if (!confirm(ids.length + ' run(s) uit de historie verwijderen? Dit wist alleen de '
+        + 'vastlegging — campagnes en uitsluitingen in Google Ads blijven staan.')) return;
+    e.currentTarget.disabled = true;
+    const failed = [];
+    for (const id of ids) {
+        try {
+            const r = await fetch('/api/gsd-tag-toppers/runs/' + id, { method: 'DELETE' });
+            // 404 betekent dat hij al weg is — dat is precies wat we wilden.
+            if (!r.ok && r.status !== 404) failed.push('#' + id + ': HTTP ' + r.status);
+            else RUN_SEL.delete(id);
+        } catch (err) {
+            failed.push('#' + id + ': ' + err.message);
+        }
+    }
+    if (failed.length) alert('Verwijderen mislukt voor:\n' + failed.join('\n'));
+    loadRuns();
 }
 
 window.addEventListener('resize', () => {

@@ -10,6 +10,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from backend.gsd_tag_toppers_service import (
     cancel_run,
+    delete_run,
     get_seed_progress,
     import_items,
     items_for_run,
@@ -107,6 +108,15 @@ async def cancel():
 async def runs(limit: int = 100):
     """Afgeronde runs uit de database — overleeft een herstart van de backend."""
     return {"runs": get_runs(max(1, min(limit, 500)))}
+
+
+@router.delete("/runs/{run_id}")
+async def delete_run_row(run_id: int):
+    """Haal één run uit de historie. De campagnes en uitsluitingen die hij in
+    Google Ads heeft aangemaakt blijven staan — dit wist alleen de vastlegging."""
+    if not delete_run(run_id):
+        raise HTTPException(status_code=404, detail="Run niet gevonden")
+    return {"deleted": run_id}
 
 
 @router.get("/runs/{run_id}/results")

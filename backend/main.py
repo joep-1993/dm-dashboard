@@ -3469,6 +3469,23 @@ async def seo_prio_delete(run_id: str):
     return {"status": "deleted", "run_id": run_id}
 
 
+@app.get("/api/seo-prio/export")
+async def seo_prio_export_many(run_ids: str):
+    """Export one or more runs. Several runs merge into one workbook with a
+    leading `run` column, the same shape as the Auto-Redirects bulk export."""
+    from fastapi.responses import StreamingResponse
+    ids = [r for r in (run_ids or "").split(",") if r.strip()]
+    if not ids:
+        raise HTTPException(status_code=400, detail="run_ids is required")
+    blob = seo_prio_service.export_excel(ids)
+    name = f"seo_prio_{ids[0]}.xlsx" if len(ids) == 1 else f"seo_prio_{len(ids)}_runs.xlsx"
+    return StreamingResponse(
+        io.BytesIO(blob),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
 @app.get("/api/seo-prio/export/{run_id}")
 async def seo_prio_export(run_id: str):
     from fastapi.responses import StreamingResponse
