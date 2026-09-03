@@ -3,7 +3,7 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
-### 2026-09-03 (8) — Facet Watch: vier modules erbij, en ronde selectievakjes dashboardbreed
+### 2026-09-03 (10) — Facet Watch: vier modules erbij, en ronde selectievakjes dashboardbreed
 
 Commits `7a33b8c` (facet-watch) en `f29142f` (ui). Lessen in LEARNINGS, zelfde datum. Vier verzoeken
 van Joep plus één losse UI-wens.
@@ -71,7 +71,7 @@ Open:
       ophalen" vult het (±1 Keyword-Planner-call per 500 termen); bewust niet automatisch bij
       pageload gedaan vanwege de quota.
 
-### 2026-09-03 (7) — GSD low-linkage: welke campagnes missen het label, en waarom het label niet mocht blijven
+### 2026-09-03 (9) — GSD low-linkage: welke campagnes missen het label, en waarom het label niet mocht blijven
 
 Commit `b060ab1`. Lessen in LEARNINGS, zelfde datum. Aanleiding: Sokken-online.nl
 (`[shop_id:652601]`) heeft campagnes zonder het LL-label terwijl je dat wel zou verwachten.
