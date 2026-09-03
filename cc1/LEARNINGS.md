@@ -1,6 +1,147 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Ontwerp op de events die er zijn, niet op het mechanisme dat de vraag beschrijft (2026-09-03, Facet Watch)
+
+De vraag was een module voor "verhuisde facetten: facetten die ergens verwijderd zijn maar op een
+nieuwe plek opduiken onder dezelfde naam". Dat beschrijft een DELETE gevolgd door een INSERT, en de
+reflex is dat paar te gaan matchen. Eerst tellen wat er ligt, over 103.078 events en 14
+entity/action-combinaties:
+
+- **Geen enkele `Facet` DELETE en geen enkele `Category Facet` DELETE.** Een facet dat wordt weggehaald
+  of losgekoppeld laat geen spoor na. De "verwijderd"-helft van het paar bestaat niet.
+- Van de 13.113 `Facet Value` DELETEs draagt **97% geen naam** (355 met; via de value-cache is er
+  1.164 te herstellen). Matchen op naam kan dus over de grote meerderheid niets zeggen.
+- En wat een naam-match wél oplevert is ruis: **1.493 paren over 206 namen**, vrijwel allemaal MERKEN
+  die tussen de 32 per-maincat `Merk`-facetten schuiven (`acelera` weg bij Merk-Speelgoed, aan bij
+  Merk-Kleding). Dat is een merk dat in de ene maincat producten verliest en in de andere wint — twee
+  losse pagina's in twee categorieën. Een redirect ertussen stuurt een bezoeker naar een andere
+  categorie, dus dit is niet "bijna goed", het is verkeerd.
+
+Wat hetzelfde probleem exact oplost stond er wél: `Facet Label` UPDATE met `UrlSlug` in
+`changed_fields`, dat **Old én New meelevert**. De facet-slug staat letterlijk in de URL
+(`/products/<pad>/c/<slug>~<value-id>`), dus een slug-wijziging ís "dezelfde pagina, nieuwe plek" —
+met beide kanten hard geregistreerd in plaats van geraden. 38 events, 8 bruikbare wijzigingen,
+7.427 te repareren URL's.
+
+**De les is de volgorde.** Een gevraagd mechanisme is een hypothese over de data, geen beschrijving
+ervan. Één `GROUP BY entity_name, action` vóór het ontwerp verving hier een module die op 97% van
+zijn invoer niets had kunnen zeggen en op de rest het verkeerde.
+
+En de check die het bevestigde: **is het probleem er nog?** De site vángt de oude slug op, maar 301't
+naar de KÁLE categorie en gooit het facet weg —
+`beslist.be/…/c/stijl_test~393710` → `/products/meubilair/meubilair_389370/`, terwijl
+`…/c/woonstijl~393710` een 200 geeft. Zonder die probe was "de site handelt het al af" een even
+plausibele conclusie geweest, en dan was de hele module overbodig.
+
+---
+
+## Een slug die in een URL staat, is niet uniek over facetten (2026-09-03, Facet Watch)
+
+Facet 4501 hernoemde `type` → `format`. `pa.urls` heeft **1.313 rijen met `/type~`** — en daarvan
+horen er **0** bij facet 4501. De slug `type` wordt door meerdere facetten gebruikt; die 1.313 rijen
+zijn andermans pagina's. Ze omleiden zou 1.313 werkende URL's kapot hebben gemaakt, zonder foutmelding
+en zonder dat de telling er verdacht uitziet (1.313 lijkt juist een mooi resultaat).
+
+De afbakening moet dus via de **value-ids** van dat facet (`pa.facet_watch_value_facet`): match
+`/<slug>~<value-id>` waarbij het value-id aantoonbaar in dít facet zit. Ter controle op de andere
+kant: voor `stijl_test` (facet 2931) geeft die begrenzing 2.037 van 2.037 — de guard gooit niets weg
+waar hij niet hoort.
+
+Twee dingen die daar direct bij horen:
+
+- **Match beide posities.** Een facet staat in het pad als `/c/<slug>~<id>` of als `~~<slug>~<id>`.
+  Alleen op `/<slug>~` matchen mist elke niet-eerste facet: dat was het verschil tussen 2.037 en
+  25.730 rijen voor `stijl_test`.
+- **Hernoemen alleen levert een URL op die de site zelf weer omleidt.** Facetten staan alfabetisch op
+  slug in het `/c/`-pad, dus `stijl_test` → `woonstijl` schuift het facet voorbij `vorm_stoel`.
+  `redirect_301_service.transform_and_sort_url()` hernoemt én hersorteert; die regel bestond al voor
+  de Redirect Generator en is hergebruikt in plaats van nagebouwd. Gecontroleerd op 313 gegenereerde
+  paren: 0 met de oude slug erin, 0 niet-alfabetisch.
+
+---
+
+## Een per-locale event zonder locale-veld: één hop, nooit een keten (2026-09-03, Facet Watch)
+
+`Facet Label` UPDATE vuurt per locale, maar de payload draagt alleen `Name` en `UrlSlug` — **geen
+locale**. Eén facet levert dus vier bijna identieke events en niets zegt welke bij welk domein hoort.
+Dat is geen randgeval maar bepaalt of de redirect goed of schadelijk is:
+
+| facet 2931 | `stijl_test~393710` | `woonstijl~393710` |
+|---|---|---|
+| beslist.**nl** | 200 | 301 |
+| beslist.**be** | 301 | 200 |
+
+**De augustus-edits landden op `nl-BE`, niet op `nl-NL`.** Een push op NL+BE had op .nl de wérkende
+pagina weggeduwd. De locale is alleen te bepalen door de huidige slugs live op te halen
+(`GET /api/Facets/{id}` → labels met `locale` + `urlSlug`) en te kijken welke wijziging op de huidige
+slug uitkwam.
+
+**En dan één hop, niet een keten terugwandelen.** Dat laatste lijkt completer (de `New` van de vorige
+stap is de `Old` van de volgende), maar de locales delen hun slugs: facet 2952 heeft nl-NL
+`opties → met_matras_bed` en nl-BE `met_matras_bed → opties`. Een wandeling pakt de wijziging van de
+ándere locale als volgende stap en produceert een redirect die een werkende pagina wegduwt — precies
+wat je probeerde te voorkomen. Met één hop kan dat niet: je vraagt alleen wie op de huidige slug is
+uitgekomen. Komen er meerdere wijzigingen met een verschillende `Old` op dezelfde slug uit (facet 4501
+en-US: zowel `t_papier → format` als `type → format`), dan is het niet te scheiden — **melden, niet
+kiezen**. Dat waren 4 van de 32 rijen.
+
+---
+
+## "De cache is stale" was gewoon een andere locale (2026-09-03, Facet Watch)
+
+`facet_watch_facet_maincat.facet_slug` gaf `stijl_test` voor facet 2931, terwijl het event de slug op
+30-07 naar `woonstijl` had gezet. Conclusie opgeschreven: cache is stale, dus de locale is er niet uit
+te bepalen. **Fout.** `GET /api/Facets/{id}` live opgevraagd: nl-NL is nog steeds `stijl_test`, nl-BE
+is `woonstijl`. De cache had het gewoon bij het rechte eind — `_fetch_facet_meta()` bewaart de
+nl-NL-slug, en de wijziging zat op een andere locale.
+
+**Een verschil tussen cache en event is niet automatisch een stale cache**; het kan ook betekenen dat
+de twee over verschillende dingen gaan. Kost één call om te checken, en het scheelde hier een
+ontwerp dat op een onjuiste aanname was gebouwd.
+
+---
+
+## Een primaire actie achter horizontale scroll bestaat niet (2026-09-03, Facet Watch)
+
+De twee nieuwe modules kregen `.tbl-nowrap` mee, de bestaande conventie van die pagina ("houd elke
+waarde op één regel en scroll horizontaal"). Bij de bestaande twee tabellen is dat prima — die zijn
+om te lézen. De nieuwe tabel heeft als laatste kolom een **knop** (`→ Redirect Tool`), en die stond
+daardoor buiten de kaart tot je horizontaal scrollde. Op de screenshot viel het meteen op; in de code
+niet, want er was niets fout aan.
+
+Vervangen door `.tbl-fit`: de lange cellen (slugs, categorielijsten) wrappen, en wat niet mag afbreken
+(datum, getal, badge, de knop) houdt zijn eigen `nowrap`. De twee slug-kolommen zijn daarbij één
+gestapelde kolom geworden (`oud` / `→ nieuw`), wat de tabel smaller maakt én beter leest als een
+verhuizing. **Een conventie die je overneemt van een tabel ernaast geldt voor tabellen met dezelfde
+inhoudssoort** — zodra er een actie in staat, verandert de vraag van "past het" naar "kun je erbij".
+
+Bijkomend, uit dezelfde screenshotronde: 24 van de 32 rijen waren en-US/de-DE met 0 te repareren
+URL's en geen knop. Die duwden de acht rijen waar het werk zit uit beeld, dus er is een
+default-aan-filter bij ("Alleen met te repareren URL's", met de telling ernaast zodat het inperken
+zichtbaar is — UI_BLUEPRINT §"een tool die de selectie inperkt, ZEGT dat").
+
+---
+
+## Een blote `<input type="checkbox">` negeert `border-radius` (2026-09-03, dashboardbreed)
+
+De ronde-selectievakjes-regel van Auto-Redirects naar `css/style.css` verplaatsen was niet genoeg: op
+vier pagina's bleven elf vakjes vierkant. Een checkbox zonder `.form-check-input` wordt door de
+browser zelf getekend (`appearance: auto`) en trekt zich van `border-radius` niets aan. Bootstrap zet
+op die klasse `appearance: none` en tekent het vakje zelf — pas dán doet de radius iets.
+
+Dus **geen `input[type="checkbox"]`-regel in de shared CSS** die daar stil niets doet, maar de klasse
+erbij op de elf vakjes (Bot Hits 1, DMA Exclusions 4, GSD Campaigns 4, SEO titles 2). UI_BLUEPRINT
+vroeg die klasse al; dit is waarom het niet cosmetisch is.
+
+Manier om het te vinden zonder alle 21 pagina's te openen:
+
+```bash
+grep -o '<input[^>]*type="checkbox"[^>]*>' *.html | grep -vc "form-check-input"
+```
+
+---
+
 ## Een A/B waarvan je de controle-arm zelf net hebt geschreven, moet je óók toetsen (2026-09-03, rurl V68)
 
 De vloer die een "te hard afgestrafte" rij terugtilt kan per definitie alleen VERHOGEN. Mijn eerste

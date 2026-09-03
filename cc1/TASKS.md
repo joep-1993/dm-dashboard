@@ -3,6 +3,74 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-03 (8) — Facet Watch: vier modules erbij, en ronde selectievakjes dashboardbreed
+
+Commits `7a33b8c` (facet-watch) en `f29142f` (ui). Lessen in LEARNINGS, zelfde datum. Vier verzoeken
+van Joep plus één losse UI-wens.
+
+Gedaan — **Facet Watch**:
+
+- [x] **Tegels in "Facetwijzigingen per main categorie" klikbaar.** De vier die een deelverzameling
+      aanwijzen (`Nieuwe facetten`, `Aangehangen`, `Waarden +`, `Waarden −`) zetten het filter op de
+      facettabel en scrollen ernaartoe. `Events` en `Facetten geraakt` zijn totalen en blijven
+      onklikbaar — een klik die de tabel niet verandert is erger dan geen klik.
+- [x] **De categoriefilter vervangen door een uitklaprij.** Rij-klik in "Per main categorie" klapt de
+      facetten van die categorie eronder uit; accordeon, één rij tegelijk, zelfde vorm als Bot Hits en
+      DMA Exclusions. Geen nieuw endpoint: `/facets?main_cat_id=` bestond al. De scope op de
+      facettabel is daarmee weg; die filtert nu op SOORT wijziging via de tegels.
+- [x] **Module "Nieuwe productlijnen".** 490 lijnen over 30 dagen, ontdubbeld op merk + lijnnaam.
+      Dat is niet cosmetisch: ListsApi maakt hetzelfde productlijn-facet herhaaldelijk opnieuw aan
+      onder dezelfde naam met een NIEUW facet-id én nieuwe waarde-ids — "UGG Goldencoast" stond er
+      **14×** in — dus zonder dedup lees je 14 lijnen waar er 1 is. `Keer` houdt bij hoe vaak.
+      Zoekvolume uit de Keyword Planner op **merk + lijnnaam**: "tasman" is los niets, `ugg tasman`
+      doet 18.100/mnd. Gecached in `pa.facet_watch_keyword_volume` (nieuwe tabel) zodat de quota niet
+      bij elke pageload wordt aangetikt; chunks van 500 + retry, want de Planner laat in grote batches
+      stil rijen weg. Prioriteitsbanden ≥1000 / ≥200 / ≥10 / <10, plus een aparte stand
+      "niet opgehaald" — dat is iets anders dan 0.
+- [x] **Module "Verhuisde facetten" — op slug, niet op naam.** Kan niet zoals gevraagd: er staat geen
+      enkele `Facet`/`Category Facet` DELETE in de store en 97% van de waarde-deletes is naamloos; zie
+      LEARNINGS. Gebouwd op `Facet Label` UPDATE met `UrlSlug`, dat oude én nieuwe slug meelevert.
+      **8 wijzigingen, 7.427 te repareren URL's**, alle acht `nl-BE`. Locale live bepaald via
+      `GET /api/Facets/{id}`, één hop, ambigue gevallen gemeld in plaats van gekozen (4 van 32).
+      URL-set begrensd op de value-ids van het facet (een slug is niet uniek: `/type~` = 1.313 rijen
+      waarvan 0 bij het hernoemende facet). Hersorteren via
+      `redirect_301_service.transform_and_sort_url()`, hergebruikt niet nagebouwd.
+- [x] **Doorpushen naar de Redirect Tool.** Via `sessionStorage` + `?prefill=facet-watch`; duizenden
+      URL-paren passen niet in een query string en horen niet in serverlogs. De sleutel wordt bij het
+      lezen meteen gewist, zodat een refresh geen selectie terugzet die niemand heeft aangevraagd.
+      Vult **alleen het invoerveld**, mét het juiste land (`nl-BE` → BE) — parsen, previewen en
+      indienen blijven handwerk, want die tool schrijft naar de live redirect-API.
+- [x] **`Facet Value Dependency` toegevoegd aan de Events-filter**, nu het sinds `d9c9b29` mee-ingest.
+
+Gedaan — **UI dashboardbreed**:
+
+- [x] **Selectievakjes rond** ("zoals in Auto-Redirects, dus niet vierkant zoals in Healthscore").
+      De regel stond in de `<style>` van `rurl-optimizer.html`, dus één van de 21 pagina's had het;
+      nu in `css/style.css`, lokale kopie weg. Elf blote checkboxes (Bot Hits 1, DMA Exclusions 4,
+      GSD Campaigns 4, SEO titles 2) hebben `form-check-input` gekregen — zonder die klasse tekent de
+      browser zelf en negeert `border-radius`. Gecontroleerd per screenshot. In UI_BLUEPRINT gezet,
+      inclusief de prijs: **checkbox en radio zijn nu niet op vorm te onderscheiden**.
+
+Open:
+
+- [ ] **De 7.427 BE-redirects zijn niet ingediend.** De knop vult alleen het veld; Joep dient zelf in.
+- [ ] **`affected_urls` is een NL-pad-proxy, geen BE-telling.** `pa.urls` heeft **geen domeinkolom**
+      (alleen `url_id, url, main_cat_name, deepest_subcat_name, first_seen_at, last_seen_at,
+      is_active, notes`), dus geteld wordt "paden in onze inventaris die de oude slug dragen". Dat de
+      equivalente paden ook op .be bestaan is aannemelijk (zelfde catalogus, zelfde pad, alleen die
+      ene facet-slug verschilt) maar niet uit deze tabel te bevestigen. Wie het exact wil: bothits of
+      `dim_visit` hebben wél een domein.
+- [ ] **4 slug-wijzigingen zijn niet eenduidig toe te wijzen** (facet 4501 de-DE/en-US, facet 5613
+      en-US/nl-BE): meerdere wijzigingen komen op dezelfde slug uit met een verschillende `Old`. Met
+      de hand na te kijken in de audit log; geen van de vier is nl-NL of heeft URL's, dus geen haast.
+- [ ] **`value_name` blijft NULL op `Facet Value`/`Facet Value Label` events terwijl de naam in
+      `changes->>'NameInColumn'` staat.** De nieuwe module leest daarom uit `changes`. Een backfill
+      in de ingest zou die kolom bruikbaar maken voor alle latere queries — nu is er een kolom die
+      belooft wat hij niet levert.
+- [ ] **Zoekvolume staat voor 485 van de 490 productlijnen nog leeg.** Eén klik op "Zoekvolume
+      ophalen" vult het (±1 Keyword-Planner-call per 500 termen); bewust niet automatisch bij
+      pageload gedaan vanwege de quota.
+
 ### 2026-09-03 (7) — GSD low-linkage: welke campagnes missen het label, en waarom het label niet mocht blijven
 
 Commit `b060ab1`. Lessen in LEARNINGS, zelfde datum. Aanleiding: Sokken-online.nl
