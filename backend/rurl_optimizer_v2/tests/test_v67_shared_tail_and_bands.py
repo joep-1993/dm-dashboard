@@ -330,3 +330,58 @@ def test_end_state_for_joeps_row():
     out = _finalize_redirect(
         _row(reliability_score=base_scored, facet_value_names='Balkon'), _ctx(KW))
     assert (base_scored, out['reliability_score'], out['reliability_tier']) == (72, 82, 'B')
+
+
+# --- V68: de vloer generaliseert van maat/kleur naar "geen productwoord" ------
+
+def _scored68(kw, target, vocab=None, count=250, share=0.5, faceted=False):
+    """Als _scored, maar met de V68-woordenlijst en de querytokens."""
+    from src.reliability_scorer import set_category_vocabulary, _bridge_stem
+    set_category_vocabulary({_bridge_stem(w) for w in (vocab or [])})
+    cov, left = _cov_and_left(kw, target)
+    try:
+        return score_search_derived(_cross_maincat_base(True, 100), match_coverage=cov,
+                                    dom_share=share, dom_count=count,
+                                    target_is_faceted=faceted, unrepresented=left,
+                                    keyword_tokens=kw.lower().split())
+    finally:
+        set_category_vocabulary(set())
+
+
+def test_v68_lifts_a_dropped_qualifier_that_is_not_a_size_or_colour():
+    """'professionele' staat in geen categorienaam, dus het is een bijzaak."""
+    assert _scored68('professionele mandoline', 'Mandolines',
+                     vocab=['mandolines', 'keukensnijders']) == ADJ_ONLY_FLOOR
+
+
+def test_v68_keeps_a_dropped_product_noun_in_tier_d():
+    """'dispenser' IS een categorienaam, dus de bestemming verkoopt iets anders."""
+    assert _scored68('wattenschijfjes dispenser', 'Wattenschijfjes',
+                     vocab=['wattenschijfjes', 'dispensers']) < ADJ_ONLY_FLOOR
+
+
+def test_v68_sees_the_head_of_a_dutch_compound():
+    """'slang' is de kop van 'Tuinslangen' — een suffix, geen vrije containment."""
+    from src.reliability_scorer import set_category_vocabulary, _is_qualifier, _bridge_stem
+    set_category_vocabulary({_bridge_stem(w) for w in ['tuinslangen', 'crepepapier']})
+    try:
+        assert _is_qualifier('slang') is False      # kop van tuinslang
+        assert _is_qualifier('crepe') is True       # PREFIX van crepepapier, geen kop
+    finally:
+        set_category_vocabulary(set())
+
+
+def test_v68_will_not_lift_when_the_head_itself_went_unrepresented():
+    """'Deep Blue Sea' -> Dekbedovertrekken: geen van de woorden is een
+    productwoord, maar de bestemming gaat ook niet over de kop van de query."""
+    assert _scored68('deep blue sea', 'Dekbedovertrekken',
+                     vocab=['dekbedovertrekken']) < ADJ_ONLY_FLOOR
+
+
+def test_v68_without_a_vocabulary_is_exactly_v67():
+    """De noodrem (RURL_V68_PRODUCT_NOUNS=0) mag de regel niet OMKEREN — dat deed
+    hij wel toen de lege lijst elk woord als bijzaak las, en de A/B ving het."""
+    from src.reliability_scorer import set_category_vocabulary, _is_qualifier
+    set_category_vocabulary(set())
+    assert _is_qualifier('grote') is True        # maat blijft een bijzaak
+    assert _is_qualifier('dispenser') is False   # al het andere niet

@@ -624,9 +624,96 @@ COLOUR_WORDS = frozenset({
 })
 ADJ_ONLY_FLOOR = 50  # the bottom of tier C
 
+# V68: the same floor, for qualifiers that are neither a maat nor a kleur.
+#
+# The size/colour sets above were the first cut and they only reached one of the
+# nine rows Joep marked "te hard afgestraft" on 2026-09-03 (`grote wasknijpers`).
+# The other eight drop a word that is just as much a qualifier — `professionele
+# mandoline` -> Mandolines, `crepe pannenkoekenpan` -> Pannenkoekenpannen,
+# `solar lampionnen` -> Lampionnen, `toiletverhoger met armleuningen` ->
+# Toiletverhogers — and enumerating those by hand does not end.
+#
+# The discriminator is not the part of speech. It is whether the dropped word
+# names a PRODUCT: `wattenschijfjes dispenser` -> Wattenschijfjes and
+# `hogedrukreinigers slang` -> Hogedrukreinigers drop `dispenser` and `slang`,
+# and those are things you can buy — the destination sells something else. So a
+# token counts as a product noun when it appears in the taxonomy's own category
+# names, and everything else is treated as a qualifier.
+#
+# Two directions, both anchored on Dutch putting the head of a compound LAST:
+#   * equality            — `dispenser` is "Dispensers"
+#   * token ENDS WITH it  — `slang` is the head of "Tuinslangen", "Doucheslangen"
+# Deliberately NOT free containment, the same call the V62 floor made (9a4d822):
+# containment would let `crepe` match "Crepepapier" and lose the row it is meant
+# to save, and it is what once put 'bor' inside 'bordeauxrod'.
+#
+# The vocabulary is injected by the worker (set_category_vocabulary), because the
+# scorer must not grow a data dependency of its own. Until it is set, this
+# returns False for everything and the floor falls back to size/colour exactly as
+# it behaved in V67 — a scorer used without the optimizer keeps its old answers.
+_CATEGORY_STEMS: frozenset = frozenset()
+_PRODUCT_NOUN_MIN = 5   # under this, a stem is too short to carry a head safely
+
+
+def set_category_vocabulary(stems) -> None:
+    """Hand the scorer the stems of every word in the taxonomy's category names."""
+    global _CATEGORY_STEMS
+    _CATEGORY_STEMS = frozenset(stems or ())
+
+
+def _is_product_noun(token: str) -> bool:
+    """True when the token names a product, i.e. it turns up in a category name."""
+    if not _CATEGORY_STEMS:
+        return False
+    st = _bridge_stem((token or '').lower().strip())
+    if not st:
+        return False
+    if st in _CATEGORY_STEMS:
+        return True
+    if len(st) < _PRODUCT_NOUN_MIN:
+        return False
+    return any(t.endswith(st) and len(t) > len(st) for t in _CATEGORY_STEMS)
+
 
 def _is_size_or_colour(token: str) -> bool:
     return (token or '').lower().strip() in SIZE_WORDS | COLOUR_WORDS
+
+
+# Dutch puts the head of a noun phrase LAST, except when a preposition opens a
+# modifier: "toiletverhoger MET armleuningen" is a toiletverhoger, not an
+# armleuning. So the head is the last content token before the first preposition,
+# or simply the last token when there is none.
+_HEAD_PREPS = frozenset({'met', 'voor', 'zonder', 'van', 'op', 'aan', 'in', 'bij', 'tot'})
+
+
+def _query_head(tokens) -> str:
+    """The token a query is ABOUT. Empty when it cannot be decided."""
+    toks = [str(t).lower().strip() for t in (tokens or []) if str(t).strip()]
+    if not toks:
+        return ''
+    for i, t in enumerate(toks):
+        if t in _HEAD_PREPS and i > 0:
+            return toks[i - 1]
+    return toks[-1]
+
+
+def _is_qualifier(token: str) -> bool:
+    """V68: a word the destination cannot filter on, but that does not change
+    WHICH product is being asked for.
+
+    The empty-vocabulary branch is NOT cosmetic. Written as
+    ``_is_size_or_colour(t) or not _is_product_noun(t)`` it inverts the whole
+    rule when the vocabulary is missing: `_is_product_noun` is False for
+    everything, so every unrepresented token reads as a qualifier and the floor
+    lifts EVERY coverage-demoted row. The A/B caught it — the "V67" arm came back
+    with MORE tier C than V68, which a floor can never produce. Without a
+    vocabulary the answer has to be V67's: size and colour, nothing else.
+    """
+    if _is_size_or_colour(token):
+        return True
+    if not _CATEGORY_STEMS:
+        return False
+    return not _is_product_noun(token)
 
 
 # Below this AND-match count a high dom_share is not trustworthy enough to earn
@@ -654,6 +741,7 @@ def score_search_derived(
     include_coverage: bool = True,
     target_is_faceted: bool = False,
     unrepresented: Optional[list] = None,
+    keyword_tokens: Optional[list] = None,
 ) -> int:
     """V45: adjust a score by query coverage and category product-count
     dominance. See the band tables above.
@@ -734,8 +822,21 @@ def score_search_derived(
     # weakness of the >= 4-char bridge (see h1_overlap_parts), and the answer
     # there is the same as here: let the branch's own evidence decide whether the
     # row deserves the benefit of the doubt.
+    # V68 adds a second condition: the destination must represent the query's
+    # HEAD. Without it the floor lifts anything whose words are simply absent
+    # from the taxonomy — the 400-row A/B put "Deep Blue Sea" -> Dekbedovertrekken
+    # and "emaille" -> Installatiedraden in tier C, because a film title and a
+    # finish are no more "product nouns" than `solar` is. The claim the floor is
+    # meant to protect is narrower: the page sells the thing you asked for, it
+    # just cannot filter on your adjective. That claim is false the moment the
+    # head itself went unrepresented. When no tokens are passed the condition is
+    # skipped, so a caller that has not been updated keeps the V67 answer.
+    _head = _query_head(keyword_tokens)
+    _head_ok = (not _head) or (_head not in {str(w).lower().strip()
+                                             for w in (unrepresented or [])})
     if (unrepresented and base >= ADJ_ONLY_FLOOR and score < ADJ_ONLY_FLOOR
-            and all(_is_size_or_colour(w) for w in unrepresented)):
+            and _head_ok
+            and all(_is_qualifier(w) for w in unrepresented)):
         score = ADJ_ONLY_FLOOR
     return score
 

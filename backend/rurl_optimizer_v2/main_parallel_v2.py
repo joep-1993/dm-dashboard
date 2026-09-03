@@ -227,6 +227,30 @@ def init_worker_v2(cache_file, fuzzy_threshold, use_token_coverage=True,
     # V32: let the builder verify brand/shop facets across subcat depths.
     builder.facet_url_exists = facet_filter.facet_url_set().__contains__
 
+    # V68: hand the scorer the taxonomy's own vocabulary once per worker, so the
+    # size/colour floor can generalise to "the dropped word is not a product".
+    # Built here rather than in the scorer because this is where categories_df
+    # already lives; without this call the floor keeps its V67 behaviour.
+    # RURL_V68_PRODUCT_NOUNS=0 leaves the vocabulary empty, which puts the floor
+    # back on V67's size/colour behaviour. It is the A/B switch this rule was
+    # measured with, and the escape hatch if it ever misjudges at scale — a
+    # scoring change that touches every coverage-demoted row deserves one.
+    try:
+        import os as _os, re as _re
+        if _os.getenv("RURL_V68_PRODUCT_NOUNS", "1") == "0":
+            raise RuntimeError("disabled via RURL_V68_PRODUCT_NOUNS=0")
+        from src.reliability_scorer import set_category_vocabulary, _bridge_stem
+        _names = data['categories_df']['display_name'].dropna().astype(str)
+        set_category_vocabulary({
+            _bridge_stem(w)
+            for n in _names
+            for w in _re.findall(r'[a-z\u00e0-\u00ff0-9]+', n.lower())
+            if len(w) >= 4
+        })
+    except Exception as _ex:          # never let vocabulary-building kill a worker
+        logging.getLogger(__name__).info(
+            "V68: category vocabulary not loaded (%s) — floor stays size/colour only", _ex)
+
     _worker_data = {
         'parser': RUrlParser(),
         'facet_filter': facet_filter,
@@ -2047,7 +2071,8 @@ def _cross_maincat_fallback_fields(url, parsed, categories_df, matcher,
                       dom_count=pv.get('dom_cat_count'),
                       match_type='cross_maincat_fallback',
                       target_is_faceted=bool(res.facet_fragment),
-                      unrepresented=_cov_left)
+                      unrepresented=_cov_left,
+                      keyword_tokens=_cov_words)
     sub_id = extract_subcategory_id_from_url(res.redirect_url)
     dropped = getattr(parsed, 'existing_facet', '') or ''
     reason = (
@@ -4718,6 +4743,7 @@ def process_url_v2(args):
             # it, so scoping it to the cross-maincat branch alone would have left
             # the neighbouring branches judging 'grote wasknijpers' the old way.
             unrepresented=_v45_unmatched,
+            keyword_tokens=_keyword_words(parsed.keyword),
         )
         final_tier = get_reliability_tier(final_score)
         # surface the corrected coverage in the output so the column matches the
