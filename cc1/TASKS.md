@@ -3,6 +3,80 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-03 (2) — Auto-Redirects: de Push Redirects-balk uitgekleed en de tabel op één lettertype
+
+Wensenlijst van Joep uit `suggestions.txt`, zeven punten op de Push Redirects-kaart. Commit `865ddb0`.
+
+Gedaan:
+
+- [x] **Eén lettertype op de pagina.** `.url-cell` stond op `monospace 0.78rem`, waardoor Push
+      Redirects en Recent runs — twee tabellen in dezelfde kaartstapel — in twee verschillende
+      lettertypes stonden. `.url-cell` draagt nu alleen nog het afbreekgedrag en erft `.tool-table`
+      (0,9rem).
+- [x] **Products- en Visits-kolom weg, Score achteraan.** Volgorde is nu ☑ / Old / New / Score. Beide
+      geschrapte kolommen waren context bij een keuze die op de score wordt gemaakt.
+- [x] **Koppen ingekort** naar `Old` en `New`.
+- [x] **Min. score is een teller** (`input-group` + `<input type="number">`, default 90, stap 5),
+      dezelfde vorm als `FAQs` in FAQ Generation. Daarmee vervalt het uitklapmenu mét
+      histogramtelling (`≥ 90 · Tier A (49)`) en `buildScoreOptions()`. Invoer wordt op 0-100 geklemd
+      bij `change`.
+- [x] **Status code- en Country-dropdown weg**; 301 en NL+BE staan nu als constante in het
+      push-blok. Payload naar `/api/redirect-tool` onveranderd.
+- [x] **De samenvattingsregel weg** (`49 of 762 redirects with score ≥ 90 · not pushable…`). De
+      afkap-waarschuwing blijft: die gaat niet over context maar over een selectie die minder dekt
+      dan je denkt.
+- [x] **De telling naar links**, direct naast de select-all-checkbox, als platte tekst in plaats van
+      een badge — waar UI_BLUEPRINT hem in de bulk-select-balk zet.
+
+Getoetst per screenshot met een tijdelijke preview-kopie van de pagina en gestubde rijen (recept in
+[[wsl_screenshot_windows_chrome]]): kolomvolgorde, de tierkleuren, de teller, en de twee tabellen
+onder elkaar om het lettertype te vergelijken.
+
+Open:
+
+- [ ] De histogramtelling per drempel is met de dropdown verdwenen. Terug te brengen als klein cijfer
+      achter de teller (het endpoint levert `histogram` nog steeds mee) — alleen als Joep hem mist.
+- [ ] De Old/New-cellen breken nu vaker over twee regels (`break-all`), waar Recent runs juist afkapt
+      met `…` en de volle waarde in de `title` zet. Eén CSS-regel als dat netter moet.
+
+### 2026-09-03 (1) — SEO Rulings: een vaste combo in de facet-links-check
+
+Vraag van Joep: één van de drie URL's in check 2 moet vast zijn —
+`schoenen_430884/c/populaire_serie~4379309` — met de toets of `type_productlijn~18049952` in het
+noscript staat. Commit `9daabef`.
+
+Gedaan:
+
+- [x] **`PINNED_FACET_COMBO`** als slot 1; slot 2-3 blijven de steekproef. De vaste rij wordt niet
+      geresampled: een gepinde combo heeft geen gelijkwaardige vervanger, dus rood is daar het
+      signaal.
+- [x] **`_has_noscript_link()`** — matcht binnen het `<noscript>`-blok op een exacte href. Bewust
+      niet document-breed: de GraphQL-payload in dezelfde HTML noemt `valueId 18049952` ook, dus dat
+      zou een kapot noscript groen houden. Zie LEARNINGS (zelfde datum).
+- [x] **`vast`-pill in de Details-tabel** met de verwachte link in de tooltip.
+- [x] De "stream is op"-tak telt nu gesamplede rijen in plaats van de lengte van de detaillijst —
+      anders kon die tak met een gepinde rij erin nooit meer vuren.
+- [x] Getoetst tegen live: 3 rijen, alle drie `present`, plus negatieve controles op de probe
+      (noscript leeggehaald → False terwijl de value-id nog in de JSON staat; fake id → False;
+      prefix van de echte href → False).
+
+Bijvangst — **de dependent-facet-bug reproduceert niet meer.** Facet 3432 (Collectie, Parfumerie)
+staat op exact de URL uit `cc1/SEO_FACETLINKS_DEPENDENT_FACETS.md` §2 nu op `isSeoFacet=true` met 5
+noscript-links, waar 19-08/25-08 `false` en 0 links gaven; 3821 (Schoenen) idem. Volledige nameting
+in dat document onder "STATUS 2026-09-03".
+
+Open:
+
+- [ ] **De ask aan IT herzien** (checklist-artifact, doc §8). De twee gevallen die het bewijs droegen
+      linken nu allebei, maar niemand weet wat er tussen 25-08 en 03-09 veranderde en er is geen
+      release gemeld. Niet intrekken zonder dat antwoord.
+- [ ] **Modelnaam 5514 (Laptops) is niet getoetst**: in die categorie staat élk facet op
+      `isSeoFacet=false` en bevat het noscript alleen "Kies categorie". Zoek een categorie waar de
+      parent (Productlijn 2306) zelf wél gelinkt wordt.
+- [ ] **De backend op :8003 draait nog zonder deze wijziging** — geen `--reload`, dus de vaste combo
+      gaat pas mee vanaf de eerstvolgende herstart (kill + relaunch, zie
+      [[dm_tools_backend_no_reload]]). De frontend-wijzigingen zijn wél al live (statische bestanden).
+
 ### 2026-09-02 (8) — Auto-Redirects: een run doorvoeren vanuit de tool zelf
 
 Vraag van Joep: dezelfde doorvoer-optie als in Canonicals en de Redirect Generator, met een selector

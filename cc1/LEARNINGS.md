@@ -1,6 +1,49 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een canary moet in het blok kijken dat hij bewaakt (2026-09-03, SEO Rulings check 2)
+
+Check 2 van SEO Rulings trok drie willekeurige categorie/facet-combo's met `seoPriority=true`. Joep
+wilde er één vast bij: de Schoenen-pagina `…/c/populaire_serie~4379309`, met de vraag of de
+vervolg-URL `…~~type_productlijn~18049952` in het noscript staat. Drie dingen die daarbij bleken:
+
+### 1. De value-id staat twee keer op de pagina — één keer waar je hem wilt, één keer waar je hem niet wilt
+
+`18049952` komt op die pagina 2× voor: één keer als `href` in het `<noscript>`, en één keer in de
+GraphQL-payload verderop in dezelfde HTML (`\"valueId\":18049952`). Een document-brede
+`"type_productlijn~18049952" in html` zou dus **groen blijven op een volledig kapot noscript** — de
+JSON alleen al houdt hem overeind. Gemeten met het noscript leeggehaald: 1 hit blijft over.
+
+**Een check die één blok bewaakt, moet in dat blok zoeken.** `_has_noscript_link()` knipt eerst de
+`<noscript>`-inhoud eruit en matcht daarbinnen op `href="…"` met een exact pad, dus een langere href
+met een extra facet erachter telt ook niet mee.
+
+### 2. Toets het ding zelf, niet de kop erboven
+
+De andere twee slots kijken of er een noscript-kop met de facetnaam staat. Die kop zegt niets over of
+de vervolg-URL ook echt gerenderd is; voor een facet dat eerder gewéigerd werd te linken is dat
+precies het verschil dat je wilt zien.
+
+### 3. Een vaste rij moet uit de "steekproef is op"-boekhouding blijven
+
+De oude lus deed `if not facet_details:` om te herkennen dat de combo-stream leeg was voordat er ook
+maar één kandidaat langskwam. Met een gepinde rij die er altijd in zit, kan die tak nooit meer vuren
+— stil, want de check zou gewoon "passed" melden terwijl de steekproef niets opleverde. Nu telt een
+aparte `sampled`-teller alleen de rijen die écht uit de stream komen. Dezelfde soort val als altijd:
+je verandert de betekenis van een lijst en vergeet dat iets anders zijn lengte als signaal gebruikt.
+
+### En de aanleiding zelf: de dependent-facet-bug reproduceert niet meer
+
+Bij het nameten bleek de aanleiding voor die canary verdwenen. Op exact de URL uit
+`cc1/SEO_FACETLINKS_DEPENDENT_FACETS.md` §2 staat facet **3432 (Collectie) nu op `isSeoFacet=true`
+met 5 noscript-links**, waar 19-08 en 25-08 `false` en 0 links gaven; **3821 (Type, Schoenen)** idem
+op de parent-waarde-pagina, 14 links. Wat er tussen 25-08 en 03-09 veranderd is, weet niemand — er is
+geen release gemeld. Vandaar de canary: hij bewaakt nu een fix waarvan de oorzaak onbekend is.
+
+Let bij het nameten op wélke pagina je pakt: een dependent facet linkt **alleen** op de pagina waar
+zijn parent-waarde gekozen is. Op de kale `schoenen_430884/` staat 0 keer `type_productlijn`, en dat
+is correct gedrag. Meet je daar, dan meet je de bug niet — je meet de definitie.
+
 ## Drie vallen die er niet uitzagen als een val (2026-09-02, Auto-Redirects doorvoeren)
 
 Bij het bouwen van de doorvoer-flow (`0a5658c`) kostten drie dingen een ronde die alle drie hetzelfde

@@ -19,6 +19,47 @@ SEO-visits; onderweg bleek waarom een deel van die values structureel geen kans 
    `CategoryFacetSettings`. `GET /api/CategoryFacets` heeft het veld ook, maar geeft altijd `null`.
    Zie §8 — inclusief de checklist die naar IT kan.
 
+## STATUS 2026-09-03: de bug reproduceert niet meer
+
+Nagemeten met exact de URL uit §2 — `parfum_aftershave_422758/c/merk~422868`, dezelfde pagina waar
+op 19-08 en 25-08 `isSeoFacet=false` en 0 links stonden:
+
+| Facet | slug | `isSeoFacet` 19-08 | `isSeoFacet` 03-09 | noscript 03-09 |
+|---|---|---|---|---|
+| **3432 Collectie** | type_parfum | **false** | **true** | kop "Collectie" + 5 links |
+| 3441 Inhoud | inhoud_parfum_ml | true | true | ja |
+| 6271 Verpakking | verpakking | true | true | ja |
+| 6273 Geurfamilie | geurnoot | false | false | nee (seoPriority is daar ook null) |
+
+Tweede geval, Schoenen: op `schoenen_430884/c/populaire_serie~4379309` (parent-waarde gekozen) staat
+**3821 `type_productlijn` op `isSeoFacet=true`** met een kop "Type" en 14 facetlinks, waaronder
+`…/c/populaire_serie~4379309~~type_productlijn~18049952`.
+
+Twee dingen om niet te verwarren:
+
+- **Een dependent facet linkt alleen op de pagina waar zijn parent-waarde gekozen is.** Op de kále
+  `schoenen_430884/`-pagina en op `/c/merk~431107` staat géén Type-blok en 0 `type_productlijn`-links.
+  Dat is geen bug maar de definitie van dependent. De crawlketen loopt dus via het parent-facet:
+  de kale categorie linkt "Productlijn" (3513 `populaire_serie`), en pas op zo'n waarde-pagina
+  verschijnt het kind. Meet je op de kale categorie, dan meet je niets.
+- **Modelnaam 5514 (Laptops) is hiermee niet getoetst.** In `computers_19664326_19904517` staat
+  *elk* facet op `isSeoFacet=false` en bevat het noscript alleen "Kies categorie" — die categorie
+  heeft überhaupt geen SEO-facetten, dus er valt geen dependent-gedrag te zien. Wie dit sluitend wil
+  hebben, zoekt een categorie waar de parent (Productlijn 2306) zelf wél gelinkt wordt.
+
+**Wat dit betekent voor de ask aan IT** (§8, de checklist-artifact): de twee gevallen die het bewijs
+droegen linken nu allebei. Voordat je de vraag intrekt: het is niet bekend *wat* er tussen 25-08 en
+03-09 veranderd is, en niemand heeft een release gemeld. Vraag 3 uit de checklist ("bestaat er een
+bewuste regel dat child-facetten nooit isSeoFacet krijgen?") is daarmee juist beantwoord met "nee,
+blijkbaar niet" — maar zonder te weten waarom het eerst wél zo was.
+
+**Regressiewacht staat sinds vandaag in de tool.** SEO Rulings check 2 heeft een vaste combo
+(`PINNED_FACET_COMBO` in `backend/seo_rulings_service.py`): elke run toetst of
+`…populaire_serie~4379309~~type_productlijn~18049952` als `<a href>` in het noscript van die pagina
+staat. Verdwijnt de link, dan valt de check om — dat is precies de gebeurtenis die dit document
+beschrijft. Zie ook LEARNINGS 2026-09-03 voor waarom die match op het noscript-blok gescoped is en
+niet op de hele HTML.
+
 ## 1. Wat seoPriority doet, en hoe je het meet
 
 Definitie (Joep): `seoPriority=1` op een cat/facet-combinatie linkt de facet values in een

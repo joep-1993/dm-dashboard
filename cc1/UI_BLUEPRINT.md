@@ -100,6 +100,12 @@ other tool uses the grey default. New tools follow the grey default.
   **Die staat bewust nog per pagina en niet in `style.css`**: bredere cellen verschuiven
   de kolombreedtes van elke tabel in de app tegelijk, en dat is een eigen ronde met een
   eigen meting. Wie het gelijktrekt, doet het app-breed in één keer.
+- **Twee tabellen op één pagina dragen hetzelfde lettertype.** Auto-Redirects had jarenlang
+  `font-family: monospace; font-size: 0.78rem` op de URL-cellen van Push Redirects, terwijl
+  Recent runs eronder gewoon `.tool-table` (0,9rem) was. Los bekeken ziet elk van de twee er
+  prima uit; onder elkaar leest het als twee applicaties. Een cel-klasse hoort alleen te dragen
+  wat *afwijkt* (hier: afbreken op een lange URL), niet een compleet eigen font. Wil je een URL
+  echt in monospace, doe het dan in elke tabel van die pagina tegelijk.
 - **Column widths — pick one strategy, and a value must never bleed into the next column:**
   - *Fixed widths (stable on sort):* `table-layout:fixed; width:100%` + an explicit
     width on every column (a `.col-*` class per `<th>`; `width:36px` for the checkbox,
@@ -1489,6 +1495,28 @@ Een langere vertaling, een toegevoegd woord of een `*` erbij is genoeg. `select.
 select.clientWidth` in de probe zegt het in één regel. De maten die in deze app werken voor een
 `input-group-text` + `select`: land/statuscode ≈ 170-185px, een selector met een lange optietekst
 (`≥ 95 · Tier A (380)`) ≈ 265px.
+
+### Een keuze die nooit wijzigt is geen control, en een getal is een teller
+
+Auto-Redirects, 2026-09-03. De Push Redirects-balk droeg vier controls: `Min. score` (select),
+`Filter`, `Status code` (301/302) en `Country` (NL+BE/NL/BE). De laatste twee stonden er sinds de
+bouw op hun default en zijn nooit anders gezet — die tool voert altijd een 301 voor NL+BE door.
+
+- **Staat een control altijd op dezelfde waarde, zet hem dan in de code.** Een dropdown met één
+  gebruikte optie kost ruimte naast de filters die je wél aanraakt, en suggereert een keuze die
+  niemand maakt. Verdwijnt hij, dan gaat de waarde als constante mee bovenaan het blok (hier
+  `PUSH_STATUSCODE` / `PUSH_COUNTRY`), zodat het contract met de API zichtbaar blijft.
+- **Een continue numerieke drempel is een teller, geen keuzelijst.** De huisvorm staat in FAQ
+  Generation: `input-group` met een `input-group-text`-label en een `<input type="number">`
+  (`value`/`min`/`max`/`step`), breedte ≈ 150-165px. Een select dwingt je in stappen die iemand ooit
+  bedacht heeft; een teller laat 87 toe.
+- **Klem de invoer bij `change`.** Een `number`-veld accepteert een getypte 250 of -5 gewoon, en dan
+  haalt de fetch een leeg resultaat op zonder dat het veld laat zien waarom. `Math.min(max,
+  Math.max(min, …))` en de geklemde waarde terugschrijven in het veld.
+- **De prijs**: een select kan zijn opties labelen met wat ze opleveren (`≥ 95 · Tier A (380)`, uit
+  het histogram), een teller niet. Ruil dat alleen weg als het aantal niet de reden is dat je kiest.
+  De maat van 265px voor zo'n lange optietekst in §"Een label hernoemen krimpt de control ernaast"
+  gold voor precies die select; die staat er niet meer.
 
 ### Zoekveld boven een tabel
 

@@ -87,6 +87,10 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── seo_rulings_service.py   # SEO Rulings: live sanity checks against beslist.nl
 │   │                            #   (no-script categories, no-script facet-links,
 │   │                            #    basement links, title-variable substitution).
+│   │   # Check 2 heeft één VASTE combo (PINNED_FACET_COMBO): Schoenen +
+│   │   # populaire_serie~4379309, toetst of type_productlijn~18049952 als href
+│   │   # in het <noscript> staat — regressiewacht op de dependent-facet-bug.
+│   │   # Matchen mag NIET document-breed: de GraphQL-payload noemt die value-id ook.
 │   │                            #   Picks 1 main / 1 sub / 1 deepest category filtered
 │   │                            #   by taxv2 isEnabled + non-404 URL status; persists
 │   │                            #   every run to pa.seo_rulings_runs (JSONB); posts
