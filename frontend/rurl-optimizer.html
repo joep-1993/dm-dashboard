@@ -285,10 +285,10 @@
                                 <input class="form-check-input" type="checkbox" id="pushSelectAll" title="Select all visible rows">
                             </div>
                             <span id="pushSelCount" class="sel-count">0 selected</span>
-                            <div class="input-group input-group-sm" style="width: 165px;">
+                            <div class="input-group input-group-sm" style="width: 215px;">
                                 <span class="input-group-text">Min. score</span>
-                                <input type="number" class="form-control" id="pushMinScore" value="90" min="0" max="100" step="5"
-                                       title="Show and select every redirect with at least this reliability score. Tier A (>= 90) is what the engine itself calls safe for production.">
+                                <select class="form-select" id="pushMinScore"
+                                        title="Show and select every redirect with at least this reliability score. The number in brackets is how many rows of this run clear it."></select>
                             </div>
                             <div class="input-group input-group-sm" style="max-width: 260px;">
                                 <span class="input-group-text">Filter</span>
@@ -904,7 +904,9 @@
                 'Run ' + (runLabel ? runLabel + ' · ' : '') + taskId;
             document.getElementById('pushFilter').value = '';
             // Default to Tier A — the tier the engine itself calls safe for production.
-            document.getElementById('pushMinScore').value = PUSH_MIN_SCORE_DEFAULT;
+            // Opties alvast zonder tellingen, zodat het veld niet leeg staat terwijl
+            // de eerste fetch loopt; loadPushRows vult ze met het histogram aan.
+            buildScoreOptions(null, PUSH_MIN_SCORE_DEFAULT);
             await loadPushRows(PUSH_MIN_SCORE_DEFAULT);
             document.getElementById('pushCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
@@ -924,6 +926,7 @@
                 const data = await r.json();
                 pushRows = data.rows || [];
                 pushMeta = data;
+                buildScoreOptions(data.histogram, minScore);
                 renderPushRows();
             } catch (err) {
                 pushRows = [];
@@ -932,6 +935,17 @@
                 document.getElementById('pushTruncWarn').classList.add('d-none');
                 updatePushSelectionCount();
             }
+        }
+
+        // ALLEEN voor weergave. `https://www.beslist.nl` is 22 tekens die in elke
+        // rij hetzelfde zijn en die de Old/New-cellen over twee regels duwden; de
+        // volle URL blijft in de `title` staan. Bewust GEEN kopie van
+        // `strip_domain()`: die regel hoort bij een export en staat sinds
+        // `445c758` op precies één plek, in de backend. Deze knipt alleen het
+        // schema+host eraf en raakt query of fragment niet aan, want wat hier
+        // staat moet blijven kloppen met wat je aanklikt.
+        function _displayPath(url) {
+            return String(url == null ? '' : url).replace(/^https?:\/\/[^/]+/i, '') || String(url || '');
         }
 
         function renderPushRows() {
@@ -944,8 +958,8 @@
                     const why = [tierLabel(r.score), r.reason].filter(Boolean).join(' — ');
                     return `<tr class="push-row" data-idx="${i}">
                         <td><input type="checkbox" class="push-select form-check-input" data-idx="${i}"${checked}></td>
-                        <td class="url-cell" title="${escapeHtml(r.old_url)}">${escapeHtml(r.old_url)}</td>
-                        <td class="url-cell" title="${escapeHtml(r.new_url)}">${escapeHtml(r.new_url)}</td>
+                        <td class="url-cell" title="${escapeHtml(r.old_url)}">${escapeHtml(_displayPath(r.old_url))}</td>
+                        <td class="url-cell" title="${escapeHtml(r.new_url)}">${escapeHtml(_displayPath(r.new_url))}</td>
                         <td class="col-center tier-${escapeHtml(r.tier || '')}" title="${escapeHtml(why)}">${r.score}</td>
                     </tr>`;
                 }).join('');
@@ -1027,16 +1041,36 @@
             syncPushSelectAll();
         }
 
+        // Drempels in stappen van 10 (Joep, 2026-09-03), zonder tier-aanduiding.
+        // Het getal tussen haakjes is CUMULATIEF — hoeveel rijen van deze run die
+        // drempel halen — want dat is de vraag die je stelt als je hem verzet. Het
+        // histogram uit `/results` telt per exacte score, dus hier opgeteld van
+        // hoog naar laag. Het beschrijft de hele run en verandert niet mee met de
+        // gekozen drempel, dus één keer bouwen per run is genoeg.
+        function buildScoreOptions(histogram, selected) {
+            const sel = document.getElementById('pushMinScore');
+            const counts = {};
+            for (const h of (histogram || [])) counts[Number(h.score)] = Number(h.count) || 0;
+            let running = 0;
+            const cumulative = {};
+            for (let s = 100; s >= 0; s--) {
+                running += counts[s] || 0;
+                if (s % 10 === 0) cumulative[s] = running;
+            }
+            sel.innerHTML = '';
+            for (let s = 100; s >= 0; s -= 10) {
+                const o = document.createElement('option');
+                o.value = String(s);
+                o.textContent = histogram ? `${s} (${fmtInt(cumulative[s] || 0)})` : String(s);
+                sel.appendChild(o);
+            }
+            sel.value = String(selected);
+        }
+
         document.getElementById('pushMinScore').addEventListener('change', (e) => {
             // Unticks survive a threshold change on purpose: widening the score
             // must not re-arm a row you already rejected.
-            // Klemmen op 0-100: een teller laat een getypte 250 of -5 gewoon
-            // staan, en dan haalt de fetch een leeg resultaat op zonder dat het
-            // veld laat zien waarom.
-            const raw = Number(e.target.value);
-            const score = Math.min(100, Math.max(0, Number.isFinite(raw) ? Math.round(raw) : 0));
-            e.target.value = score;
-            loadPushRows(score);
+            loadPushRows(Number(e.target.value));
         });
         document.getElementById('pushFilter').addEventListener('input', applyPushFilter);
         document.getElementById('pushFilterClear').addEventListener('click', () => {
