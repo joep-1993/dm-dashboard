@@ -15,7 +15,11 @@
         .stat-box.success { background: #d1e7dd; border-color: #badbcc; }
         .stat-box.danger { background: #f8d7da; border-color: #f5c2c7; }
 
-        .url-cell { font-family: monospace; font-size: 0.8rem; word-break: break-all; max-width: 380px; }
+        /* Geen eigen lettertype meer: de URL-cellen stonden in monospace 0,8rem
+           terwijl de rest van dezelfde tabel de gewone body-font droeg, zodat één
+           tabel in twee fonts stond (Joep, 2026-09-03). Zelfde ingreep als in
+           Auto-Redirects. Blijft over: afbreken op de URL zelf + een maximum. */
+        .url-cell { word-break: break-all; max-width: 380px; }
         .flatten-cell { background-color: #fff3cd !important; }
         .skip-cell { background-color: #f8d7da !important; }
         .ok-cell { background-color: #d1e7dd !important; }
@@ -39,35 +43,43 @@
            uitlijnen — `.badge` centreert, wat bij twee regels URL scheef leest. */
         .badge-current {
             white-space: normal; word-break: break-all; text-align: left;
-            font-family: monospace; font-weight: 500;
+            font-weight: 500;
         }
 
+        /* Alle drie de tabellen op deze pagina dragen de canonieke maat uit
+           style.css (.tool-table: 0,9rem body, 1rem kop). Preview, de Run-view en
+           Recent results stonden eerder elk in hun eigen grootte (Joep,
+           2026-09-03). De klasse zelf komt hier niet op: die brengt via
+           `th.sortable::after` een tweede sorteerglyph mee naast de
+           `.sort-arrow`-span die deze tabellen al hebben. */
+        .preview-table, #runsTable { font-size: 0.9rem; }
         .preview-table { min-width: 1500px; }
         .preview-table thead th {
-            background: #f1f3f5; font-size: 0.8rem;
+            background: #f1f3f5; font-size: 1rem;
             position: sticky; top: 0; z-index: 1;
         }
         .preview-table thead th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
         .preview-table thead th.sortable:hover { background: #e9ecef; }
         .preview-table thead th .sort-arrow { color: #adb5bd; font-size: 0.75rem; margin-left: 4px; }
         .preview-table thead th.sort-active .sort-arrow { color: #5e4a90; }
-        .preview-table td { font-size: 0.82rem; vertical-align: middle; padding: 6px 10px; }
+        .preview-table td { vertical-align: middle; padding: 6px 12px; }
         .stat-box[data-filter] { cursor: pointer; transition: box-shadow 0.15s, transform 0.05s; }
         .stat-box[data-filter]:hover { box-shadow: 0 0 0 2px rgba(94, 74, 144, 0.25); }
         .stat-box[data-filter].active { box-shadow: 0 0 0 2px #5e4a90; transform: translateY(-1px); }
 
-        .runs-table thead th { background: #f1f3f5; font-size: 0.8rem; }
-        .runs-table td { font-size: 0.85rem; vertical-align: middle; }
-        .runs-table .actions { white-space: nowrap; }
+        /* #runsTable, niet `.runs-table`: die klasse staat niet op de tabel, dus
+           het blok dat hier stond deed nooit iets (2026-09-03). De kopkleur komt
+           uit `.table thead th` in style.css. */
+        #runsTable td { vertical-align: middle; }
+        #runsTable th.col-check, #runsTable td.col-check { width: 42px; text-align: center; }
 
         .check-result { background: #f8f9fa; padding: 12px 16px; border-radius: 6px; border-left: 4px solid #0d6efd; margin-top: 12px; }
         .check-result.empty { border-left-color: #6c757d; }
         .check-result.is-homepage { border-left-color: #dc3545; }
         .check-result .pair { font-family: monospace; font-size: 0.85rem; }
 
-        .history-row { font-size: 0.85rem; }
-        .btn-red-outline { font-size: 0.75rem; padding: 0.15rem 0.5rem; }
-        .btn-purple-action { font-size: 0.75rem; padding: 0.15rem 0.5rem; }
+        /* Alleen View leeft nog per rij; Export en Delete zijn naar de bulk-bar
+           verhuisd, dus hun twee maatregels zijn weg (2026-09-03). */
         .btn-orange-action { font-size: 0.75rem; padding: 0.15rem 0.5rem; }
         /* Pagination — matches gsd-check / other dm-tools tables.
            btn-outline-secondary is restyled to burnt-orange in css/style.css. */
@@ -77,6 +89,9 @@
         .pagination-controls .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
 
         .small-muted { font-size: 0.8rem; color: #6c757d; }
+        /* Telling links in de bulk-select bar. Merkpaars, niet grijs — grijs leest
+           als "geen waarde" (UI_BLUEPRINT Labels). Zelfde regel als Auto-Redirects. */
+        .sel-count { color: var(--color-navbar); font-size: 0.82rem; font-weight: 600; }
         .badge-flatten { background-color: #ffc107; color: #000; }
         /* Eigen kleurregels per id zijn hier weg (2026-08-14). Deze knoppen dragen een
            themed klasse (btn-primary), dus style.css bezit hun kleur in elke staat —
@@ -160,7 +175,7 @@
                     <div class="card-header">
                         <h5 class="mb-0" style="white-space: nowrap;">Create redirects
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px; margin-left: 4px;">
-                                <title>Expected columns: old, new, statuscode, country, label</title>
+                                <title>File upload: old, new, statuscode, country, label. Manual input: old, new — the rest is filled in for you.</title>
                                 <circle cx="8" cy="8" r="8" fill="#5e4a90"/>
                                 <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
                                 <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
@@ -193,8 +208,18 @@
                             <div class="col-12 d-none" id="paneText">
                                 <label for="textInput" class="form-label">Manual input</label>
                                 <textarea id="textInput" class="form-control" rows="6"
-                                    placeholder="old, new, statuscode, country, label"
+                                    placeholder="old, new"
                                     style="font-family: monospace; font-size: 0.85rem;"></textarea>
+                                <!-- Twee kolommen is de hele vraag; de rest vult de backend
+                                     (_MANUAL_DEFAULTS in redirect_tool_router). De datum wordt
+                                     bij het laden ingevuld zodat hier staat wat er straks
+                                     echt in de Label-kolom komt. -->
+                                <div class="small-muted mt-1">
+                                    Relative or absolute URLs — a full <code>https://…</code> URL is reduced to its path.
+                                    Status code <strong>301</strong>, country <strong>NL+BE</strong> and label
+                                    <strong>JVS Redirects <span id="manualLabelDate">…</span></strong> are filled in
+                                    for you; the same path given under several domains is deduplicated.
+                                </div>
                             </div>
                             <div class="col-12 d-none" id="paneForm">
                                 <div class="row g-2">
@@ -363,6 +388,7 @@
                         <table class="table mb-0" id="runsTable">
                             <thead class="table-light">
                                 <tr>
+                                    <th class="col-check" style="padding: 8px 12px;"><input class="form-check-input" type="checkbox" id="runSelectAll" title="Select all runs"></th>
                                     <th style="padding: 8px 12px; text-align: center;">Timestamp</th>
                                     <th style="padding: 8px 12px; text-align: center;">Source</th>
                                     <th style="padding: 8px 12px; text-align: center;">Total</th>
@@ -373,8 +399,19 @@
                                     <th style="padding: 8px 12px; text-align: center;">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody id="runsBody"><tr><td colspan="8" class="text-muted text-center p-3">No runs yet</td></tr></tbody>
+                            <tbody id="runsBody"><tr><td colspan="9" class="text-muted text-center p-3">No runs yet</td></tr></tbody>
                         </table>
+                        <!-- Bulk-select bar, net als in Auto-Redirects: één Export en één
+                             Remove voor de aangevinkte runs in plaats van dat paar knoppen
+                             per rij, dat met tientallen runs het meeste inkt was. -->
+                        <div class="d-flex align-items-center gap-2 px-3 py-2" style="border-top: 1px solid #eee;">
+                            <span id="runSelCount" class="sel-count">0 selected</span>
+                            <div class="ms-auto d-flex gap-2">
+                                <button type="button" class="btn btn-outline-purple btn-sm" id="runExportBtn" disabled
+                                        title="Download the selected runs. One run gives you its own file; several are merged into one workbook with a leading `run` column.">Export</button>
+                                <button type="button" class="btn btn-outline-red btn-sm" id="runRemoveBtn" disabled>Remove</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -723,18 +760,16 @@
                     ? `<br><span class="badge badge-flatten">flattened from <code>${escapeHtml(row.flatten_from)}</code></span>`
                     : '';
                 // Status badge under the From cell:
-                //   - already_correct → green "URL already redirected"
+                //   - already_correct → green "already redirected"
                 //   - replaceable (toggle on) → yellow "will replace …"
                 //   - other skip → red with the reason and current target
                 let skipBadge = '';
                 if (row.already_correct) {
-                    skipBadge = `<br><span class="badge bg-success">URL already redirected</span>`;
-                    if (hasTopup(row)) {
-                        const forms = (row.topup_variants || [])
-                            .map(v => `<code>${escapeHtml(v)}</code>`).join(' + ');
-                        skipBadge += `<br><span class="badge badge-flatten">will add any missing separator form</span>`
-                                   + `<span class="small-muted ms-1">${forms}</span>`;
-                    }
+                    // De "will add any missing separator form (…)"-regel die hier
+                    // stond is weg (Joep, 2026-09-03). Wat de submit werkelijk
+                    // heeft bijgeschreven staat nog wel in de Note-kolom van de
+                    // Run-view, want dat is een uitkomst en geen belofte.
+                    skipBadge = `<br><span class="badge bg-success">already redirected</span>`;
                 } else if (effSkip) {
                     // Staat er al een regel op deze oude URL, dan IS de huidige
                     // bestemming het antwoord op "waarom staat deze rij op
@@ -772,7 +807,7 @@
                     ? `<td><input class="form-check-input preview-row-check" type="checkbox"
                              data-idx="${origIndex}" ${previewSelected.has(origIndex) ? 'checked' : ''}></td>`
                     : `<td><span class="small-muted" title="${row.already_correct
-                            ? 'Already redirected in every separator form — nothing to submit'
+                            ? 'Already redirected — nothing to submit'
                             : 'Skipped — nothing to submit'}">—</span></td>`;
                 tr.innerHTML = `
                     ${checkCell}
@@ -1106,13 +1141,14 @@
             const body = document.getElementById('runsBody');
             // Keeps the table's height across a reload, unlike the single
             // "Loading…" row this replaces.
-            body.innerHTML = skeletonRows(8, Math.min(Math.max(body.rows.length || 5, 3), 10));
+            body.innerHTML = skeletonRows(9, Math.min(Math.max(body.rows.length || 5, 3), 10));
             try {
                 const r = await fetch(`${API}/runs`);
                 if (!r.ok) throw new Error((await r.json()).detail || 'Failed to load runs');
                 const data = await r.json();
                 if (!data.runs.length) {
-                    body.innerHTML = '<tr><td colspan="8" class="text-center text-muted p-3">No runs yet.</td></tr>';
+                    body.innerHTML = '<tr><td colspan="9" class="text-center text-muted p-3">No runs yet.</td></tr>';
+                    updateRunSelectionCount();
                     return;
                 }
                 body.innerHTML = '';
@@ -1121,6 +1157,7 @@
                     tr.className = 'history-row';
                     const when = new Date(run.created_at).toLocaleString('nl-NL', { dateStyle: 'short', timeStyle: 'short' });
                     tr.innerHTML = `
+                        <td class="col-check" style="padding: 6px 12px;"><input class="form-check-input run-select" type="checkbox" data-run="${run.id}"${runSelected.has(run.id) ? ' checked' : ''}></td>
                         <td style="padding: 6px 12px; text-align: center;">${escapeHtml(when)}</td>
                         <td style="padding: 6px 12px; text-align: center;">${redirectSourceBadge(run.input_method)}</td>
                         <td style="padding: 6px 12px; text-align: center;">${run.total_rows}</td>
@@ -1129,18 +1166,104 @@
                         <td style="padding: 6px 12px; text-align: center; color: #198754;">${run.success}</td>
                         <td style="padding: 6px 12px; text-align: center; ${run.failed > 0 ? 'color: #dc3545;' : ''}">${run.failed}</td>
                         <td style="padding: 6px 12px; text-align: center;">
-                            <div style="display: inline-flex; gap: 4px; align-items: center;">
-                                <button class="btn btn-sm btn-orange-action" onclick="viewRun(${run.id})">View</button>
-                                <a class="btn btn-sm btn-purple-action" href="${API}/runs/${run.id}/export">Export</a>
-                                <button class="btn btn-sm btn-red-outline" onclick="deleteRun(${run.id})">Delete</button>
-                            </div>
+                            <button class="btn btn-sm btn-orange-action" onclick="viewRun(${run.id})">View</button>
                         </td>`;
                     body.appendChild(tr);
                 });
+                updateRunSelectionCount();
             } catch (e) {
-                body.innerHTML = `<tr><td colspan="8" class="text-danger p-3">Failed to load: ${escapeHtml(e.message)}</td></tr>`;
+                body.innerHTML = `<tr><td colspan="9" class="text-danger p-3">Failed to load: ${escapeHtml(e.message)}</td></tr>`;
+                updateRunSelectionCount();
             }
         }
+
+        // ---- Run selection (bulk Export / Remove) ---------------------------
+        // Export and Remove act on the ticked runs instead of a button pair per
+        // row — same bar as Auto-Redirects. Keyed on the run's own id (a Set that
+        // survives a refresh), never on the row position.
+        let runSelected = new Set();
+
+        function selectedRunBoxes() {
+            return [...document.querySelectorAll('#runsBody .run-select:checked')];
+        }
+
+        function selectedRunIds() {
+            return selectedRunBoxes().map(b => Number(b.dataset.run));
+        }
+
+        function updateRunSelectionCount() {
+            const boxes = [...document.querySelectorAll('#runsBody .run-select')];
+            const chosen = boxes.filter(b => b.checked).length;
+            const cnt = document.getElementById('runSelCount');
+            if (cnt) cnt.textContent = `${chosen} selected`;
+            const exportBtn = document.getElementById('runExportBtn');
+            if (exportBtn) exportBtn.disabled = chosen === 0;
+            const removeBtn = document.getElementById('runRemoveBtn');
+            if (removeBtn) removeBtn.disabled = chosen === 0;
+            const sa = document.getElementById('runSelectAll');
+            if (sa) {
+                sa.checked = boxes.length > 0 && chosen === boxes.length;
+                sa.indeterminate = chosen > 0 && chosen < boxes.length;
+                sa.disabled = boxes.length === 0;
+            }
+        }
+
+        document.getElementById('runSelectAll').addEventListener('change', (e) => {
+            document.querySelectorAll('#runsBody .run-select').forEach(b => {
+                b.checked = e.target.checked;
+                if (b.checked) runSelected.add(Number(b.dataset.run));
+                else runSelected.delete(Number(b.dataset.run));
+            });
+            updateRunSelectionCount();
+        });
+
+        // Delegated: loadRuns() rebuilds every <tr>, so per-element listeners
+        // would be lost on each refresh.
+        document.getElementById('runsBody').addEventListener('change', (e) => {
+            const box = e.target.closest('.run-select');
+            if (!box) return;
+            const id = Number(box.dataset.run);
+            if (box.checked) runSelected.add(id);
+            else runSelected.delete(id);
+            updateRunSelectionCount();
+        });
+
+        document.getElementById('runExportBtn').addEventListener('click', () => {
+            const ids = selectedRunIds();
+            if (!ids.length) return;
+            // One endpoint for one or many: with a single id the backend hands
+            // back that run's own file, with several a merged workbook.
+            window.location.href = `${API}/runs/export?run_ids=` + encodeURIComponent(ids.join(','));
+        });
+
+        document.getElementById('runRemoveBtn').addEventListener('click', async (e) => {
+            const ids = selectedRunIds();
+            if (!ids.length) return;
+            if (!confirm(`Remove ${ids.length} run(s) from the Recent results table?`
+                + `\n\nThe redirects themselves stay in the API.`)) return;
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            const failed = [];
+            for (const id of ids) {
+                try {
+                    const r = await fetch(`${API}/runs/${id}`, { method: 'DELETE' });
+                    // 404 means it is already gone — that is the outcome we wanted.
+                    if (!r.ok && r.status !== 404) failed.push(`#${id}: ${await r.text()}`);
+                    else {
+                        runSelected.delete(id);
+                        // The open detail card belongs to a run that no longer exists.
+                        if (runDetailMeta && runDetailMeta.id === id) {
+                            document.getElementById('runDetail').innerHTML = '';
+                            runDetailMeta = null;
+                        }
+                    }
+                } catch (err) {
+                    failed.push(`#${id}: ${err.message}`);
+                }
+            }
+            if (failed.length) alert('Remove failed for:\n' + failed.join('\n'));
+            loadRuns();
+        });
 
         // View state for the run-detail table. Mirrors Preview's pattern
         // (sort + filter) but adds pagination since runs can be large.
@@ -1150,7 +1273,12 @@
 
         async function viewRun(id) {
             const out = document.getElementById('runDetail');
-            out.innerHTML = '<div class="text-muted">Loading…</div>';
+            // Canonieke inline spinner (UI_BLUEPRINT Spinners) in plaats van het
+            // woord "Loading…" dat hier stond (Joep, 2026-09-03). Skeleton-rijen
+            // kunnen hier niet: de tabel zelf bestaat nog niet.
+            out.innerHTML = '<div class="text-center py-3">'
+                + '<span class="spinner-border spinner-border-sm text-muted" role="status"></span>'
+                + '<span class="visually-hidden">Loading run…</span></div>';
             try {
                 const r = await fetch(`${API}/runs/${id}`);
                 if (!r.ok) throw new Error((await r.json()).detail || 'Failed to load run');
@@ -1161,9 +1289,9 @@
 
                 // Shell — table rows + pagination are populated by renderRunDetailTable.
                 out.innerHTML = `
-                    <div class="card">
+                    <div class="card mb-3">
                         <div class="card-header d-flex justify-content-between align-items-center">
-                            <strong>Run #${run.id}${run.label ? ' — ' + escapeHtml(run.label) : ''}</strong>
+                            <h5 class="mb-0">Run #${run.id}${run.label ? ' — ' + escapeHtml(run.label) : ''}</h5>
                             <button class="btn btn-sm btn-purple-outline" onclick="document.getElementById('runDetail').innerHTML=''">Close</button>
                         </div>
                         <div class="card-body">
@@ -1352,14 +1480,6 @@
             }
         }
 
-        async function deleteRun(id) {
-            if (!confirm(`Delete run #${id}? This only removes it from the Recent results table — the redirects themselves stay in the API.`)) return;
-            const r = await fetch(`${API}/runs/${id}`, { method: 'DELETE' });
-            if (!r.ok) { alert('Delete failed'); return; }
-            loadRuns();
-            document.getElementById('runDetail').innerHTML = '';
-        }
-
         // ---------------------- Helpers ----------------------
         function escapeHtml(s) {
             return String(s == null ? '' : s)
@@ -1407,6 +1527,16 @@
         document.getElementById('btnCheck').addEventListener('click', checkSingleUrl);
         document.getElementById('checkUrlInput').addEventListener('keypress', e => { if (e.key === 'Enter') checkSingleUrl(); });
         document.getElementById('btnRefreshRuns').addEventListener('click', loadRuns);
+
+        // Same date the backend stamps into an empty Label (_manual_label), so the
+        // hint under Manual input names the label you will actually get.
+        (() => {
+            const el = document.getElementById('manualLabelDate');
+            if (!el) return;
+            const d = new Date();
+            const p2 = (n) => String(n).padStart(2, '0');
+            el.textContent = `${p2(d.getDate())}-${p2(d.getMonth() + 1)}-${d.getFullYear()}`;
+        })();
 
         wirePreviewInteractions();
         loadRuns();

@@ -728,7 +728,7 @@ def preflight_rows(
             item["existing_statusCode"] = existing.get("statusCode") or DEFAULT_STATUS_CODE
             item["existing_country"] = existing.get("country") or country
             if equiv_key(existing_url) == equiv_key(item["final_new"]):
-                item["skip_reason"] = "URL already redirected"
+                item["skip_reason"] = "already redirected"
                 item["already_correct"] = True
                 # `check_url_is_fromUrl` matches ANY separator form, so
                 # "already redirected" can be true of the `_` row while the

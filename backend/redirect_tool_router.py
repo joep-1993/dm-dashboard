@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+from datetime import date
 from typing import Any
 
 import pandas as pd
@@ -19,6 +20,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/redirect-tool", tags=["redirect-tool"])
 
 EXPECTED_COLUMNS = ["old", "new", "statuscode", "country", "label"]
+
+# Manual input asks for `old` and `new` only (Joep, 2026-09-03) — everything else
+# is filled in here so a two-column paste is a complete row. The label carries
+# today's date in dd-mm-yyyy, the notation the Add-redirect form already used.
+MANUAL_STATUS_CODE = "301"
+MANUAL_COUNTRY = "NL+BE"
+
+
+def _manual_label() -> str:
+    return f"JVS Redirects {date.today().strftime('%d-%m-%Y')}"
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +57,65 @@ def _df_to_rows(df: pd.DataFrame) -> list[dict]:
         if row["old"] or row["new"]:
             rows.append(row)
     return rows
+
+
+def _apply_manual_defaults(rows: list[dict]) -> None:
+    """Fill the columns Manual input no longer asks for, in place.
+
+    Only BLANK fields are touched, so a paste that still carries a header with
+    its own statuscode/country/label keeps every value it supplies. Without this
+    an empty country reached ``normalize_country("")``, which defaults to plain
+    ``nl`` — a redirect that then exists for beslist.nl but not for beslist.be.
+    """
+    label = _manual_label()
+    for row in rows:
+        if not row.get("statuscode"):
+            row["statuscode"] = MANUAL_STATUS_CODE
+        if not row.get("country"):
+            row["country"] = MANUAL_COUNTRY
+        if not row.get("label"):
+            row["label"] = label
+
+
+def _to_relative(rows: list[dict]) -> None:
+    """Rewrite `old`/`new` to the path the redirect API stores, in place.
+
+    ``strip_domain`` accepts a full URL, a bare hostname and a path alike, and
+    also drops ``?``/``#`` per the project's canonicalization rule. The preflight
+    calls it again per row, but doing it here means the Preview table shows the
+    exact value that will be written — and it is what makes the dedupe below see
+    the same page under www.beslist.nl and www.beslist.be as one row.
+    """
+    for row in rows:
+        for col in ("old", "new"):
+            if row.get(col):
+                row[col] = svc.strip_domain(str(row[col]))
+
+
+def _dedupe_rows(rows: list[dict]) -> tuple[list[dict], int]:
+    """Drop rows that are identical once the domain is off. Keeps the first.
+
+    Keyed on the %-decoded path pair PLUS statuscode/country/label, so two rows
+    that differ in any of those survive — an `_`-form and a `+`-form of the same
+    URL are deliberately NOT collapsed either (only those two resolve
+    independently upstream, see `encode_from_url`), which is why this uses
+    `normalize_path` and not the looser `equiv_key`.
+    """
+    seen: set[tuple] = set()
+    out: list[dict] = []
+    for row in rows:
+        key = (
+            svc.normalize_path(str(row.get("old", ""))),
+            svc.normalize_path(str(row.get("new", ""))),
+            str(row.get("statuscode", "")),
+            str(row.get("country", "")),
+            str(row.get("label", "")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out, len(rows) - len(out)
 
 
 def _parse_text(text: str) -> list[dict]:
@@ -167,8 +237,24 @@ class ParseTextRequest(BaseModel):
 
 @router.post("/parse-text")
 def parse_text(req: ParseTextRequest) -> dict:
+    """Manual input. Two columns is the whole ask; the rest is filled in here.
+
+    The dedupe count comes back as a `warning` so the removal is visible in the
+    Preview's warning box rather than being a silent drop — pasting the same page
+    under two domains is the intended case, but so is noticing you did.
+    """
     rows = _parse_text(req.text)
-    return {"rows": rows, "count": len(rows)}
+    _to_relative(rows)
+    _apply_manual_defaults(rows)
+    rows, dropped = _dedupe_rows(rows)
+    payload: dict[str, Any] = {"rows": rows, "count": len(rows)}
+    if dropped:
+        payload["warning"] = (
+            f"{dropped} duplicate row(s) removed — the same path was given more "
+            "than once (a full URL and its path, or the same page under several "
+            "domains, all reduce to one rule)."
+        )
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -273,30 +359,10 @@ def runs() -> dict:
     return {"runs": svc.list_runs()}
 
 
-@router.get("/runs/{run_id}")
-def run_detail(run_id: int) -> dict:
-    run = svc.get_run(run_id)
-    if not run:
-        raise HTTPException(404, "Run not found")
-    return run
-
-
-@router.delete("/runs/{run_id}")
-def remove_run(run_id: int) -> dict:
-    ok = svc.delete_run(run_id)
-    if not ok:
-        raise HTTPException(404, "Run not found")
-    return {"deleted": run_id}
-
-
-@router.get("/runs/{run_id}/export")
-def export_run(run_id: int) -> StreamingResponse:
-    run = svc.get_run(run_id)
-    if not run:
-        raise HTTPException(404, "Run not found")
-    results = run["results"] or []
+def _run_export_rows(run: dict) -> list[dict]:
+    """Flatten one run's stored per-row results into export columns."""
     df_rows = []
-    for r in results:
+    for r in run["results"] or []:
         api_resp = r.get("api_response") or {}
         if isinstance(api_resp, dict):
             msg = api_resp.get("message", "") or api_resp.get("error", "")
@@ -314,13 +380,78 @@ def export_run(run_id: int) -> StreamingResponse:
             "skip_reason": r.get("skip_reason", "") or "",
             "api_message": msg,
         })
-    df = pd.DataFrame(df_rows)
+    return df_rows
+
+
+def _xlsx_response(df: pd.DataFrame, fname: str) -> StreamingResponse:
     buf = io.BytesIO()
     df.to_excel(buf, index=False, engine="openpyxl")
     buf.seek(0)
-    fname = f"redirect_tool_run_{run_id}.xlsx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={fname}"},
     )
+
+
+# Declared BEFORE /runs/{run_id}: that route's `run_id` is typed int, and FastAPI
+# matches in declaration order — so with this one second, "/runs/export" would be
+# caught by the {run_id} route and rejected as a bad int (422) instead of landing
+# here.
+@router.get("/runs/export")
+def export_runs(run_ids: str) -> StreamingResponse:
+    """Export the selected runs. One id gives that run's own file; several are
+    merged into a single workbook with a leading `run` column (same shape as
+    Auto-Redirects' bulk export)."""
+    try:
+        ids = [int(part) for part in run_ids.split(",") if part.strip()]
+    except ValueError as exc:
+        raise HTTPException(400, "run_ids must be a comma-separated list of run ids") from exc
+    if not ids:
+        raise HTTPException(400, "run_ids is required")
+
+    frames: list[dict] = []
+    missing: list[int] = []
+    for run_id in ids:
+        run = svc.get_run(run_id)
+        if not run:
+            missing.append(run_id)
+            continue
+        for row in _run_export_rows(run):
+            # Only when several runs share one sheet — a single-run export keeps
+            # exactly the columns it has always had.
+            frames.append({"run": run_id, **row} if len(ids) > 1 else row)
+    if missing and len(missing) == len(ids):
+        raise HTTPException(404, f"Run(s) not found: {', '.join(map(str, missing))}")
+
+    df = pd.DataFrame(frames)
+    fname = (f"redirect_tool_run_{ids[0]}.xlsx" if len(ids) == 1
+             else f"redirect_tool_runs_{len(ids)}.xlsx")
+    return _xlsx_response(df, fname)
+
+
+@router.get("/runs/{run_id}")
+def run_detail(run_id: int) -> dict:
+    run = svc.get_run(run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    return run
+
+
+@router.delete("/runs/{run_id}")
+def remove_run(run_id: int) -> dict:
+    ok = svc.delete_run(run_id)
+    if not ok:
+        raise HTTPException(404, "Run not found")
+    return {"deleted": run_id}
+
+
+# Kept alongside the bulk route above: it is a stable link shape that other
+# pages/bookmarks may still use.
+@router.get("/runs/{run_id}/export")
+def export_run(run_id: int) -> StreamingResponse:
+    run = svc.get_run(run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    df = pd.DataFrame(_run_export_rows(run))
+    return _xlsx_response(df, f"redirect_tool_run_{run_id}.xlsx")
