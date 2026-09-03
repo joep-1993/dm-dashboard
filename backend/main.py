@@ -4321,6 +4321,61 @@ async def generate_301_urls(request: Redirect301Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class Redirect301ExportRequest(BaseModel):
+    """Request model for exporting Redirect Generator results to Excel."""
+    results: List[dict] = []
+
+
+@app.post("/api/301-generator/export-excel")
+def export_301_excel(request: Redirect301ExportRequest):
+    """Stream the Redirect Generator results as a real .xlsx file.
+
+    Exists so the path rule lives in ONE place. The page used to build this
+    workbook client-side with a `toRelativeUrl()` that mirrored `strip_domain()`
+    line for line — two copies of a rule that must not drift, in two languages,
+    with nothing to catch it when one moved. Same reasoning (and the same column
+    contract) as `/api/canonical/export-excel`; only the statuscode and the label
+    differ, because these rows are 301s and those are canonicals.
+
+    Sync def (not async): the pandas/openpyxl serialization is blocking and
+    CPU-bound, so FastAPI runs it in the threadpool instead of stalling the
+    event loop for the whole request.
+    """
+    import pandas as pd
+
+    if len(request.results) > MAX_CANONICAL_URLS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Too many rows ({len(request.results)}); max {MAX_CANONICAL_URLS}",
+        )
+
+    from backend.redirect_tool_service import strip_domain
+
+    label = f"JVS Redirects {datetime.now().strftime('%d-%m-%Y')}"
+    rows = [
+        {
+            "old": strip_domain(str(r.get("original", "") or "")),
+            "new": strip_domain(str(r.get("redirect", "") or "")),
+            "statuscode": 301,
+            "country": "NL+BE",
+            "label": label,
+        }
+        for r in request.results
+    ]
+    df = pd.DataFrame(
+        rows, columns=["old", "new", "statuscode", "country", "label"]
+    )
+    buf = BytesIO()
+    df.to_excel(buf, index=False, engine="openpyxl")
+    buf.seek(0)
+    fname = f"301_redirects_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
+    )
+
+
 @app.get("/api/301-generator/fetch-urls")
 async def fetch_301_urls(
     contains: Optional[str] = None,

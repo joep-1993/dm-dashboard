@@ -220,7 +220,7 @@
                         <h5 class="mb-0">Results</h5>
                         <div>
                             <button class="btn btn-sm btn-outline-purple" onclick="copyAllToClipboard()">Copy for Excel</button>
-                            <button class="btn btn-outline-purple btn-sm" onclick="downloadResults()">Download Excel</button>
+                            <button class="btn btn-outline-purple btn-sm" id="downloadBtn" onclick="downloadResults()">Download Excel</button>
                         </div>
                     </div>
                     <div class="card-body">
@@ -626,50 +626,42 @@
             });
         }
 
-        // Mirror of backend strip_domain() in redirect_tool_service.py: the
-        // redirect API stores path-only fromUrl/toUrl, so an export that feeds
-        // the Redirect Tool must carry relative URLs. Query and fragment go
-        // too — the project canonicalization rule drops them before any insert.
-        function toRelativeUrl(url) {
-            const s = String(url == null ? '' : url).trim().split('#')[0].split('?')[0];
-            if (!s) return '';
-            if (s.startsWith('/')) return s;
-            const scheme = s.indexOf('://');
-            if (scheme !== -1) {
-                const rest = s.slice(scheme + 3);
-                const slash = rest.indexOf('/');
-                return slash === -1 ? '/' : rest.slice(slash);
-            }
-            // bare hostname like www.beslist.nl/foo
-            const host = s.split('/')[0];
-            if (s.includes('/') && host.includes('.')) return s.slice(host.length);
-            return '/' + s;
-        }
-
-        function downloadResults() {
+        // The workbook is built by the BACKEND (`/api/301-generator/export-excel`),
+        // like the one in Canonicals. It used to be built here, with a
+        // `toRelativeUrl()` that mirrored `strip_domain()` line for line — the
+        // same rule written twice, in two languages, with nothing to catch it
+        // when one of the two moved. The label date comes from the server too,
+        // in its own local time, so an export after 22:00 CEST no longer risks
+        // yesterday's date from a UTC `toISOString()`.
+        async function downloadResults() {
             if (results.length === 0) return;
-
-            // Same column contract as the Redirect Tool's bulk import, so an
-            // export can be fed straight back in without hand-editing.
-            const label = `JVS Redirects ${_labelDate()}`;
-            const aoa = [['old', 'new', 'statuscode', 'country', 'label']];
-            results.forEach(r => aoa.push([
-                toRelativeUrl(r.original), toRelativeUrl(r.redirect), 301, 'NL+BE', label,
-            ]));
-
-            const ws = XLSX.utils.aoa_to_sheet(aoa);
-            ws['!cols'] = [{ wch: 80 }, { wch: 80 }, { wch: 11 }, { wch: 9 }, { wch: 28 }];
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'Redirects');
-            XLSX.writeFile(wb, '301_redirects.xlsx');
-        }
-
-        // dd-mm-yyyy in local time (toISOString would shift the date across
-        // midnight for a CEST afternoon export).
-        function _labelDate() {
-            const d = new Date();
-            const p2 = (n) => String(n).padStart(2, '0');
-            return `${p2(d.getDate())}-${p2(d.getMonth() + 1)}-${d.getFullYear()}`;
+            const btn = document.getElementById('downloadBtn');
+            const label = btn ? btn.textContent : null;
+            if (btn) { btn.disabled = true; btn.textContent = 'Exporting…'; }
+            try {
+                const resp = await fetch('/api/301-generator/export-excel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ results }),
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.detail || `HTTP ${resp.status}`);
+                }
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `301_redirects_${new Date().toISOString().slice(0, 10)}.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                alert('Export mislukt: ' + e.message);
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = label; }
+            }
         }
 
         // ---- Selection + filter (push-to-Redirect-tool) -------------------
