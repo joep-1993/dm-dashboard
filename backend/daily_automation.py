@@ -479,21 +479,35 @@ def step_process_parallel():
 def step_publish_kopteksten_records():
     """Incremental kopteksten publish via /automated-content/records (upsert)."""
     log = logging.getLogger("automation")
-    resp = SESSION.post(
-        f"{BASE_URL}/api/content-publish/records",
-        json={"environment": "production", "mode": "new", "prune": True},
-        timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
-    )
-    if resp.status_code == 401 and _reauth_on_401(resp):
+    payload = {"environment": "production", "mode": "new", "prune": True}
+
+    def _start():
         resp = SESSION.post(
             f"{BASE_URL}/api/content-publish/records",
-            json={"environment": "production", "mode": "new", "prune": True},
+            json=payload,
             timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
         )
-    resp.raise_for_status()
-    task_id = resp.json().get("task_id")
-    log.info(f"  Kopteksten records publish started, task_id={task_id}")
-    result = poll_task(f"{BASE_URL}/api/content-publish/records/status/{task_id}", PUBLISH_TIMEOUT)
+        if resp.status_code == 401 and _reauth_on_401(resp):
+            resp = SESSION.post(
+                f"{BASE_URL}/api/content-publish/records",
+                json=payload,
+                timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+            )
+        resp.raise_for_status()
+        task_id = resp.json().get("task_id")
+        log.info(f"  Kopteksten records publish started, task_id={task_id}")
+        return f"{BASE_URL}/api/content-publish/records/status/{task_id}"
+
+    # Restartable for the same reason the validation steps are: the task lives in
+    # the server's memory, so a restart mid-publish 404s the status URL and the
+    # poller gave up after POLL_MAX_ERRORS — taking the whole daily run with it.
+    # Resuming is safe because progress is in PostgreSQL, not in the task:
+    # content_records_publisher._stamp() writes pa.kopteksten_push_state after
+    # each successful chunk, and mode="new" only selects URLs with no state row
+    # or a changed md5. The restarted task therefore pushes the remainder, and
+    # prune recomputes what is stale at that moment.
+    status_url = _start()
+    result = poll_task(status_url, PUBLISH_TIMEOUT, restart_fn=_start)
 
     pub_result = result.get("result", {})
     if pub_result.get("success"):
@@ -523,21 +537,30 @@ def step_publish_faq_v2():
     """
     log = logging.getLogger("automation")
     payload = {"environment": "production", "mode": "new", "replace": True}
-    resp = SESSION.post(
-        f"{BASE_URL}/api/faq/publish-v2",
-        json=payload,
-        timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
-    )
-    if resp.status_code == 401 and _reauth_on_401(resp):
+
+    def _start():
         resp = SESSION.post(
             f"{BASE_URL}/api/faq/publish-v2",
             json=payload,
             timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
         )
-    resp.raise_for_status()
-    task_id = resp.json().get("task_id")
-    log.info(f"  FAQ v2 publish started, task_id={task_id}")
-    result = poll_task(f"{BASE_URL}/api/faq/publish-v2/status/{task_id}", PUBLISH_TIMEOUT)
+        if resp.status_code == 401 and _reauth_on_401(resp):
+            resp = SESSION.post(
+                f"{BASE_URL}/api/faq/publish-v2",
+                json=payload,
+                timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+            )
+        resp.raise_for_status()
+        task_id = resp.json().get("task_id")
+        log.info(f"  FAQ v2 publish started, task_id={task_id}")
+        return f"{BASE_URL}/api/faq/publish-v2/status/{task_id}"
+
+    # Same restart story as the kopteksten publish above. faq_v2_publisher calls
+    # _stamp_state() after each successful batch, and mode="new" reads that state,
+    # so a resumed task picks up the URLs that had not landed yet — and replace's
+    # per-URL DELETE only fires for the URLs it actually re-pushes.
+    status_url = _start()
+    result = poll_task(status_url, PUBLISH_TIMEOUT, restart_fn=_start)
 
     pub_result = result.get("result", {})
     if pub_result.get("success"):
