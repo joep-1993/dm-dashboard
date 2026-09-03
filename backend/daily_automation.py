@@ -190,12 +190,21 @@ def poll_task(status_url, timeout, restart_fn=None):
     If *restart_fn* is provided and a server restart is detected (404 after
     at least one successful poll), the function calls restart_fn() to start a
     new task and continues polling with the returned status URL.
+
+    A restart resets the task's own counters, so the returned data would only
+    describe the LAST attempt. To let a caller report the whole step, the last
+    progress dict seen before each restart is handed back under the reserved key
+    "_interrupted_progress" (a list, one entry per restart, absent when none
+    happened). Those are lower bounds: polling is every POLL_INTERVAL seconds, so
+    whatever the dying task did in its final seconds was never reported.
     """
     log = logging.getLogger("automation")
     start = time.time()
     consecutive_errors = 0
     had_success = False           # True once at least one poll returned OK
     restarts = 0
+    last_progress = {}            # most recent progress dict of the running task
+    interrupted = []              # last_progress of each task a restart abandoned
     while time.time() - start < timeout:
         try:
             resp = _get_with_deadline(status_url)
@@ -210,6 +219,10 @@ def poll_task(status_url, timeout, restart_fn=None):
                     f"  Server restart detected (404 after successful poll)"
                     f" — restarting task ({restarts}/{POLL_MAX_RESTARTS})"
                 )
+                # Keep what the abandoned task had reported: its counters die
+                # with it, and the caller needs them to report the whole step.
+                interrupted.append(last_progress)
+                last_progress = {}
                 status_url = restart_fn()
                 consecutive_errors = 0
                 had_success = False
@@ -234,6 +247,8 @@ def poll_task(status_url, timeout, restart_fn=None):
 
         if status == "completed":
             log.info(f"  Task completed")
+            if interrupted:
+                data["_interrupted_progress"] = interrupted
             return data
         if status in ("error", "failed"):
             raise RuntimeError(f"Task failed: {data}")
@@ -243,6 +258,8 @@ def poll_task(status_url, timeout, restart_fn=None):
         total = data.get("total_to_validate", data.get("total_to_recheck", data.get("total", "")))
         # Incremental publishers nest progress under a "progress" key
         progress = data.get("progress", {})
+        if progress:
+            last_progress = progress
         if not validated and progress:
             validated = progress.get("urls_done", progress.get("urls_processed", ""))
         if not total and progress:
@@ -476,6 +493,44 @@ def step_process_parallel():
     return results
 
 
+def _approx_count(pub_result, key):
+    """Render a count, marked with "+" when a restart made it a lower bound.
+
+    A step that survived a server restart cannot know what the abandoned attempt
+    did in its last unpolled seconds, so the number under-reports. Quoting it
+    bare would read as exact.
+    """
+    v = pub_result.get(key, "?")
+    if v != "?" and pub_result.get("counts_are_lower_bound"):
+        return f"{v}+"
+    return v
+
+
+def _fold_interrupted(result, pub_result, mapping, log, label):
+    """Add what restart-abandoned attempts had already reported to *pub_result*.
+
+    A restarted task counts from zero and mode="new" hands it only the URLs the
+    previous attempt had not landed yet, so the attempts are disjoint and adding
+    them is right. `mapping` says which progress key feeds which result key.
+
+    The sum is a LOWER BOUND — the dying task's last seconds were never polled —
+    so the caller marks the number as approximate rather than quoting it as exact.
+    """
+    interrupted = result.get("_interrupted_progress") or []
+    if not interrupted:
+        return False
+    for prog in interrupted:
+        for prog_key, res_key in mapping.items():
+            add = prog.get(prog_key) or 0
+            if add:
+                pub_result[res_key] = (pub_result.get(res_key) or 0) + add
+    pub_result["restarts"] = len(interrupted)
+    pub_result["counts_are_lower_bound"] = True
+    log.info(f"  {label}: {len(interrupted)} restart(s) folded in — counts are a"
+             f" lower bound, the last poll before each restart is all we saw")
+    return True
+
+
 def step_publish_kopteksten_records():
     """Incremental kopteksten publish via /automated-content/records (upsert)."""
     log = logging.getLogger("automation")
@@ -510,6 +565,8 @@ def step_publish_kopteksten_records():
     result = poll_task(status_url, PUBLISH_TIMEOUT, restart_fn=_start)
 
     pub_result = result.get("result", {})
+    # urls_done is the publisher's own progress counter for pushed URLs.
+    _fold_interrupted(result, pub_result, {"urls_done": "urls_pushed"}, log, "Kopteksten")
     if pub_result.get("success"):
         skipped = pub_result.get("urls_too_long", 0)
         extra = f", skipped {skipped} too-long URLs" if skipped else ""
@@ -563,6 +620,9 @@ def step_publish_faq_v2():
     result = poll_task(status_url, PUBLISH_TIMEOUT, restart_fn=_start)
 
     pub_result = result.get("result", {})
+    _fold_interrupted(result, pub_result,
+                      {"records_pushed": "records_pushed", "urls_done": "urls_processed"},
+                      log, "FAQ")
     if pub_result.get("success"):
         log.info(f"  FAQ: pushed {pub_result.get('records_pushed', 0)} records"
                  f" across {pub_result.get('urls_processed', 0)} URLs")
@@ -726,11 +786,14 @@ def main():
     if publish_results:
         kopt = publish_results.get("Kopteksten", {})
         faq = publish_results.get("FAQ", {})
+        restarts = (kopt.get("restarts", 0) or 0) + (faq.get("restarts", 0) or 0)
+        restart_note = f" [na {restarts} herstart(s), tellingen zijn ondergrenzen]" if restarts else ""
         publish_summary = (
-            f"\nPublish: Kopteksten {kopt.get('urls_pushed', '?')} URLs"
+            f"\nPublish: Kopteksten {_approx_count(kopt, 'urls_pushed')} URLs"
             f" (pruned {kopt.get('urls_retired', 0)})"
-            f", FAQ {faq.get('records_pushed', '?')} records"
-            f" ({faq.get('urls_processed', '?')} URLs)"
+            f", FAQ {_approx_count(faq, 'records_pushed')} records"
+            f" ({_approx_count(faq, 'urls_processed')} URLs)"
+            f"{restart_note}"
         )
 
     any_timed_out = process_results and any(r["timed_out"] for r in process_results.values())
