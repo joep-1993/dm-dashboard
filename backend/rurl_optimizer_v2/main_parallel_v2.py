@@ -563,6 +563,28 @@ def _high_subcat_name_match(url, parsed, categories_df, matcher, facet_filter,
     return None
 
 
+def _join_value_names(names) -> str:
+    """De facetwaarde-namen als één weergavestring: lege eruit, dubbele eruit,
+    volgorde behouden.
+
+    Twee assen kunnen dezelfde waardenaam dragen — ruimte 'Buiten' naast
+    t_vloerkleed 'Buiten' — en dan las de synthetische H1 "Vloerkleden Buiten,
+    Buiten". De URL heeft beide assen nodig, de naam maar één keer.
+
+    Stond in drie vormen in dit bestand (een `dict.fromkeys`, een `not in`-lus en
+    een kale join zonder dedupe), waarvan de kale precies de plek was waar het
+    zichtbaar werd. Hoofdletter-ongevoelig, want het gaat om weergave; de
+    ORIGINELE schrijfwijze van de eerste treffer blijft staan.
+    """
+    seen, out = set(), []
+    for name in names:
+        name = (name or '').strip()
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            out.append(name)
+    return ', '.join(out)
+
+
 def _append_facet_to_subcat_redirect(result, parsed, subcategory_match, facet_filter, matcher):
     # When a subcat-name match wins (e.g. "tuinkast kunststof" → "Tuinkasten")
     # the leftover token ("kunststof") was previously thrown away. Match it
@@ -751,8 +773,10 @@ def _append_facet_to_subcat_redirect(result, parsed, subcategory_match, facet_fi
             result.facet_count = 1
 
     result.facet_names = ', '.join(m.facet_value.facet_name for m in appends)
-    result.facet_value_names = ', '.join(
-        (m.matched_text or m.facet_value.facet_value_name) for m in appends
+    # Alleen de WEERGAVE dedupliceren; `facet_names` blijft ongemoeid, want die
+    # twee assen bestaan allebei echt.
+    result.facet_value_names = _join_value_names(
+        m.matched_text or m.facet_value.facet_value_name for m in appends
     )
     result.reason = (
         (result.reason or '')
@@ -3186,6 +3210,7 @@ def process_url_v2(args):
     search_derived_dom_cat = ''
     search_derived_dom_share = None
     search_derived_dom_count = None  # V45: products behind dom_share (count guard)
+    search_derived_fetched_at = ''    # wanneer het search-bewijs is opgehaald
     # `derived` is only assigned inside the `if has_matchable ...` block below, but
     # the V53 block (~line 3550) reads it at function-body level. A row whose query
     # is nothing but shop names and/or stopwords (has_matchable False) can still come
@@ -3202,6 +3227,9 @@ def process_url_v2(args):
         search_derived_dom_cat = derived.get('dom_cat_name', '') or ''
         search_derived_dom_share = derived.get('dom_cat_share')
         search_derived_dom_count = derived.get('dom_cat_count')
+        # Uit de cache-rij, niet uit de payload zelf (zie search_derived._cache_get).
+        # Leeg bij een miss: dan is er geen bewijs om te dateren.
+        search_derived_fetched_at = derived.get("fetched_at") or ""
 
         # V31 guard: when the matcher already produced a clean facet match in
         # the URL's own subcategory, do NOT let search-derived override it
@@ -3536,10 +3564,15 @@ def process_url_v2(args):
                         'main_category': r.main_category,
                         'original_category': original_cat_name,
                         'keyword': r.keyword,
-                        'redirect_url': _xfb['redirect_url'],
+                        # `_xfin` en niet `_xfb`: de tail kan het fragment
+                        # geprund hebben, dus dit is de URL die ook echt
+                        # verstuurd wordt. Hier stond `_xfb['redirect_url']` er
+                        # NOG een keer boven — een dubbele dict-key waarvan de
+                        # laatste won. Toevallig de goede, maar wie de regels
+                        # ooit herordent, verliest de pruning stil.
+                        'redirect_url': _xfin['redirect_url'],
                         'redirect_category': _xfb['redirect_category'],
                         'is_cross_category': True,
-                        'redirect_url': _xfin['redirect_url'],
                         'facet_fragment': _xfin['facet_fragment'],
                         'facet_names': _xfin['facet_names'],
                         'facet_value_names': _xfin['facet_value_names'],
@@ -3548,7 +3581,19 @@ def process_url_v2(args):
                         'match_type': _xfb['match_type'],
                         'reliability_score': _xfin['reliability_score'],
                         'reliability_tier': _xfin['reliability_tier'],
-                        'h1_similarity': 0,
+                        # Stond hard op 0 terwijl deze rij WEL een bestemming
+                        # heeft: de kolom beweerde "H1 lijkt nergens op" over een
+                        # pagina die de zoekterm soms letterlijk noemt. De
+                        # metriek stuurt geen besluit meer (de sheet leest
+                        # `h1_overlap`), maar een kolom die liegt is erger dan
+                        # een kolom die leeg is. Gemeten op de bestemming ná
+                        # pruning, dus op wat er werkelijk uitgaat.
+                        'h1_similarity': compute_h1_similarity(
+                            keyword=r.keyword,
+                            original_cat_name=original_cat_name,
+                            redirect_cat_name=_xfb['redirect_category'],
+                            facet_value_names=_xfin['facet_value_names'],
+                        ),
                         'h1_overlap': _xfin['h1_overlap'],
                         'h1_query_coverage': _xfin['h1_query_coverage'],
                         'reject_reason': _xfin['reject_reason'],
@@ -3557,6 +3602,7 @@ def process_url_v2(args):
                         'search_derived_dom_cat': search_derived_dom_cat,
                         'search_derived_dom_share': search_derived_dom_share,
                         'search_derived_dom_count': search_derived_dom_count,  # V45
+                        'search_derived_fetched_at': search_derived_fetched_at,
                         'matched_keywords': matched_keywords_str,
                         'unmatched_keywords': unmatched_keywords_str,
                         'match_coverage': match_coverage,
@@ -3598,6 +3644,11 @@ def process_url_v2(args):
                     'match_type': final_match_type,
                     'reliability_score': 0,
                     'reliability_tier': 'D',
+                    # Hier is 0 de juiste waarde en geen aanname: zonder
+                    # bestemming is er geen tweede H1 om tegen te vergelijken,
+                    # en `compute_h1_similarity` geeft voor een lege kant zelf
+                    # ook 0. Zelfde reden bij de twee stopwords/category-noun-
+                    # returns hierboven.
                     'h1_similarity': 0,
                     'h1_overlap': 0,
                     'h1_query_coverage': 0,
@@ -3607,6 +3658,7 @@ def process_url_v2(args):
                     'search_derived_dom_cat': search_derived_dom_cat,
                     'search_derived_dom_share': search_derived_dom_share,
                     'search_derived_dom_count': search_derived_dom_count,  # V45
+                    'search_derived_fetched_at': search_derived_fetched_at,
                     'matched_keywords': matched_keywords_str,
                     'unmatched_keywords': unmatched_keywords_str,
                     'match_coverage': match_coverage,
@@ -4170,7 +4222,7 @@ def process_url_v2(args):
         # V45: keep the value names the search-derived branches appended (they
         # can't be reconstructed from the URL's value IDs, but we captured them
         # as they were appended). Falls back to '' when nothing was recorded.
-        out_facet_value_names = ', '.join(dict.fromkeys(v for v in appended_value_names if v))
+        out_facet_value_names = _join_value_names(appended_value_names)
         out_facet_count = len(_faxes)
 
     # V48 (RC5): prefer a search-VERIFIED cross-maincat subcategory-name match
@@ -4878,18 +4930,13 @@ def process_url_v2(args):
             out_facet_fragment = _v55_frag
             out_facet_names = ', '.join(p.split('~', 1)[0] for p in _v55_axes)
             out_facet_count = len(_v55_axes)
-            _v55_names = []
             _v55_lookup = _facet_value_name_lookup(facet_filter)
-            for _p in _v55_axes:
-                _vid = _p.split('~', 1)[1]
-                _nm = _v55_lookup.get(_vid)
-                if _nm and _nm not in _v55_names:
-                    _v55_names.append(_nm)
-            for _nm in appended_value_names:
-                if _nm and _nm not in _v55_names:
-                    _v55_names.append(_nm)
+            _v55_names = _join_value_names(
+                [_v55_lookup.get(_p.split('~', 1)[1]) for _p in _v55_axes]
+                + list(appended_value_names or [])
+            )
             if _v55_names:
-                out_facet_value_names = ', '.join(_v55_names)
+                out_facet_value_names = _v55_names
         h1_similarity = compute_h1_similarity(
             keyword=r.keyword,
             original_cat_name=original_cat_name,
@@ -4985,6 +5032,7 @@ def process_url_v2(args):
         'search_derived_dom_cat': search_derived_dom_cat,
         'search_derived_dom_share': search_derived_dom_share,
         'search_derived_dom_count': search_derived_dom_count,  # V45
+        'search_derived_fetched_at': search_derived_fetched_at,
         'matched_keywords': matched_keywords_str,
         'unmatched_keywords': unmatched_keywords_str,
         'match_coverage': match_coverage,

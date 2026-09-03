@@ -365,6 +365,14 @@ def _cache_get(maincat_norm: str, keyword_norm: str) -> Optional[dict]:
         # it as a miss so the next prefetch re-fetches it.
         if payload.get("mode") == "error":
             return None
+        # Wanneer dit bewijs is opgehaald. De TTL is 7 dagen, dus twee runs over
+        # dezelfde URL kunnen op ander bewijs staan zonder dat er iets aan de
+        # code of de site veranderde — dat kostte op 02-09 een halve diagnose
+        # (dom_cat_share 0,84 -> 0,37 na cache-verval). Het stond alleen in deze
+        # kolom van de sqlite; nu reist het mee met de payload, zodat de
+        # reviewsheet het kan noemen. Deliberately hier en niet in _cache_put:
+        # workers lezen alleen, dus dit is de plek waar elke run langskomt.
+        payload["fetched_at"] = row[1]
         return payload
     except sqlite3.OperationalError:
         # V61: sqlite3.connect() is lazy — het opent en lockt het bestand niet, dus
