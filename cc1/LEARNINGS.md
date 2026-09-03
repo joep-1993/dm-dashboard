@@ -1,6 +1,86 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Het effect stond drie dagen ná de oorzaak, en het meetgereedschap loog stil (2026-09-03, SEA-piek 2 september)
+
+Vraag van Joep: wat verklaart de piek in SEA-bezoeken? Op 2 september 13.229 bot-gefilterde
+bezoeken — de hoogste dag in zeven weken, +71% op het dal van de week ervoor, en aan de Google
+Ads-kant 199.342 vertoningen tegen 72.281 op 28 augustus. Het antwoord zat niet in die dag.
+
+### 1. Bij een tROAS-kanaal ligt de oorzaak vóór het venster waarin het effect staat
+
+Alle campagnes in de 30 categorie-accounts staan op `TARGET_ROAS`. De reflex is de change history
+van de piekdagen afstruinen; daar stond niets. Wat er wél was: in de week ervóór zakte het
+klikvolume weg terwijl de CPR-opbrengst per outclick opliep van ±€0,10 naar €0,15, en daarmee klom
+de gemeten ROAS van 1,4 naar 2,7 — zes dagen ver boven target. Smart Bidding verhoogt dan de
+biedingen, met twee tot drie dagen vertraging. CPC +35%, vertoningen ×2,5, bezoeken op een
+zevenweeks record, en de ROAS zakte op de piekdag door naar 1,01.
+
+**Leg bij een volumesprong in een biedgestuurd kanaal éérst de gemeten ROAS van de 3-7 dagen
+ervóór naast het target.** Pas als die vlak is, is een change event de moeite waard. Het
+verraderlijke is dat de piek zelf er als het probleem uitziet terwijl hij de correctie is.
+
+Tegenbewijs dat de zaak sloot: het impressieaandeel bleef vlak op 10,3% terwijl de vertoningen
+verdrievoudigden (we betalen ons in méér veilingen naar binnen, we winnen niet meer van hetzelfde),
+de gemiddelde max-CPC daalde juist — bij smart bidding zegt `effective_cpc_bid_micros` niets — en
+alle 28 categorie-accounts bewogen tegelijk, behalve merk en algemeen. Eén categorie of één
+campagne zou nooit zo'n vorm hebben.
+
+### 2. `query_tool.py` mapt elke query op één vast schema en geeft nul terug in plaats van een fout
+
+`parse_row()` in de laiza-skill kent alleen campagnevelden en metrics. Een
+`SELECT customer_client.id, …`-query gaf 130 rijen `campaign_id=0 | UNSPECIFIED | 0 | 0` terug —
+geen exception, geen lege lijst, gewoon een tabel vol nullen die eruitziet als "dit account heeft
+geen data". `--format json` helpt niet, want de mapping zit vóór de serialisatie.
+
+**Voor alles buiten campagne-metrics een eigen runner:** `search_stream` + `MessageToDict(r._pb)`
+geeft de rijen zoals ze zijn. Staat in `scratchpad/gaql.py`-vorm in deze sessie; drie regels werk.
+Zelfde klasse als de gecatchte exception in GSD Budgets: een laag die zijn onwetendheid als een
+geldige uitkomst presenteert.
+
+### 3. SEA staat niet in de accountmap van de laiza-skill
+
+De `ACCOUNTS`-dict kent alleen DMA en Direct Shopping. SEA (aff_id 84 "Adwords NL", 732 BE) leeft
+in **30 losse per-categorie-accounts** — `Beslist.nl - Schoenen_FAS`, `- Woonaccessoires_HNL`, …
+plus `- Merknaam broad` en `- algemeen vergelijkingssite` — onder manager **1103539935** (Beslist
+Nederland). `--account` komt er dus niet bij, `--customer-id` wel, en voor een kanaaltotaal moet je
+ze alle 30 langs en optellen. De accountnaam ís de categorie; dat is meteen je categoriesplitsing
+aan de kostenkant.
+
+### 4. Twee GAQL-details die de hele stream laten klappen
+
+- `segments.date IN ('a','b','c')` bestaat niet: *"IN is not a valid operator to use with
+  'segments.date'"*. Alleen `=`, `<`, `>`, `BETWEEN`, `DURING` — dus een reeks losse dagen haal je
+  op als `BETWEEN` en filter je in Python.
+- `change_event.change_resource_type IN (…, 'BIDDING_STRATEGY')` gooit
+  *"Invalid enum value cannot be included in WHERE clause"* en neemt de héle query mee, ook de
+  geldige waarden ernaast. Eén verzonnen enumwaarde in een lijst van vijf = nul rijen.
+
+`change_event` heeft daarnaast een venster van 30 dagen, vereist een `LIMIT`, en die limiet knipt
+vanaf de nieuwste: met `LIMIT 2000` over een account dat 's nachts 5.000 SA360-regels bijwerkt zie
+je alleen de laatste nacht. Filter op `change_resource_type` vóór je conclusies trekt uit "er staat
+niets".
+
+### 5. `viewport_group` is de device-proxy op `dim_visit`
+
+Er is geen device-kolom. `viewport_group` heeft drie waarden: `0-767` = mobiel, `768-1023` =
+tablet, `1024+` = desktop. De verhouding komt overeen met `segments.device` uit Google Ads, dus
+voor een split over bezoeken/outclicks/CPR is dit de goede kolom. In dit geval: 79% van zowel de
+extra bezoeken als de extra mediakosten was mobiel, en juist daar halveerde de opbrengst per
+outclick (€0,120 → €0,080).
+
+### Wat het niet was
+
+Vier verklaringen die zich aandienden en het geen van alle waren: **AI Max** (29-08 15:21 via de
+API aangezet op 39 campagnes — die groeiden juist mínder hard, +89% tegen +136% voor de campagnes
+zonder), **een handmatige ingreep** (geen budget- of biedstrategiewijziging in het venster; de
+enige keyword-statuswijzigingen waren Google's eigen *low activity*-pauzeringen, die het bereik
+verkleinen), **een tagging-artefact** (de piek staat ook aan de Ads-kant, dus er is echt volume
+ingekocht) en **seizoen** (SEO +1% en DMA paid +11% op dezelfde dag, SEA +46%).
+
+Deliverable: artifact met de dagreeks, de apparaat- en de categoriesplitsing.
+
+
 ## Een canary moet in het blok kijken dat hij bewaakt (2026-09-03, SEO Rulings check 2)
 
 Check 2 van SEO Rulings trok drie willekeurige categorie/facet-combo's met `seoPriority=true`. Joep

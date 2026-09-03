@@ -3,6 +3,36 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-03 (4) — SEA-piek 2 september: de tROAS-lus uitgezocht
+
+Vraag van Joep, geen code gewijzigd — analyse over Redshift + Google Ads API, opgeleverd als
+artifact. Volledige uitwerking in `LEARNINGS.md` (2026-09-03, SEA-piek 2 september).
+
+- [x] Piek gelokaliseerd op **2 sep**: 13.229 bot-gefilterde SEA-bezoeken, hoogste dag in zeven
+      weken, +71% op het dal 27-30 aug. Aan de Ads-kant 199.342 vertoningen (+176%), €1.415
+      kosten, CPC €0,130 (+35%).
+- [x] Oorzaak: **Target ROAS-terugkoppeling**. 24-30 aug liep de gemeten ROAS op naar 2,4-2,7
+      tegen een normaal niveau van 1,4-1,5, doordat het volume wegzakte terwijl de CPR per
+      outclick opliep naar €0,15. Smart Bidding reageerde 1-2 sep. Geen handmatige ingreep in de
+      change history.
+- [x] Uitgesloten: AI Max (39 campagnes sinds 29-08, groeiden mínder hard), tagging-artefact,
+      seizoen alleen, en een categoriegedreven vraagpiek.
+- [x] Split naar apparaat (79% van de extra bezoeken én de extra kosten is mobiel; CPR/outclick
+      mobiel €0,120 → €0,080) en naar categorie (29 van de 30 hoofdcategorieën +25% tot +110%;
+      alleen `Beslist.nl` vlak, spiegelt de merkcampagnes).
+
+Open:
+
+- [ ] **Kijken of de slinger terugslaat.** Op 2 sep zakte de ROAS naar 1,01 en de CPR per outclick
+      naar €0,092 (laagste sinds 20 aug). Blijft dat zo, dan knijpt Smart Bidding de biedingen
+      binnen enkele dagen dicht en zakt SEA dóór onder de baseline. Vanaf 05-09 de reeks
+      `visits / kosten / roas / cpr_oc` opnieuw trekken; als de correctie inzet is de vraag of de
+      tROAS-targets de amplitude moeten dempen in plaats van de lus te laten uitzwaaien.
+- [ ] Budgetverlies liep op van ~1% naar 2,5% op 2 sep — de eerste campagnes raken hun dagbudget.
+      Meenemen in de volgende meting: als de correctie komt, verdwijnt dat vanzelf; blijft het
+      staan, dan zit er een budgetplafond op iets dat wél rendeert.
+
+
 ### 2026-09-03 (3) — Redirect tool: de skip-badge zegt waarheen de URL nú verwijst
 
 Uit `suggestions.txt`. Commit `216d757`.
