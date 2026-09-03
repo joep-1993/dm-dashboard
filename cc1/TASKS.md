@@ -114,24 +114,79 @@ Gedaan — **twee labels + backfill**:
 - [x] **Guard in `gsd_campaigns_service` blijkt niet te hoeven** — die leest `GSD_LL_PAUSED` en dat
       label houdt zijn oude betekenis; alle labelchecks daar zijn additief.
 
+Gedaan — **nagekomen, en twee correcties op wat hierboven stond**:
+
+- [x] **Sokken-online.nl BE aangezet** (5 campagnes, via `apply_selected()` zodat de audittrail
+      klopt: 5 `Enabled`-rijen met linkage 71,4 om 13:23). Shop draait weer in NL én BE.
+- [x] **CORRECTIE — `Aliexpress.com|NL CSS` was niet gestrand maar bewust uitgezet.** Per campagne
+      opgevraagd: **24-08 10:44, `GOOGLE_ADS_WEB_CLIENT`**, door een collega, alle 5 ENABLED →
+      PAUSED. `XXXFatbikeskopen.nl` idem, 24-08 10:20 door een ánder. Mijn eerdere conclusie
+      ("geen statuswijziging in 29 dagen, dus allemaal >29 dagen dark") kwam uit één
+      `change_event`-query per account met `LIMIT 10000` — precies de truncatie waar LEARNINGS
+      sinds 17-07 al voor waarschuwt. Per campagne opvragen is de fix. Voor Sokken-online BE hield
+      de conclusie wél stand (0 wijzigingen in 28 dagen, laatste spend 02-08).
+- [x] **CORRECTIE — `[limit]` is géén gepensioneerde suffix.** Alle 12.768 leden geteld op hun
+      laatste naam-token: `[macro]` 0 ENABLED / 346 PAUSED en `[macro+micro]` 0 / 350 — geen van
+      die 696 staat érgens aan, dus dát is een harde retired-generatie. Maar `[limit]` heeft
+      **10 ENABLED** tegen 13 PAUSED, dus die vorm zegt niets over of een campagne aan hoort.
+      Hiermee ook de gepauzeerde leden opnieuw uitgesplitst: **1.971** totaal, waarvan **404** door
+      LL zelf gepauzeerd, **696** retired generatie en **871** overig (met de hand uit, shop-off-
+      flow, oudere generaties).
+- [x] **Enable-kant verbreed naar "lidmaatschap volstaat" — gebouwd, getest en op verzoek weer
+      teruggedraaid.** Joep koos eerst voor verbreden, tot de meting liet zien dat de
+      `[macro]`/`[limit]`-varianten wél het lidmaatschapslabel dragen (de sweep is naam-blind) en
+      de blast radius dus 871 campagnes is. Terug naar het gecommitte tweelabel-ontwerp. De patch
+      (`_find_enable_candidates` met `reason` ll_paused/member, `RETIRED_GENERATION_TOKENS`, een
+      bid-strategy-guard en een preview-markering) is niet bewaard in de repo — zie LEARNINGS voor
+      wat eruit te leren valt.
+
 Open:
 
-- [ ] **30 shop+land-combi's / 159 campagnes zijn VOLLEDIG dark** (nul actieve campagnes) terwijl
+- [ ] **29 shop+land-combi's zijn VOLLEDIG dark** (was 30; Sokken-online BE staat weer aan) terwijl
       `bt.shop_list` de shop nog als GSD-shop voor dat land vlagt, en geen enkele draagt een
-      LL-toestandslabel — dus geen enable-run haalt ze ooit terug. Per shop een beslissing:
-      aanzetten of laten. De duurste is `Aliexpress.com|NL CSS` (665193, NL, € 30.973 in 365d,
-      laatste spend 24-08); daarna `XXXFatbikeskopen.nl` (653190, € 1.046) en `Berger-camping.nl`
-      (650991, NL+BE, € 794). Negen van de 30 zijn `OUD_`/`XXX`-shops, waar dark correct is en de
-      `shop_list`-vlag achterloopt. **Sokken-online BE is de enige die vandaag ook echt aan hoort
-      te staan** (`gsd = 1`).
-- [ ] **De andere 1.413 dark-zonder-eigenaar** zitten bij shops die ook live campagnes hebben; 683
-      daarvan zijn `[macro]`/`[macro+micro]`/`[limit]`-naamvarianten. Vermoedelijk afgesloten
-      experimenten — maar niemand heeft dat expliciet besloten. Eén keer doorlopen en opruimen of
-      accepteren.
+      LL-toestandslabel — dus geen enable-run haalt ze ooit terug. Twee daarvan (Aliexpress CSS,
+      XXXFatbikeskopen) zijn hierboven verklaard als bewust; negen zijn `OUD_`/`XXX`-shops waar
+      dark correct is. Wat overblijft is vooral **13 combi's die nooit één cent uitgaven**
+      (Coffeeandteabrokers, Delicando NL/BE/DE, NicheFragrance, Berghoff-toys, Zooplus.be,
+      Planethappy.be, Doublefonline, Mandmdirect.de, Carmount.de): campagnes bestaan,
+      biedstrategie is gekoppeld (alle 133 staan op `TARGET_ROAS`, dus geen technische blokkade),
+      nooit aangezet. Waren die bedoeld om live te gaan?
+- [ ] **De vlag óf de campagnes moet wijken.** Bij elke combi hierboven zijn Google Ads en
+      `bt.shop_list` het niet met elkaar eens. Voor de bewust-uitgezette en de `OUD_`/`XXX`-shops
+      is de juiste uitkomst `is_gsd_<land>_shop = 0`; dat is een `shop_list`-vraag, niet een
+      tool-vraag. Routeren naar wie die tabel beheert.
+- [ ] **Watchdog voorstellen: "gevlagd als live maar nul actieve campagnes".** Dit is wat het
+      Sokken-online-gat écht dicht, want het hangt niet van labels af: voor elke shop+land met
+      `is_gsd_<land>_shop = 1`, als het account nul ENABLED Shopping-campagnes voor die shop heeft
+      → alarm. Vangt het geval op dag 1 ongeacht *waarom* het dark is, en een false positive is
+      ook waardevol (dan hoort de vlag naar 0). Meeliften op de read-only Excel-load van 09:50,
+      Slack-melding alleen bij een niet-lege lijst. Op de stand van vandaag zou hij 29× afgaan en
+      daarna stil zijn.
 - [ ] **Deploy op win-htz-006:3003.** De labels zitten al in Google Ads (die mutatie liep via de
       API), maar de nieuwe tegel en de sweep-in-de-run komen pas mee na een deploy.
 - [ ] **Overweeg de backfill periodiek te draaien** i.p.v. eenmalig — nieuwe campagnes van een
       LL-shop krijgen hun lidmaatschap nu pas als die shop weer in de feed opduikt.
+
+### 2026-09-03 (8) — De drie mc_ids rechtgezet en de twee UI-nafjes afgehandeld
+
+Twee losse verzoeken van Joep na entry (7). Commit `42d79aa` (UI); de mc_ids-write is een
+databasewijziging, geen commit.
+
+Gedaan:
+
+- [x] **De drie stale `mc_ids` geschreven** na Joeps go. Zie de entry van 01-09 (5) voor de meting,
+      de snapshot en de terugleescontrole. Datum op vandaag gezet zoals gevraagd — met de kanttekening
+      dat die kolom daarmee voor deze drie rijen niet meer de aanmaakdatum van het MC-account is.
+- [x] **Min. score-dropdown terug**, stappen van 10, zonder tier, met een cumulatieve telling per
+      drempel. Zie de entry van 03-09 (2).
+- [x] **Old/New tonen relatieve paden** in plaats van absolute URL's — Joeps eigen voorstel, en het
+      halveerde het wikkelen meer dan tweemaal (26 → 8 van 60 rijen). Zie de entry van 03-09 (2).
+
+Open:
+
+- [ ] **Afkappen blijft de terugvaloptie** voor de acht rijen die nog wikkelen (allemaal
+      `/c/`-bestemmingen met twee facetten). Eén CSS-regel; ik heb hem laten staan omdat de facetketen
+      juist is waarop je een redirect beoordeelt.
 
 ### 2026-09-03 (7) — Openstaande TASKS-punten opgepakt: V68, de dependency-ingest en twee dubbele regels
 
@@ -156,14 +211,14 @@ Gedaan:
 
 Open:
 
-- [ ] **De drie `mc_ids`-writes wachten op Joeps go.** Waarden en plan staan in de entry van 01-09 (5);
-      schrijven gaat via `push_mc_ids_to_redshift()`, niet met de hand.
+- [x] **De drie `mc_ids`-writes zijn gedaan** (Joeps go, 03-09). Zie de entry van 01-09 (5) voor de
+      meting, de snapshot en de terugleescontrole.
 - [ ] **De GSD-tripwire op "twee runs hebben gedraaid"** overgeslagen: `gsd_ll_service.py` en
       `gsd-campaigns.html` waren op dat moment in gebruik bij een parallelle sessie (inmiddels
       gecommit als `b060ab1`/`07b5970`, dus nu vrij).
-- [ ] **De twee UI-nafjes in Auto-Redirects** (histogramtelling terug, Old/New-cellen afkappen i.p.v.
-      `break-all`) staan in TASKS als "alleen als Joep hem mist" en "als dat netter moet" — dat is
-      smaak, dus gevraagd en nog geen antwoord.
+- [x] **De twee UI-nafjes in Auto-Redirects zijn gedaan** (Joeps smaak gevraagd en gekregen, 03-09):
+      de Min. score-dropdown is terug met stappen van 10 en zonder tier, en de Old/New-cellen tonen
+      relatieve paden. Zie de entry van 03-09 (2).
 - [ ] **De Healthscore categorie/maincat-tweelingen** (~400 regels bijna-identieke SQL) is het enige
       punt uit die hoop dat nog helemaal open staat. Vraagt volgens de notitie zelf een
       OLD-vs-NEW-harness met een volledige build tegen Redshift.
@@ -406,10 +461,23 @@ onder elkaar om het lettertype te vergelijken.
 
 Open:
 
-- [ ] De histogramtelling per drempel is met de dropdown verdwenen. Terug te brengen als klein cijfer
-      achter de teller (het endpoint levert `histogram` nog steeds mee) — alleen als Joep hem mist.
-- [ ] De Old/New-cellen breken nu vaker over twee regels (`break-all`), waar Recent runs juist afkapt
-      met `…` en de volle waarde in de `title` zet. Eén CSS-regel als dat netter moet.
+- [x] **Dropdown terug (Joep, 03-09), stappen van 10 en zonder tier-aanduiding.** `buildScoreOptions()`
+      is terug maar anders: opties 100..0 in stappen van 10, label `90 (480)` waarbij het getal
+      CUMULATIEF is — hoeveel rijen van deze run die drempel halen, want dat is de vraag die je stelt
+      als je hem verzet. Het `histogram` uit `/results` telt per exacte score, dus hier van hoog naar
+      laag opgeteld; het beschrijft de hele run en verandert niet mee met de gekozen drempel, dus één
+      keer bouwen per run volstaat. Bij het openen worden de opties eerst zonder tellingen gezet zodat
+      het veld niet leeg staat tijdens de eerste fetch. Klemmen op 0-100 kon weg — een select kan geen
+      250 teruggeven. Breedte 165 → 215px, anders valt `(480)` buiten het veld.
+- [x] **Opgelost door relatieve paden te tonen (Joeps voorstel, 03-09)** in plaats van af te kappen.
+      `old_url`/`new_url` komen absoluut uit het endpoint, en `https://www.beslist.nl` is 22 tekens die
+      in élke rij hetzelfde zijn. `_displayPath()` knipt schema+host eraf; de volle URL blijft in de
+      `title`. **Gemeten op één run, 60 rijen: van meer dan één regel hoog ging het van 26 naar 8.**
+      Wat overblijft zijn `/c/`-bestemmingen met twee facetten, en daar is het wikkelen juist nuttig —
+      de facetketen is precies waarop je de redirect beoordeelt. Afkappen blijft de terugvaloptie
+      (Joep: "anders is de afbreking ook prima"), één CSS-regel.
+      **Let op**: `_displayPath()` is ALLEEN voor weergave en bewust geen kopie van `strip_domain()`.
+      Die regel hoort bij een export en staat sinds `445c758` op precies één plek, in de backend.
 
 ### 2026-09-03 (1) — SEO Rulings: een vaste combo in de facet-links-check
 
@@ -1038,8 +1106,7 @@ Open:
       (lock per (parent, shopnaam) + hercheck ín de lock) en de twee weesaccounts zijn verwijderd.
       Correctie op de inventarisatie hierboven: het waren er **twee**, niet vier — Hondenvoerdirect NL
       en Speelgoedvoorvolwassenen hebben één MC id en kregen twee *campagnesets*.
-- [ ] **Drie stale waarden — gemeten op 03-09, alle drie bevestigd stale; de write staat klaar maar
-      is niet gedaan.** Live merchant_id uit de ENABLED campagnes van die shops, één consistente
+- [x] **Drie stale waarden — gemeten én rechtgezet op 03-09 (Joeps go).** Live merchant_id uit de ENABLED campagnes van die shops, één consistente
       waarde per shop: **182 Kamera-express.nl NL** 5619578895 → `670182955` (7 campagnes),
       **207860 Hbm-machines.com|NL** 5832402430 → `677034425` (6), **651763 Welhof.com|BE BE**
       5834452853 → `746168817` (5). `reconcile_run_logs(days=30, dry_run=True)` ziet 52 shops en
@@ -1047,7 +1114,13 @@ Open:
       campagne aangemaakt — zelfheling komt hier dus niet vanzelf. `mc_upsert_plan()` met de gemeten
       waarden plant netjes 3 updates, 0 inserts, 0 repairs. Schrijven gaat via
       `push_mc_ids_to_redshift()` (delete-before-insert + advisory lock), niet met de hand.
-      **Wacht op Joeps go**: het is productie-state aan de GSD-kant.
+      **Gedaan**: vlak voor de write opnieuw gemeten (elke shop wees naar precies één mc id, anders
+      niet schrijven), snapshot van de oude rijen naar
+      `Downloads/claude/mc_ids_efficy_snapshot_20260903.json`, daarna
+      `push_mc_ids_to_redshift()` → `0 inserted, 3 updated, 0 repaired, 0 unchanged, lock=True`.
+      Teruggelezen: alle drie op het live mc-id met `date=20260903`, en de tabel telt 574 rijen op
+      574 unieke (shop_id, domain) — geen duplicaten bijgekomen. Datum op vandaag gezet op Joeps
+      verzoek, zodat ze doorkomen.
 
 ### 2026-09-01 (4) — Excel-export van Canonicals en Redirect Generator in het Redirect-tool-formaat
 

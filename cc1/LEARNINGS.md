@@ -1,6 +1,124 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een layout-meting in een headless probe: vergelijk met de KLEINSTE rij (2026-09-03, Auto-Redirects)
+
+Ik wilde weten hoeveel rijen van de Push Redirects-tabel over twee regels breken, en had er twee
+foute antwoorden voor nodig:
+
+| poging | resultaat | waarom fout |
+|---|---|---|
+| `td.offsetHeight > 30` | 40 van 40 | de celpadding maakt élke cel hoger dan 30px |
+| `Range.getClientRects().length` | 46 van 60 | geeft ook meerdere rechthoeken voor tekst die op één regel staat |
+
+Wat wél klopt en geen magische constante nodig heeft: meet de hoogte van elke RIJ, neem de kleinste
+als "één regel", en tel wat daarboven uitkomt.
+
+```js
+const hs = rows.map(tr => tr.getBoundingClientRect().height);
+const min = Math.min(...hs);
+const tall = hs.filter(x => x > min + 2).length;   // 8 van 60
+```
+
+Beide foute uitkomsten spraken het screenshot tegen dat er al was (de Old-kolom brak zichtbaar
+nergens), en dat was de reden om ze niet te geloven. **Zet een getal uit een probe altijd naast de
+foto van diezelfde probe.**
+
+**En als je vergeten bent de oude toestand vast te leggen: herstel hem IN de pagina en meet opnieuw.**
+De volle URL stond nog in de `title`, dus `td.textContent = td.title` gaf de situatie van vóór de
+wijziging terug — één pagina-load, twee metingen, en daarmee mocht "van 26 naar 8" een gemeten
+uitspraak heten in plaats van een indruk. Hoort bij [[wsl_screenshot_windows_chrome]].
+
+---
+
+## Een productie-write doe je op een verse meting, niet op die van een uur geleden (2026-09-03, mc_ids)
+
+Drie rijen in `pa.mc_ids_efficy` rechtgezet. De volgorde die het veilig maakte:
+
+1. **Opnieuw meten vlak vóór de write**, met een harde stop erin: als een shop naar méér dan één
+   merchant id had gewezen, wordt er niets geschreven. De meting van een uur eerder was toevallig nog
+   goed, maar dat wist ik pas achteraf.
+2. **Snapshot van de oude rijen** naar `Downloads/claude/`, zodat terugdraaien met dezelfde writer kan.
+3. **Via de bestaande writer**, niet met de hand: `push_mc_ids_to_redshift()` doet delete-before-insert
+   onder een advisory lock, en `mc_upsert_plan()` zegt vooraf wat er gaat gebeuren (3 updates, 0
+   inserts, 0 repairs — precies wat eruit kwam).
+4. **Teruggelezen**, inclusief de controle dat de tabel nog 574 rijen op 574 unieke (shop_id, domain)
+   telt. Duplicaten waren de historische failure mode van juist deze tabel.
+
+**Wat de gebruiker vroeg had een bijwerking die het waard was om te noemen.** De datum op vandaag
+zetten laat de rijen doorkomen, maar die kolom hield tot dan de aanmaakdatum van het MC-account bij —
+voor deze drie rijen is die historie nu weg. Dat is geen bezwaar tegen het verzoek, wel iets dat je
+zegt vóór je het doet, en het staat in de snapshot.
+
+---
+
+## Een naamconventie is pas een "afgedankt"-signaal als je de ENABLED-kant telt (2026-09-03, GSD low-linkage)
+
+Joep wilde de enable-kant van low-linkage verbreden: een campagne met het `GSD_LL`
+lidmaatschapslabel mag ook aan, ook zonder `GSD_LL_PAUSED`. Zijn aanname daarbij was dat de
+`[macro]`/`[limit]`-varianten daar buiten vielen omdat die het lidmaatschapslabel niet zouden
+hebben. Dat was niet zo: de membership-sweep is **status-blind én naam-blind** — hij labelt elke
+niet-REMOVED Shopping-campagne van een GSD-gevlagde shop, punt. Dus die varianten waren wél
+kandidaat, en de blast radius was 871 campagnes.
+
+**Voordat je een naamsuffix als "gepensioneerde generatie" behandelt, tel ENABLED tegen PAUSED per
+token over de hele estate.** Alle 12.768 leden op hun laatste bracket-token:
+
+| laatste token | ENABLED | PAUSED |
+|---|---|---|
+| `[macro]` | 0 | 346 |
+| `[macro+micro]` | 0 | 350 |
+| `[limit]` | **10** | 13 |
+| `[label:a_zombie]` | 4 | 3 |
+
+`[macro]`/`[macro+micro]` is een harde retired-generatie: 696 campagnes en er staat er geen één
+aan, dus niets hangt er nog van af. `[limit]` en `[a_zombie]` zijn gemengd — die op naam
+uitsluiten zou live-vormige campagnes stil dark houden. De regel die ik bouwde sloot dus alleen de
+eerste twee uit, en pakte het laatste bracket-token (niet "bevat `[macro]`"), want deze namen zijn
+positioneel opgebouwd.
+
+De verbreding is uiteindelijk teruggedraaid — Joep koos ervoor bij het tweelabel-ontwerp te
+blijven zodra dit getal op tafel lag. Wat blijft staan is de meetregel, plus de uitsplitsing van
+de 1.971 gepauzeerde leden: 404 door LL zelf gepauzeerd, 696 retired generatie, 871 overig.
+
+**Twee ontwerpdetails die ik zou herhalen als het ooit terugkomt.** Een `reason`-veld
+(`ll_paused` / `member`) dat helemaal tot in de frontend reist, zodat een previewrij zegt *waarom*
+hij aangaat in plaats van dat te verstoppen in de backend; en de bid-strategy-guard uit
+`gsd_campaigns_service` meenemen (`MANUAL_CPC` = SA360 heeft nog niet gekoppeld, dus aanzetten
+levert niets). Die guard bleek vandaag niets te blokkeren — alle 133 dark-campagnes staan op
+`TARGET_ROAS` — maar dat wéten is precies de reden om het te meten in plaats van aan te nemen.
+
+---
+
+## Ik liep opnieuw in de `change_event`-truncatie die hier al sinds 17-07 gedocumenteerd staat (2026-09-03)
+
+Om te bepalen wanneer een set gepauzeerde campagnes dark ging deed ik **één** `change_event`-query
+per account: `WHERE change_date_time >= <28 dagen terug> ... ORDER BY change_date_time DESC LIMIT
+10000`. Nul resultaten, en ik concludeerde "allemaal >28 dagen dark". Fout: in het gedeelde
+NL-account (`7938980174`, honderden shops) spannen 10k events niet eens een paar dagen, dus mijn
+venster was in werkelijkheid uren. De entry van 17-07 in dit bestand beschrijft exact deze val,
+inclusief de fix.
+
+**Per campagne opvragen**, niet per account:
+
+```
+WHERE change_event.campaign = 'customers/{cid}/campaigns/{id}'
+  AND change_event.change_date_time >= '{YYYY-MM-DD} 00:00:00' ... LIMIT 50
+```
+
+Weinig events per campagne → geen truncatie. Toen kwam eruit dat `Aliexpress.com|NL CSS` op **24-08
+10:44** met de hand in de Ads-webinterface was uitgezet en `XXXFatbikeskopen.nl` twintig minuten
+eerder door iemand anders — dus niet gestrand door een gat in de tool, maar een bewuste actie. Dat
+draaide een openstaand punt van "€ 30.973 aan verloren omzet" om naar "de `shop_list`-vlag klopt
+niet".
+
+De les boven de les: ik had die entry kunnen vinden vóór de query, niet erna. Bij twijfel over een
+`change_event`-venster is `grep -n "change_event" cc1/LEARNINGS.md` goedkoper dan de meting
+overdoen. En een leeg resultaat uit een `LIMIT`-query is geen bewijs van afwezigheid — het is pas
+bewijs als je weet dat de limiet niet geraakt werd.
+
+---
+
 ## Ontwerp op de events die er zijn, niet op het mechanisme dat de vraag beschrijft (2026-09-03, Facet Watch)
 
 De vraag was een module voor "verhuisde facetten: facetten die ergens verwijderd zijn maar op een
