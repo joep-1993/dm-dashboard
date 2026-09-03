@@ -52,13 +52,48 @@
         .badge-attached { background-color: #ffc107; color: #000; }
         .badge-auto     { background-color: #fd7e14; color: #000; cursor: help; }
         .badge-del      { background-color: #dc3545; color: #fff; }
+        /* "Niet opgehaald" / een locale die de Redirect API niet bedient. GEEN grijs
+           (UI_BLUEPRINT §Labels): grijs leest als uitgeschakeld terwijl dit gewoon
+           een stand is die nog kan veranderen. De merkkleur als rand, zodat het
+           zichtbaar buiten de groen→rood-prioriteitsladder valt. */
+        .badge-unknown  { background-color: #f1edfa; color: #5e4a90; box-shadow: inset 0 0 0 1px #cfc4e6; }
 
         /* Was monospace; now only a smaller size, so the column matches its
            neighbours (see the font-family rule above). */
         .ts { font-size: 0.82rem; }
         .facet-slug { font-size: 0.78rem; color: #6c757d; }
         .maincat-row { cursor: pointer; }
-        .maincat-row.selected { background: #ede9f6 !important; }
+
+        /* ---- Klikbare tegels ----
+           De tegels waren tot 2026-09-03 alleen een uitkomst; nu zetten ze het
+           filter op de facettabel eronder. Alleen de tegels die een DEELVERZAMELING
+           aanwijzen krijgen dat gedrag — "Events" en "Facetten geraakt" zijn het
+           totaal en filteren dus niets, en die horen er ook niet klikbaar uit te
+           zien (cursor + hover blijven weg via .is-clickable). */
+        .stat-box.is-clickable { cursor: pointer; transition: box-shadow .12s ease, transform .12s ease; }
+        .stat-box.is-clickable:hover { box-shadow: 0 2px 8px rgba(45, 42, 58, 0.18); transform: translateY(-1px); }
+        /* De actieve tegel krijgt de merkrand, niet een eigen vulkleur: de vulling
+           codeert al WAT de tegel is (groen = nieuw, rood = verwijderd) en die
+           betekenis moet niet omslaan zodra je erop klikt. */
+        .stat-box.is-active { outline: 2px solid #5e4a90; outline-offset: 1px; }
+
+        /* ---- Uitklaprij per main categorie ----
+           Zelfde vocabulaire als Bot Hits en DMA Exclusions: een caret die 90°
+           draait, de open rij getint, en het paneel op een eigen lichte grond.
+           `--bs-table-bg-state: transparent` is nodig omdat .table-hover anders
+           over de paneelgrond heen tekent. */
+        .fw-caret { display: inline-block; width: 0.8rem; color: #8a8a96; transition: transform .12s ease; }
+        tr.is-open .fw-caret { transform: rotate(90deg); }
+        .tool-table tbody tr.maincat-row.is-open > td { background: #f1edfa; font-weight: 600; }
+        .tool-table tbody tr.mc-detail > td { background: #fbfbfd !important; padding: 1rem 1.25rem !important;
+                                              --bs-table-bg-state: transparent; }
+        .tool-table tbody tr.mc-detail:hover > td { background: #fbfbfd !important; }
+        /* De subtabel is een tabel BINNEN een tabelcel; hij erft .tbl-nowrap niet en
+           moet zijn eigen breedte houden. */
+        .mc-detail table { width: 100%; margin: 0; }
+        .mc-detail table th { font-size: 0.78rem; text-transform: uppercase; color: #6c757d;
+                              font-weight: 600; padding: 4px 10px; border-bottom: 1px solid #e3e3ea; white-space: nowrap; }
+        .mc-detail table td { padding: 5px 10px; font-size: 0.85rem; vertical-align: middle; }
         .chg-cell { font-size: 0.78rem; max-width: 420px;
                     word-break: break-word; color: #495057; }
         .note { font-size: 0.82rem; color: #636e72; }
@@ -66,8 +101,20 @@
         /* ---- Keep every value on ONE line, and scroll horizontally instead ----
            Only the two summary tables. The Events table's "Gewijzigd" column holds
            arbitrary old→new field values and genuinely needs to wrap, so forcing
-           nowrap there would push the table absurdly wide for no gain. */
+           nowrap there would push the table absurdly wide for no gain.
+
+           De twee modules van 2026-09-03 doen het OOK niet, om een andere reden: hun
+           laatste kolom is een knop. Met nowrap werd de tabel breder dan de kaart en
+           stond "→ Redirect Tool" buiten beeld tot je horizontaal scrollde — een
+           actie die je niet ziet, bestaat niet. Daar wrappen de lange cellen (slugs,
+           categorielijsten) en past de tabel binnen de kaart; wat niet mag afbreken
+           (datum, getal, badge) krijgt hieronder zijn eigen nowrap. */
         .tbl-nowrap th, .tbl-nowrap td { white-space: nowrap; }
+        .tbl-fit th, .tbl-fit td { white-space: normal; }
+        .tbl-fit .ts, .tbl-fit .col-center, .tbl-fit .nowrap { white-space: nowrap; }
+        /* Een slug hoort als één token te lezen; alleen als hij écht niet past mag
+           hij breken, en dan op tekenniveau want er zitten geen spaties in. */
+        .tbl-fit code { word-break: break-all; }
         /* width:auto lets the table grow past the card so .tool-table-wrap's
            overflow can actually scroll it. Bootstrap's .table sets width:100%,
            which would instead squeeze the columns and re-introduce wrapping. */
@@ -219,15 +266,18 @@
                              banner is een blok tekst en niet één regel, en zonder extra lucht
                              plakt de tabelkop er direct tegenaan. -->
                         <div class="info-note roomy mb-4">
-                            Klik een rij om de facetten eronder te filteren. Een facet hoort bij
-                            precies één main categorie — gemeten: 194 van de 194 gewone facetten
-                            hebben één <code>CategoryFacet</code>-rij en dus één maincat. De
-                            productlijn-familie is de uitzondering en heeft er <em>geen enkele</em>:
-                            die hangt via <code>value-dependencies</code> aan merk-waarden, en zijn
-                            maincats zijn die van zijn parent-Merk-facetten (elk daarvan hoort weer
-                            bij één maincat). Die familie wordt daarom altijd uitgefilterd
-                            <span id="autoHint"></span>, zodat de kolommen optellen tot het aantal
-                            events.
+                            Klik een rij om de facetten van die categorie <em>eronder uit te klappen</em>.
+                            Een facet hoort bij precies één main categorie — gemeten: 194 van de 194
+                            gewone facetten hebben één <code>CategoryFacet</code>-rij en dus één
+                            maincat. De productlijn-familie is de uitzondering en heeft er
+                            <em>geen enkele</em>: die hangt via <code>value-dependencies</code> aan
+                            merk-waarden, en zijn maincats zijn die van zijn parent-Merk-facetten
+                            (elk daarvan hoort weer bij één maincat). Die familie wordt daarom altijd
+                            <!-- Geen spatie vóór de span: hij is leeg als er in dit venster niets
+                                 is uitgefilterd, en dan bleef er "uitgefilterd , zodat" staan.
+                                 De spatie zit nu in de waarde die de JS erin zet. -->
+                            uitgefilterd<span id="autoHint"></span>, zodat de kolommen optellen tot
+                            het aantal events. Nieuwe productlijnen staan in hun eigen module verderop.
                         </div>
                         <div class="tool-table-wrap">
                             <table class="table table-sm table-hover tool-table tbl-nowrap">
@@ -259,11 +309,17 @@
                         <h5 class="mb-0">Laatst aangemaakte / gewijzigde facetten</h5>
                     </div>
                     <div class="card-body">
+                        <!-- De categoriefilter is hier weg: die zat op de rij-klik in "Per main
+                             categorie" en is per 2026-09-03 een uitklapbare subtabel in die kaart
+                             zelf geworden (Joep). Wat hier overblijft is de vrije zoekterm plus het
+                             filter dat de tegels bovenaan zetten — dus filtert deze tabel nog
+                             steeds, maar op SOORT wijziging in plaats van op categorie. -->
                         <div class="filter-row d-flex gap-2 align-items-center mb-3">
                             <input type="text" class="form-control form-control-sm" id="facetFilter"
                                    placeholder="Zoek facet…" oninput="renderFacets()" style="max-width: 250px;">
                             <span class="note" id="facetScope"></span>
-                            <button class="btn btn-sm btn-outline-purple ms-auto" onclick="clearScope()">Alle categorieën</button>
+                            <button class="btn btn-sm btn-outline-purple ms-auto" onclick="clearKindFilter()"
+                                    id="clearKindBtn" style="display: none;">Toon alles</button>
                         </div>
                         <div class="tool-table-wrap">
                             <table class="table table-sm table-hover tool-table tbl-nowrap">
@@ -300,6 +356,141 @@
                     </div>
                 </div>
 
+                <!-- ---------------- Nieuwe productlijnen ---------------- -->
+                <div class="card mb-4">
+                    <div class="card-header d-flex align-items-center gap-2">
+                        <h5 class="mb-0">Nieuwe productlijnen
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px; margin-left: 4px;">
+                                <title>Facetwaarden die zijn aangemaakt in de productlijn-familie (het facet "Productlijn" en elk "Productlijnen: &lt;merk&gt;"). Dezelfde bronnen als de tegels "Waarden toegevoegd" en "Nieuwe facetten" hierboven, maar hier juist ZONDER de auto-filter — deze familie is hier het onderwerp in plaats van ruis.</title>
+                                <circle cx="8" cy="8" r="8" fill="#5e4a90"/>
+                                <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
+                                <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
+                            </svg>
+                        </h5>
+                        <button class="btn btn-sm btn-outline-orange ms-auto" onclick="exportProductLines()">Export Excel</button>
+                        <button class="btn btn-sm btn-run" onclick="loadVolumes()" id="volBtn">Zoekvolume ophalen</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="info-note roomy mb-3" id="plNote">
+                            De productlijn-familie wordt door ListsApi <em>herhaaldelijk opnieuw
+                            aangemaakt</em> onder dezelfde naam met een nieuw facet-id — "Productlijnen:
+                            Kärcher" staat 9× in de store met elke keer dezelfde 10 waarden. Deze tabel
+                            is daarom ontdubbeld op merk + lijnnaam; <em>Keer</em> zegt hoe vaak de lijn
+                            langskwam. Zoekvolume komt uit de Keyword Planner op <strong>merk +
+                            lijnnaam</strong> (los is "Tasman" niets, "ugg tasman" doet 18.100/mnd) en
+                            wordt gecached — de knop rechtsboven haalt alleen op wat nog leeg is.
+                        </div>
+                        <div class="filter-row d-flex gap-2 align-items-center mb-3 flex-wrap">
+                            <input type="text" class="form-control form-control-sm" id="plFilter"
+                                   placeholder="Zoek merk of lijn…" oninput="renderProductLines()" style="max-width: 250px;">
+                            <select class="form-select form-select-sm" id="plPrio" onchange="renderProductLines()" style="max-width: 190px;">
+                                <option value="">Alle prioriteiten</option>
+                                <option value="hoog">Alleen hoog</option>
+                                <option value="midden">Midden en hoger</option>
+                                <option value="known">Alleen met zoekvolume</option>
+                            </select>
+                            <span class="note" id="plScope"></span>
+                        </div>
+                        <div class="tool-table-wrap">
+                            <table class="table table-sm table-hover tool-table tbl-fit">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th class="sortable nowrap" onclick="sortPl('priority_rank')">Prioriteit</th>
+                                        <th class="sortable col-center" onclick="sortPl('search_volume')">Zoekvolume</th>
+                                        <th class="sortable" onclick="sortPl('brand')">Merk</th>
+                                        <th class="sortable" onclick="sortPl('product_line')">Productlijn</th>
+                                        <th class="sortable col-center" onclick="sortPl('n_cats')">Categorieën</th>
+                                        <th class="sortable col-center" onclick="sortPl('incarnations')">Keer</th>
+                                        <th class="sortable" onclick="sortPl('first_seen')">Eerst gezien</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="plBody">
+                                    <tr><td colspan="7" class="text-center text-muted py-3">Nog geen data.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="pagination-controls">
+                            <span>Per pagina:</span>
+                            <select class="form-select form-select-sm" id="plPerPage" onchange="plPage=1; renderProductLines();">
+                                <option value="25" selected>25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                                <option value="all">Alles</option>
+                            </select>
+                            <button class="btn btn-outline-secondary btn-page" onclick="changePlPage(-1)" id="plPrev"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+                            <span class="page-info" id="plPageInfo">-</span>
+                            <button class="btn btn-outline-secondary btn-page" onclick="changePlPage(1)" id="plNext"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ---------------- Verhuisde facetten ---------------- -->
+                <div class="card mb-4">
+                    <div class="card-header d-flex align-items-center gap-2">
+                        <h5 class="mb-0">Verhuisde facetten
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px; margin-left: 4px;">
+                                <title>Facetten waarvan de URL-slug is veranderd. De slug staat letterlijk in de URL (/products/&lt;pad&gt;/c/&lt;slug&gt;~&lt;value-id&gt;), dus een wijziging verplaatst elke bestaande facetpagina. Uit `Facet Label` UPDATE, dat oude EN nieuwe slug meelevert — niet uit een naam-match op verwijderde facetten, want een DELETE van een facet wordt nergens gelogd.</title>
+                                <circle cx="8" cy="8" r="8" fill="#5e4a90"/>
+                                <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
+                                <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
+                            </svg>
+                        </h5>
+                        <button class="btn btn-sm btn-outline-purple ms-auto" onclick="loadMoved()">↻ Refresh</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="info-note roomy mb-3">
+                            De site vángt een oude slug wel op, maar <strong>301't naar de kale
+                            categorie en gooit het facet weg</strong> — gemeten 03-09-2026:
+                            <code>beslist.be/…/c/stijl_test~393710</code> → de categorie zonder filter,
+                            terwijl <code>…/c/woonstijl~393710</code> een 200 geeft. De bezoeker
+                            verliest zijn selectie, dus hier hoort een gerichte 301 op de
+                            <em>equivalente</em> pagina.
+                            <br><br>
+                            Het label-event draagt <strong>geen locale</strong>, dus die wordt bepaald
+                            door de huidige slugs live op te halen. Dat is geen detail: de wijzigingen
+                            van augustus landden op <strong>nl-BE</strong>, niet op nl-NL. Alleen
+                            <code>nl-NL</code> (NL) en <code>nl-BE</code> (BE) zijn door te zetten naar
+                            de Redirect Tool; <code>en-US</code> en <code>de-DE</code> staan er wel bij,
+                            maar de Redirect API bedient die domeinen niet.
+                        </div>
+                        <!-- Het merendeel van de rijen is en-US / de-DE, met 0 te repareren
+                             URL's en geen knop: pa.urls houdt de NL-paden, en de Redirect API
+                             bedient die domeinen niet. Ze staan er wél in — een slug-wijziging
+                             is een slug-wijziging — maar niet standaard, want ze duwen de acht
+                             rijen waar wél werk zit uit beeld. -->
+                        <div class="filter-row d-flex gap-3 align-items-center mb-3 flex-wrap">
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="checkbox" id="mvOnlyActionable"
+                                       checked onchange="renderMoved()">
+                                <label class="form-check-label" for="mvOnlyActionable">
+                                    Alleen met te repareren URL's
+                                </label>
+                            </div>
+                            <span class="note" id="mvScope"></span>
+                        </div>
+                        <div class="tool-table-wrap">
+                            <table class="table table-sm table-hover tool-table tbl-fit">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th class="col-center">URL's</th>
+                                        <th>Facet</th>
+                                        <th>Main categorie</th>
+                                        <th class="col-center">Locale</th>
+                                        <th>Slug</th>
+                                        <th>Gewijzigd</th>
+                                        <th>Door</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="mvBody">
+                                    <tr><td colspan="8" class="text-center text-muted py-3">Nog geen data.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="mvUnresolved" class="info-note roomy mt-3" style="display: none;"></div>
+                    </div>
+                </div>
+
                 <!-- ---------------- Events ---------------- -->
                 <div class="card mb-4">
                     <div class="card-header d-flex align-items-center gap-2">
@@ -316,6 +507,9 @@
                                 <option value="Facet Value Label">Facet Value Label</option>
                                 <option value="Category Facet">Category Facet</option>
                                 <option value="Category Facet Setting">Category Facet Setting</option>
+                                <!-- Sinds 2026-09-03 mee-geïngest (het was het grootste gat:
+                                     2.497 van de 3.789 overgeslagen events over 30 dagen). -->
+                                <option value="Facet Value Dependency">Facet Value Dependency</option>
                             </select>
                             <select class="form-select form-select-sm" id="evAction" onchange="loadEvents()" style="max-width: 150px;">
                                 <option value="">Alle acties</option>
@@ -364,11 +558,20 @@
     // ===================================================================
     const API = '/api/facet-watch';
 
-    let ovRows = [], fcRows = [], scopeCat = null, scopeName = null;
+    let ovRows = [], fcRows = [];
     let ovSort = { key: 'events', dir: -1 };
     let fcSort = { key: 'last_change', dir: -1 };
     let fcPage = 1;
     let pollTimer = null;
+
+    // Welke SOORT wijziging de facettabel toont, gezet door de tegels bovenaan.
+    // null = alles. Verving de categorie-scope die hier stond: die is nu een
+    // uitklaprij in "Per main categorie" (Joep, 2026-09-03).
+    let kindFilter = null;
+
+    // Nieuwe productlijnen / verhuisde facetten
+    let plRows = [], plSort = { key: 'priority_rank', dir: -1 }, plPage = 1;
+    let mvRows = [];
 
     function esc(s) {
         if (s === null || s === undefined) return '';
@@ -411,7 +614,8 @@
 
     // ---------------- load ----------------
     async function loadAll() {
-        await Promise.all([loadOverview(), loadFacets(), loadEvents(), loadStatus()]);
+        await Promise.all([loadOverview(), loadFacets(), loadEvents(), loadStatus(),
+                           loadProductLines(), loadMoved()]);
     }
 
     async function loadStatus() {
@@ -434,7 +638,7 @@
     async function loadOverview() {
         const d = await jget(`${API}/overview?days=${days()}&exclude_auto=${EXCLUDE_AUTO}`);
         ovRows = d.main_categories || [];
-        renderStats(d);
+        renderStats();
         renderOverview();
         const un = d.unattributed || [];
         const unEl = document.getElementById('unattributed');
@@ -448,21 +652,17 @@
             : '';
         const a = d.auto_excluded || {};
         document.getElementById('autoHint').textContent = a.events
-            ? `(${a.events.toLocaleString('nl-NL')} events op ${a.facets} facetten in deze periode)` : '';
+            ? ` (${a.events.toLocaleString('nl-NL')} events op ${a.facets} facetten in deze periode)` : '';
     }
 
     async function loadFacets() {
-        const q = scopeCat ? `&main_cat_id=${scopeCat}` : '';
-        fcRows = await jget(`${API}/facets?days=${days()}&limit=2000&exclude_auto=${EXCLUDE_AUTO}${q}`);
+        fcRows = await jget(`${API}/facets?days=${days()}&limit=2000&exclude_auto=${EXCLUDE_AUTO}`);
         fcPage = 1;
         renderFacets();
-        document.getElementById('facetScope').textContent = scopeCat
-            ? `gefilterd op ${scopeName}` : 'alle main categorieën';
     }
 
     async function loadEvents() {
         const p = new URLSearchParams({ days: days(), limit: 400 });
-        if (scopeCat) p.set('main_cat_id', scopeCat);
         const ent = document.getElementById('evEntity').value;
         const act = document.getElementById('evAction').value;
         const who = document.getElementById('evActor').value.trim();
@@ -499,22 +699,50 @@
     }
 
     // ---------------- render ----------------
-    function renderStats(d) {
+    // De vierde kolom zegt op welk facet-veld de tegel filtert. `null` = de tegel is
+    // een totaal en wijst geen deelverzameling aan, dus die blijft onklikbaar: een
+    // klik op "Events" zou de tabel niet veranderen en dat is erger dan geen klik.
+    const TILES = [
+        ['events',         'Events',             '',        null],
+        ['facets_touched', 'Facetten geraakt',   'info',    null],
+        ['facets_new',     'Nieuwe facetten',    'success', 'is_new_facet'],
+        ['facets_attached', 'Aangehangen',       'accent',  'newly_attached'],
+        ['values_added',   'Waarden toegevoegd', 'success', 'values_added'],
+        ['values_deleted', 'Waarden verwijderd', 'danger',  'values_deleted'],
+    ];
+
+    function renderStats() {
         const t = (k) => ovRows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
-        const tiles = [
-            ['events', 'Events', ''],
-            ['facets_touched', 'Facetten geraakt', 'info'],
-            ['facets_new', 'Nieuwe facetten', 'success'],
-            ['facets_attached', 'Aangehangen', 'accent'],
-            ['values_added', 'Waarden toegevoegd', 'success'],
-            ['values_deleted', 'Waarden verwijderd', 'danger'],
-        ];
-        document.getElementById('statRow').innerHTML = tiles.map(([k, label, cls]) =>
-            `<div class="col"><div class="stat-box ${cls}">
+        document.getElementById('statRow').innerHTML = TILES.map(([k, label, cls, field]) => {
+            const on = field && kindFilter === field;
+            return `<div class="col"><div class="stat-box ${cls}`
+                + `${field ? ' is-clickable' : ''}${on ? ' is-active' : ''}"`
+                + `${field ? ` onclick="setKindFilter('${field}')" title="Filter de facettabel op ${label.toLowerCase()}"` : ''}>
                 <div class="num">${t(k).toLocaleString('nl-NL')}</div>
                 <div class="label">${label}</div>
-             </div></div>`).join('');
+             </div></div>`;
+        }).join('');
     }
+
+    // ---------------- tegelfilter op de facettabel ----------------
+    const KIND_LABEL = {
+        is_new_facet: 'nieuwe facetten', newly_attached: 'aangehangen facetten',
+        values_added: 'facetten met nieuwe waarden', values_deleted: 'facetten met verwijderde waarden',
+    };
+
+    function setKindFilter(field) {
+        kindFilter = (kindFilter === field) ? null : field;
+        fcPage = 1;
+        renderStats();
+        renderFacets();
+        if (kindFilter) {
+            // Naar de tabel toe scrollen, want die staat een kaart lager en anders
+            // verandert er zichtbaar niets bij een klik bovenaan.
+            document.getElementById('fcBody').closest('.card')
+                .scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
+    function clearKindFilter() { kindFilter = null; fcPage = 1; renderStats(); renderFacets(); }
 
     function sortRows(rows, s) {
         return rows.slice().sort((a, b) => {
@@ -535,9 +763,9 @@
             return;
         }
         b.innerHTML = sortRows(ovRows, ovSort).map(r => `
-            <tr class="maincat-row ${scopeCat === r.main_cat_id ? 'selected' : ''}"
-                onclick="setScope(${r.main_cat_id}, '${esc(r.main_cat_name).replace(/'/g, "\\'")}')">
-                <td>${esc(r.main_cat_name)} <span class="facet-slug">${r.main_cat_id}</span></td>
+            <tr class="maincat-row" data-cat="${r.main_cat_id}"
+                data-name="${esc(r.main_cat_name)}">
+                <td><span class="fw-caret">▸</span>${esc(r.main_cat_name)} <span class="facet-slug">${r.main_cat_id}</span></td>
                 <td class="col-center">${r.events}</td>
                 <td class="col-center">${r.facets_touched}</td>
                 <td class="col-center">${r.facets_new ? `<span class="badge badge-new">${r.facets_new}</span>` : '0'}</td>
@@ -547,6 +775,77 @@
                 <td class="col-center">${r.updates}</td>
                 <td class="ts">${fmtTs(r.last_change)}</td>
             </tr>`).join('');
+        b.querySelectorAll('tr.maincat-row').forEach(tr => {
+            tr.onclick = () => toggleMaincatDetail(tr);
+        });
+    }
+
+    // ---------------- uitklaprij per main categorie ----------------
+    // Eén rij open tegelijk, zoals de Bot Hits-tabellen: de vraag is "wat gebeurde
+    // er in DEZE categorie", niet "vergelijk er tien", en met 32 categorieën open
+    // is de bovenliggende tabel niet meer te lezen.
+    function closeMaincatDetails() {
+        document.querySelectorAll('#ovBody tr.mc-detail').forEach(d => d.remove());
+        document.querySelectorAll('#ovBody tr.is-open').forEach(r => r.classList.remove('is-open'));
+    }
+
+    async function toggleMaincatDetail(tr) {
+        const wasOpen = tr.classList.contains('is-open');
+        closeMaincatDetails();
+        if (wasOpen) return;                      // dit was een klik om te sluiten
+
+        const catId = tr.dataset.cat, catName = tr.dataset.name;
+        tr.classList.add('is-open');
+        const det = document.createElement('tr');
+        det.className = 'mc-detail';
+        det.innerHTML = `<td colspan="9"><span class="spinner-border spinner-border-sm"></span>
+            <span class="note">Facetten van ${esc(catName)} laden…</span></td>`;
+        tr.after(det);
+
+        let rows;
+        try {
+            rows = await jget(`${API}/facets?days=${days()}&limit=500`
+                + `&exclude_auto=${EXCLUDE_AUTO}&main_cat_id=${encodeURIComponent(catId)}`);
+        } catch (e) {
+            det.querySelector('td').innerHTML =
+                `<span class="text-danger">Facetten laden mislukt: ${esc(e.message)}</span>`;
+            return;
+        }
+        // De rij kan inmiddels gesloten of hertekend zijn (sorteerklik).
+        if (!det.parentNode) return;
+        if (!rows.length) {
+            det.querySelector('td').innerHTML =
+                `<span class="note">Geen facetten in ${esc(catName)} in deze periode.</span>`;
+            return;
+        }
+        det.querySelector('td').innerHTML = `
+            <div class="note mb-2"><strong>${rows.length}</strong> ${rows.length === 1 ? 'facet' : 'facetten'}
+                 gewijzigd in ${esc(catName)} — nieuwste eerst</div>
+            <table>
+                <thead><tr>
+                    <th>Laatste wijziging</th><th>Facet</th>
+                    <th class="col-center">Events</th><th class="col-center">W +</th>
+                    <th class="col-center">W −</th><th class="col-center">Upd</th>
+                    <th>Door</th><th></th>
+                </tr></thead>
+                <tbody>${rows.map(r => {
+                    const badges = [];
+                    if (r.is_new_facet) badges.push('<span class="badge badge-new">nieuw facet</span>');
+                    if (r.newly_attached) badges.push('<span class="badge badge-attached">aangehangen</span>');
+                    if (r.is_auto) badges.push('<span class="badge badge-auto" title="Automatisch aangemaakt productlijn-facet">auto</span>');
+                    return `<tr>
+                        <td class="ts">${fmtTs(r.last_change)}</td>
+                        <td><strong>${esc(r.facet_name || '?')}</strong>
+                            <span class="facet-slug">${esc(r.facet_slug || '')} · ${r.facet_id}</span></td>
+                        <td class="col-center">${r.events}</td>
+                        <td class="col-center">${r.values_added}</td>
+                        <td class="col-center">${r.values_deleted}</td>
+                        <td class="col-center">${r.updates}</td>
+                        <td class="note">${esc((r.actors || []).filter(Boolean).join(', '))}</td>
+                        <td>${badges.join(' ')}</td>
+                    </tr>`;
+                }).join('')}</tbody>
+            </table>`;
     }
 
     function renderFacets() {
@@ -556,6 +855,13 @@
             || (r.facet_slug || '').toLowerCase().includes(q)
             || String(r.facet_id).includes(q)
             || (r.main_cat_name || '').toLowerCase().includes(q));
+        // Het tegelfilter. Voor de twee booleans is het de vlag zelf, voor de twee
+        // tellers "meer dan nul" — een tegel die 40 waarden meldt hoort de facetten
+        // te tonen waar die waarden vandaan komen.
+        if (kindFilter) rows = rows.filter(r => Number(r[kindFilter]) > 0 || r[kindFilter] === true);
+        document.getElementById('facetScope').textContent = kindFilter
+            ? `gefilterd op ${KIND_LABEL[kindFilter]}` : 'alle wijzigingen';
+        document.getElementById('clearKindBtn').style.display = kindFilter ? '' : 'none';
         rows = sortRows(rows, fcSort);
 
         const per = document.getElementById('perPage').value;
@@ -591,14 +897,236 @@
     }
     function changeFcPage(d) { fcPage += d; renderFacets(); }
 
-    function setScope(id, name) {
-        scopeCat = (scopeCat === id) ? null : id;
-        scopeName = scopeCat ? name : null;
-        renderOverview();
-        loadFacets();
-        loadEvents();
+    // ---------------- nieuwe productlijnen ----------------
+    // Prioriteitsbanden op maandelijks zoekvolume. De grenzen zijn rond en
+    // uitlegbaar, niet gefit: 1.000+ is een term waar een eigen pagina zich
+    // terugbetaalt, onder 10 is ruis. `null` is iets anders dan 0 — niet opgehaald
+    // versus opgehaald en niets — en dat moet de tabel apart laten zien, anders
+    // leest een lege kolom als "geen vraag".
+    const PRIO_BANDS = [
+        { min: 1000, key: 'hoog',   label: 'Hoog',   cls: 'badge-new' },
+        { min: 200,  key: 'midden', label: 'Midden', cls: 'badge-attached' },
+        { min: 10,   key: 'laag',   label: 'Laag',   cls: 'badge-auto' },
+        { min: 0,    key: 'geen',   label: 'Geen',   cls: 'badge-del' },
+    ];
+    function prioOf(vol) {
+        if (vol === null || vol === undefined) return { key: 'onbekend', label: 'Niet opgehaald', cls: 'badge-unknown', rank: -1 };
+        const b = PRIO_BANDS.find(x => vol >= x.min) || PRIO_BANDS[PRIO_BANDS.length - 1];
+        return { ...b, rank: PRIO_BANDS.length - PRIO_BANDS.indexOf(b) };
     }
-    function clearScope() { scopeCat = null; scopeName = null; renderOverview(); loadFacets(); loadEvents(); }
+
+    async function loadProductLines() {
+        let d;
+        try {
+            d = await jget(`${API}/product-lines?days=${days()}&limit=2000`);
+        } catch (e) {
+            document.getElementById('plBody').innerHTML =
+                `<tr><td colspan="7" class="text-center text-danger py-3">${esc(e.message)}</td></tr>`;
+            return;
+        }
+        // De sorteer- en filtervelden vooraf platslaan: `sortRows` vergelijkt losse
+        // waarden en kan niet in een array kijken.
+        plRows = (d.product_lines || []).map(r => ({
+            ...r,
+            n_cats: (r.main_cat_names || []).length,
+            priority_rank: prioOf(r.search_volume).rank,
+        }));
+        const nb = d.new_brand_facets || {};
+        document.getElementById('plScope').textContent =
+            `${plRows.length.toLocaleString('nl-NL')} productlijnen · `
+            + `${(nb.brands || 0)} merken kregen een productlijn-facet · `
+            + `${(d.without_volume || 0).toLocaleString('nl-NL')} nog zonder zoekvolume`;
+        plPage = 1;
+        renderProductLines();
+    }
+
+    function plFiltered() {
+        const q = document.getElementById('plFilter').value.toLowerCase();
+        const prio = document.getElementById('plPrio').value;
+        return plRows.filter(r => {
+            if (q && !(`${r.brand || ''} ${r.product_line || ''}`.toLowerCase().includes(q)
+                       || (r.main_cat_names || []).join(' ').toLowerCase().includes(q))) return false;
+            const v = r.search_volume;
+            if (prio === 'known') return v !== null && v !== undefined;
+            if (prio === 'hoog') return v >= 1000;
+            if (prio === 'midden') return v >= 200;
+            return true;
+        });
+    }
+
+    function renderProductLines() {
+        let rows = sortRows(plFiltered(), plSort);
+        const per = document.getElementById('plPerPage').value;
+        const size = per === 'all' ? rows.length || 1 : parseInt(per, 10);
+        const pages = Math.max(1, Math.ceil(rows.length / size));
+        if (plPage > pages) plPage = pages;
+        const page = rows.slice((plPage - 1) * size, plPage * size);
+
+        document.getElementById('plBody').innerHTML = page.length ? page.map(r => {
+            const p = prioOf(r.search_volume);
+            const cats = (r.main_cat_names || []);
+            // Bij veel categorieën alleen de eerste twee tonen met het aantal erbij:
+            // een productlijn-facet hangt aan 21 maincats en die lijst duwt elke
+            // andere kolom uit beeld. De volledige lijst zit in de title.
+            const catCell = cats.length > 2
+                ? `${esc(cats.slice(0, 2).join(', '))} <span class="facet-slug">+${cats.length - 2}</span>`
+                : esc(cats.join(', ')) || '<span class="facet-slug">—</span>';
+            return `<tr>
+                <td><span class="badge ${p.cls}">${p.label}</span></td>
+                <td class="col-center">${r.search_volume === null || r.search_volume === undefined
+                    ? '<span class="facet-slug">—</span>'
+                    : r.search_volume.toLocaleString('nl-NL')}</td>
+                <td>${esc(r.brand || '') || '<span class="facet-slug">geen merk</span>'}</td>
+                <td><strong>${esc(r.product_line || '?')}</strong>
+                    <span class="facet-slug">${esc(r.keyword || '')}</span></td>
+                <td title="${esc(cats.join(', '))}">${catCell}</td>
+                <td class="col-center">${r.incarnations}</td>
+                <td class="ts">${fmtTs(r.first_seen)}</td>
+            </tr>`;
+        }).join('') : '<tr><td colspan="7" class="text-center text-muted py-3">Geen productlijnen.</td></tr>';
+
+        document.getElementById('plPageInfo').textContent =
+            `${rows.length ? (plPage - 1) * size + 1 : 0}–${Math.min(plPage * size, rows.length)} van ${rows.length}`;
+        document.getElementById('plPrev').disabled = plPage <= 1;
+        document.getElementById('plNext').disabled = plPage >= pages;
+    }
+    function sortPl(k) { plSort = { key: k, dir: plSort.key === k ? -plSort.dir : -1 }; renderProductLines(); }
+    function changePlPage(d) { plPage += d; renderProductLines(); }
+
+    async function loadVolumes() {
+        const btn = document.getElementById('volBtn');
+        const scope = document.getElementById('plScope');
+        const before = scope.textContent;
+        btn.disabled = true;
+        scope.textContent = 'Zoekvolume ophalen bij de Keyword Planner…';
+        try {
+            const r = await fetch(`${API}/product-lines/volumes?days=${days()}&limit=2000`,
+                                  { method: 'POST' });
+            const d = await r.json();
+            if (!r.ok || d.success === false) {
+                // textContent, dus geen esc(): dat zou &amp; en &#39; letterlijk in de
+                // melding zetten. De browser escapet hier zelf.
+                scope.textContent = 'Zoekvolume ophalen mislukt: '
+                    + (d.detail || d.message || `HTTP ${r.status}`);
+                return;
+            }
+            if (!d.fetched) { scope.textContent = d.message || before; return; }
+            await loadProductLines();
+        } catch (e) {
+            scope.textContent = 'Zoekvolume ophalen mislukt: ' + e.message;
+        } finally { btn.disabled = false; }
+    }
+
+    function exportProductLines() {
+        const cols = ['brand', 'product_line', 'keyword', 'search_volume', 'n_cats',
+                      'main_cat_names', 'incarnations', 'value_ids', 'first_seen', 'last_seen', 'actors'];
+        downloadCsv(cols, sortRows(plFiltered(), plSort), `nieuwe-productlijnen-${days()}d.csv`);
+    }
+
+    // ---------------- verhuisde facetten ----------------
+    async function loadMoved() {
+        let d;
+        try {
+            d = await jget(`${API}/moved-facets?days=${days()}`);
+        } catch (e) {
+            document.getElementById('mvBody').innerHTML =
+                `<tr><td colspan="9" class="text-center text-danger py-3">${esc(e.message)}</td></tr>`;
+            return;
+        }
+        mvRows = d.moved || [];
+        renderMoved();
+
+        // Wat NIET is toe te wijzen hoort erbij te staan, niet weggelaten: een facet
+        // waarvan de locale niet te bepalen is heeft misschien juist wél een redirect
+        // nodig, en dat moet iemand met de hand kunnen nakijken.
+        const un = d.unresolved || [];
+        const unEl = document.getElementById('mvUnresolved');
+        unEl.style.display = un.length ? '' : 'none';
+        unEl.innerHTML = un.length
+            ? '<strong>Niet eenduidig toe te wijzen:</strong><br>'
+              + un.map(u => `Facet ${u.facet_id} (${esc(u.facet_name || '?')})`
+                  + `${u.locale ? ' · ' + esc(u.locale) : ''} — ${esc(u.reason)}`).join('<br>')
+            : '';
+    }
+
+    function renderMoved() {
+        const onlyAct = document.getElementById('mvOnlyActionable').checked;
+        // "Te repareren" = er staan URL's op de oude slug EN de locale is een domein
+        // dat de Redirect API bedient. Beide voorwaarden, want een van de twee
+        // levert een rij waar de knop toch niets kan doen.
+        const rows = mvRows.filter(r => !onlyAct || (r.affected_urls && r.redirect_country));
+        const totalUrls = rows.reduce((a, r) => a + (r.affected_urls || 0), 0);
+        document.getElementById('mvScope').textContent =
+            `${rows.length} van ${mvRows.length} slug-wijzigingen`
+            + (totalUrls ? ` · ${totalUrls.toLocaleString('nl-NL')} URL's te repareren` : '');
+
+        document.getElementById('mvBody').innerHTML = rows.length ? rows.map(r => {
+            const pushable = !!r.redirect_country;
+            // Het index-argument komt uit mvRows en niet uit de gefilterde lijst:
+            // pushRedirects leest mvRows[i], en die twee lopen uiteen zodra het
+            // filter aan staat.
+            const i = mvRows.indexOf(r);
+            return `<tr>
+                <td class="col-center">${r.affected_urls === null ? '?'
+                    : r.affected_urls.toLocaleString('nl-NL')}</td>
+                <td><strong>${esc(r.facet_name || '?')}</strong>
+                    <span class="facet-slug">${r.facet_id}</span></td>
+                <td class="note">${esc((r.main_cat_names || []).join(', '))}</td>
+                <td class="col-center"><span class="badge ${pushable ? 'badge-attached' : 'badge-unknown'}"
+                    ${pushable ? '' : 'title="pa.urls houdt de NL-paden en de Redirect API bedient dit domein niet"'}>${esc(r.locale)}</span></td>
+                <td class="nowrap"><code>${esc(r.old_slug)}</code><br>
+                    <span class="facet-slug">→</span> <code>${esc(r.new_slug)}</code></td>
+                <td class="ts">${fmtTs(r.last_change)}</td>
+                <td class="note">${esc((r.actors || []).join(', '))}</td>
+                <td class="nowrap">${pushable && r.affected_urls
+                    ? `<button class="btn btn-sm btn-run" onclick="pushRedirects(${i})"
+                               title="Bouw de oude → nieuwe URL-paren en zet ze in de Redirect Tool">
+                         → Redirect Tool</button>`
+                    : ''}</td>
+            </tr>`;
+        }).join('') : `<tr><td colspan="8" class="text-center text-muted py-3">${
+            mvRows.length ? "Geen wijzigingen met te repareren URL's — haal het vinkje weg voor alle "
+                            + mvRows.length + ' slug-wijzigingen.'
+                          : 'Geen slug-wijzigingen in deze periode.'}</td></tr>`;
+    }
+
+    // De handoff naar de Redirect Tool loopt via sessionStorage en niet via de URL:
+    // een lijst van duizenden URL-paren past niet in een query string (en zou in
+    // serverlogs belanden). De Redirect Tool leest de sleutel één keer en gooit hem
+    // weg, zodat een refresh daar geen oude selectie terugzet.
+    async function pushRedirects(i) {
+        const r = mvRows[i];
+        if (!r) return;
+        const btn = event && event.currentTarget;
+        if (btn) { btn.disabled = true; btn.textContent = 'Bouwen…'; }
+        try {
+            const p = new URLSearchParams({ facet_id: r.facet_id, old_slug: r.old_slug,
+                                            new_slug: r.new_slug, limit: 20000 });
+            const d = await jget(`${API}/moved-facets/redirects?${p}`);
+            if (!d.pairs || !d.pairs.length) {
+                alert(d.note || 'Geen URL-paren gevonden voor deze wijziging.');
+                return;
+            }
+            const trunc = d.truncated ? `\n\nLet op: afgekapt op ${d.pairs.length} paren.` : '';
+            const ok = confirm(
+                `${d.pairs.length.toLocaleString('nl-NL')} redirects voor `
+                + `${r.facet_name} (${r.old_slug} → ${r.new_slug}), land ${r.redirect_country}.\n\n`
+                + `Voorbeeld:\n${d.pairs[0].old}\n  → ${d.pairs[0].new}\n\n`
+                + `In de Redirect Tool zetten? Daar controleer je ze en dien je ze zelf in.${trunc}`);
+            if (!ok) return;
+            sessionStorage.setItem('redirectToolPrefill', JSON.stringify({
+                source: 'Facet Watch',
+                note: `${r.facet_name} (facet ${r.facet_id}) · ${r.old_slug} → ${r.new_slug} · ${r.locale}`,
+                country: r.redirect_country,
+                rows: d.pairs,
+            }));
+            window.open('/static/redirect-tool.html?prefill=facet-watch', '_blank');
+        } catch (e) {
+            alert('Redirects bouwen mislukt: ' + e.message);
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '→ Redirect Tool'; }
+        }
+    }
 
     // ---------------- ingest ----------------
     async function runIngest() {
@@ -654,12 +1182,12 @@
     }
 
     // ---------------- export ----------------
-    function exportCsv() {
-        const cols = ['last_change', 'facet_id', 'facet_name', 'facet_slug', 'main_cat_name',
-                      'events', 'values_added', 'values_deleted', 'updates',
-                      'is_new_facet', 'newly_attached', 'is_auto', 'actors'];
+    // Eén downloader voor beide tabellen. Stond alleen in exportCsv; de
+    // productlijnen-module heeft precies dezelfde semikolon+BOM-vorm nodig, en die
+    // twee keer neerzetten is twee plekken waar de BOM kan wegvallen.
+    function downloadCsv(cols, rows, filename) {
         const head = cols.join(';');
-        const body = sortRows(fcRows, fcSort).map(r => cols.map(c => {
+        const body = rows.map(r => cols.map(c => {
             let v = r[c];
             if (Array.isArray(v)) v = v.filter(Boolean).join(', ');
             if (v === null || v === undefined) v = '';
@@ -670,9 +1198,16 @@
         const blob = new Blob(['﻿' + head + '\n' + body], { type: 'text/csv;charset=utf-8;' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = `facet-watch-${days()}d.csv`;
+        a.download = filename;
         a.click();
         URL.revokeObjectURL(a.href);
+    }
+
+    function exportCsv() {
+        const cols = ['last_change', 'facet_id', 'facet_name', 'facet_slug', 'main_cat_name',
+                      'events', 'values_added', 'values_deleted', 'updates',
+                      'is_new_facet', 'newly_attached', 'is_auto', 'actors'];
+        downloadCsv(cols, sortRows(fcRows, fcSort), `facet-watch-${days()}d.csv`);
     }
 
     document.addEventListener('DOMContentLoaded', loadAll);

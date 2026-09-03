@@ -100,6 +100,70 @@ async def stop():
     return fw.stop_run()
 
 
+@router.get("/product-lines")
+async def product_lines(days: int = Query(30, ge=1, le=365),
+                        limit: int = Query(500, ge=1, le=5000)):
+    """Nieuwe productlijnen — facetwaarden uit de productlijn-familie, ontdubbeld op
+    (merk, naam), met de main categorieën en het gecachte zoekvolume."""
+    try:
+        return fw.get_product_lines(days, limit)
+    except Exception as e:
+        logger.exception("facet-watch product-lines failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/product-lines/volumes")
+async def product_line_volumes(days: int = Query(30, ge=1, le=365),
+                               limit: int = Query(500, ge=1, le=5000),
+                               only_missing: bool = Query(True)):
+    """Zoekvolume ophalen bij de Keyword Planner voor de productlijnen in dit
+    venster, en cachen. Blokkeert: ~1 call per 500 termen.
+
+    De zoektermen komen uit `get_product_lines` zelf en worden hier niet opnieuw
+    samengesteld — anders kan de term die wordt OPGEHAALD afwijken van de term
+    waarop de tabel zijn cache JOINt, en blijft de kolom leeg terwijl het volume
+    wel is opgehaald.
+    """
+    try:
+        rows = fw.get_product_lines(days, limit).get("product_lines", [])
+        kws = [r["keyword"] for r in rows
+               if r.get("keyword") and (not only_missing or r.get("search_volume") is None)]
+        if not kws:
+            return {"success": True, "requested": 0, "fetched": 0,
+                    "message": "Alle productlijnen in dit venster hebben al een zoekvolume."}
+        res = fw.fetch_product_line_volumes(kws)
+        return {"success": True, **res}
+    except Exception as e:
+        logger.exception("facet-watch product-line volumes failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/moved-facets")
+async def moved_facets(days: int = Query(30, ge=1, le=365),
+                       with_url_counts: bool = Query(True)):
+    """Verhuisde facetten — facetten waarvan de URL-slug veranderde, per locale,
+    met het aantal bestaande URL's dat daardoor van adres wisselt."""
+    try:
+        return fw.get_moved_facets(days, with_url_counts)
+    except Exception as e:
+        logger.exception("facet-watch moved-facets failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/moved-facets/redirects")
+async def moved_facet_redirects(facet_id: int,
+                                old_slug: str,
+                                new_slug: str,
+                                limit: int = Query(5000, ge=1, le=50000)):
+    """De concrete oude -> nieuwe URL-paren voor één slug-wijziging, klaar om in de
+    Redirect Tool te zetten."""
+    try:
+        return fw.build_moved_facet_redirects(facet_id, old_slug, new_slug, limit)
+    except Exception as e:
+        logger.exception("facet-watch moved-facet redirects failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/seed-values")
 async def seed_values():
     """One-off (or occasional) refresh of the value -> facet cache from the full

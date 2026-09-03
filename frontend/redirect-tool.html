@@ -1538,6 +1538,51 @@
             el.textContent = `${p2(d.getDate())}-${p2(d.getMonth() + 1)}-${d.getFullYear()}`;
         })();
 
+        // ---- Handoff vanuit een andere tool (Facet Watch, 2026-09-03) ------------
+        // Een andere pagina zet `redirectToolPrefill` in sessionStorage en opent deze
+        // met `?prefill=<bron>`. Via sessionStorage en niet via de query string: het
+        // gaat om duizenden URL-paren, die passen daar niet in en zouden in
+        // serverlogs terechtkomen.
+        //
+        // De sleutel wordt METEEN gewist. Anders zet een refresh (of een tweede tab)
+        // dezelfde lijst opnieuw in het veld, en dan staat er een selectie die de
+        // gebruiker niet zelf heeft aangevraagd.
+        //
+        // Het vult alleen het invoerveld — parsen, previewen en indienen blijven
+        // handmatig. Deze tool schrijft naar de live redirect-API, en dat hoort geen
+        // gevolg van een klik in een ándere tool te zijn.
+        (() => {
+            const src = new URLSearchParams(location.search).get('prefill');
+            if (!src) return;
+            let payload;
+            try {
+                const raw = sessionStorage.getItem('redirectToolPrefill');
+                sessionStorage.removeItem('redirectToolPrefill');
+                if (!raw) return;
+                payload = JSON.parse(raw);
+            } catch (e) { return; }
+            const rows = (payload && payload.rows) || [];
+            if (!rows.length) return;
+
+            // De backend vult statuscode/land/label zelf in bij een paste van twee
+            // kolommen (_apply_manual_defaults), MAAR de default is NL+BE. Een
+            // slug-wijziging op één locale mag niet op beide domeinen landen, dus
+            // zodra de bron een land meegeeft komt er een header + landkolom mee.
+            const country = payload.country;
+            const text = country
+                ? 'old;new;country\n' + rows.map(r => `${r.old};${r.new};${country}`).join('\n')
+                : rows.map(r => `${r.old};${r.new}`).join('\n');
+
+            document.getElementById('srcManual').checked = true;
+            applyInputMode();
+            document.getElementById('textInput').value = text;
+            document.getElementById('parseStatus').textContent =
+                `${rows.length.toLocaleString('nl-NL')} redirects uit ${payload.source || src}`
+                + (payload.note ? ` — ${payload.note}` : '')
+                + (country ? ` · land ${country}` : '')
+                + '. Controleer ze en druk op Preview.';
+        })();
+
         wirePreviewInteractions();
         loadRuns();
     </script>

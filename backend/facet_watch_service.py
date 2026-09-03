@@ -186,6 +186,18 @@ CREATE TABLE IF NOT EXISTS pa.facet_watch_runs (
     status       TEXT DEFAULT 'running',
     message      TEXT
 );
+
+-- Zoekvolume per productlijn-naam, uit de Keyword Planner. Een eigen tabel en niet
+-- een kolom op de events: één naam komt in tientallen events terug (dezelfde
+-- productlijn wordt per maincat opnieuw als waarde aangemaakt), en het volume hoort
+-- bij de NAAM, niet bij de mutatie. `fetched_at` maakt het verversbaar zonder de
+-- Google-quota bij elke pageload aan te tikken -- de module leest de cache en haalt
+-- alleen op wat de gebruiker expliciet vraagt.
+CREATE TABLE IF NOT EXISTS pa.facet_watch_keyword_volume (
+    keyword       TEXT PRIMARY KEY,
+    search_volume INTEGER,
+    fetched_at    TIMESTAMP NOT NULL DEFAULT now()
+);
 """
 
 
@@ -1156,3 +1168,462 @@ def get_main_categories():
     finally:
         cur.close()
         return_db_connection(conn)
+
+
+# ---------------------------------------------------------------------------
+# Nieuwe productlijnen
+# ---------------------------------------------------------------------------
+# De naam van een facetwaarde staat NIET in de `Facet Value` INSERT -- die draagt
+# alleen {FacetId, CreatedAt, SeoPriority, InvalidReason}. De naam zit in de
+# `Facet Value Label` INSERT die er direct achteraan komt, als
+# `changes->>'NameInColumn'`. Gemeten over de hele store: 42.943 label-inserts tegen
+# 41.782 value-inserts, en voor de 20 verse "Productlijnen: Sage"-waarden was
+# `value_name` leeg terwijl het label "Sage the Barista Pro" wél vastlag. Daarom is
+# het label-event de primaire naambron en zijn `value_name` / de value-cache alleen
+# fallback -- omgekeerd (cache eerst) miste elke waarde die na de laatste seed kwam.
+_PL_NAME = ("COALESCE(v.label_name, v.ev_name, vf.value_name)")
+
+# Zelfde familie-definitie als _AUTO_SQL hierboven, maar hier is de familie het
+# ONDERWERP in plaats van ruis: dit is de enige module die er bewust naar kijkt.
+_PL_FAMILY_SQL = ("(fm.facet_name = 'Productlijn'"
+                  " OR fm.facet_name LIKE 'Productlijnen:%%')")
+
+
+def get_product_lines(days=30, limit=500):
+    """Nieuwe productlijnen: facetwaarden die in de productlijn-familie zijn
+    aangemaakt, met hun merk, de main categorieën waar ze opduiken en -- als het
+    is opgehaald -- het maandelijkse zoekvolume van de naam.
+
+    Ontdubbeld op (merk, naam). ListsApi maakt hetzelfde productlijn-facet
+    herhaaldelijk opnieuw aan onder dezelfde naam met een NIEUW facet-id en nieuwe
+    waarde-ids: "Productlijnen: Kärcher" staat 9× in de store, elke keer met
+    dezelfde 10 waarden. Zonder ontdubbelen leest de module als 90 nieuwe
+    productlijnen waar er 10 zijn. `incarnations` houdt bij hoe vaak het langskwam,
+    zodat het niet stil verdwijnt.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(f"""
+            WITH pl AS (
+                SELECT fm.facet_id, fm.facet_name, fm.main_cat_ids
+                FROM pa.facet_watch_facet_maincat fm
+                WHERE {_PL_FAMILY_SQL}
+            ),
+            -- Eén rij per (waarde, facet): de value-insert en zijn label-insert
+            -- dragen samen het feit "deze waarde is hier nieuw" plus de naam.
+            v AS (
+                SELECT e.facet_value_id, e.facet_id,
+                       min(e.ts_utc)                             AS first_seen,
+                       max(e.ts_utc)                             AS last_seen,
+                       max(e.changes->>'NameInColumn')           AS label_name,
+                       max(e.value_name)                         AS ev_name,
+                       bool_or(e.entity_name = 'Facet Value')    AS has_value_row,
+                       max(e.actor)                              AS actor
+                FROM pa.facet_watch_events e
+                WHERE e.ts_utc > now() - (%s || ' days')::interval
+                  AND e.action = 'INSERT'
+                  AND e.entity_name IN ('Facet Value', 'Facet Value Label')
+                  AND e.facet_value_id IS NOT NULL
+                  AND e.facet_id IN (SELECT facet_id FROM pl)
+                GROUP BY 1, 2
+            ),
+            named AS (
+                SELECT v.*, pl.facet_name,
+                       {_PL_NAME} AS product_line,
+                       -- Merk uit de facetnaam: "Productlijnen: Kärcher" -> Kärcher.
+                       -- Het generieke per-maincat facet heet gewoon "Productlijn"
+                       -- en draagt geen merk; dat blijft NULL in plaats van dat we
+                       -- er een merk bij verzinnen.
+                       CASE WHEN pl.facet_name LIKE 'Productlijnen: %%'
+                            THEN substring(pl.facet_name from 16)
+                       END AS brand,
+                       -- Hier al platgeslagen naar één rij per maincat: het facet
+                       -- hangt aan een reeks main categorieën en de module wil ze
+                       -- per productlijn samengevoegd zien. count(DISTINCT ...)
+                       -- hieronder is ongevoelig voor de duplicatie die dat geeft.
+                       mc.main_cat_id
+                FROM v
+                JOIN pl ON pl.facet_id = v.facet_id
+                LEFT JOIN pa.facet_watch_value_facet vf ON vf.value_id = v.facet_value_id
+                LEFT JOIN LATERAL unnest(pl.main_cat_ids) AS mc(main_cat_id) ON true
+            ),
+            -- De zoekterm is MERK + LIJN, niet de lijnnaam alleen. Gemeten
+            -- 03-09-2026: "tasman" is als los woord niets, "ugg tasman" doet
+            -- 18.100/mnd. Een lijnnaam die het merk al vooraan draagt ("Sage the
+            -- Barista Pro") krijgt het er niet nog eens bij.
+            kw AS (
+                SELECT n.*,
+                       lower(CASE
+                         WHEN n.brand IS NOT NULL
+                              AND lower(n.product_line) NOT LIKE lower(n.brand) || '%%'
+                         THEN n.brand || ' ' || n.product_line
+                         ELSE n.product_line
+                       END) AS keyword
+                FROM named n
+            )
+            SELECT n.brand,
+                   min(n.product_line)                        AS product_line,
+                   min(n.keyword)                             AS keyword,
+                   count(DISTINCT n.facet_id)                 AS incarnations,
+                   count(DISTINCT n.facet_value_id)           AS value_ids,
+                   min(n.first_seen)                          AS first_seen,
+                   max(n.last_seen)                           AS last_seen,
+                   array_agg(DISTINCT n.facet_id)             AS facet_ids,
+                   array_remove(array_agg(DISTINCT m.name), NULL) AS main_cat_names,
+                   array_remove(array_agg(DISTINCT n.actor), NULL) AS actors,
+                   max(kv.search_volume)                      AS search_volume,
+                   max(kv.fetched_at)                         AS volume_fetched_at
+            FROM kw n
+            LEFT JOIN pa.facet_watch_maincats m ON m.main_cat_id = n.main_cat_id
+            LEFT JOIN pa.facet_watch_keyword_volume kv ON kv.keyword = n.keyword
+            WHERE n.product_line IS NOT NULL AND n.product_line <> ''
+            GROUP BY n.brand, lower(n.product_line)
+            ORDER BY max(kv.search_volume) DESC NULLS LAST, min(n.first_seen) DESC
+            LIMIT %s
+        """, (days, limit))
+        rows = [dict(r) for r in cur.fetchall()]
+
+        # Nieuwe MERKEN in de familie: een "Productlijnen: X"-facet dat er nog niet
+        # was. Dat is een ander feit dan een nieuwe lijn eronder -- het zegt dat een
+        # merk voor het eerst productlijnen krijgt -- en hoort daarom apart geteld.
+        cur.execute(f"""
+            SELECT count(DISTINCT fm.facet_name) AS brands,
+                   count(*)                      AS facet_inserts
+            FROM pa.facet_watch_events e
+            JOIN pa.facet_watch_facet_maincat fm ON fm.facet_id = e.facet_id
+            WHERE e.ts_utc > now() - (%s || ' days')::interval
+              AND e.entity_name = 'Facet' AND e.action = 'INSERT'
+              AND {_PL_FAMILY_SQL}
+        """, (days,))
+        new_brands = dict(cur.fetchone() or {})
+
+        missing = sum(1 for r in rows if r.get("search_volume") is None)
+        return {"product_lines": rows, "new_brand_facets": new_brands,
+                "without_volume": missing, "days": days}
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def fetch_product_line_volumes(names, chunk=500):
+    """Zoekvolume ophalen voor productlijn-namen en cachen.
+
+    Chunks van 500 en niet de 10.000 die `keyword_planner_service.BATCH_SIZE`
+    toestaat: de Keyword Planner laat in grote batches stil rijen weg (zie memory
+    keyword_planner_large_batch_drops_rows), en een ontbrekende rij is hier niet te
+    onderscheiden van "0 zoekvolume". Wat na een chunk niet terugkwam gaat één keer
+    apart opnieuw mee; blijft het dan weg, dan wordt het als 0 gecached en zegt de
+    UI erbij wanneer het gemeten is.
+    """
+    from backend.keyword_planner_service import get_search_volumes
+
+    wanted = sorted({(n or "").strip().lower() for n in names if (n or "").strip()})
+    if not wanted:
+        return {"requested": 0, "fetched": 0, "cached": 0}
+
+    got = {}
+    for i in range(0, len(wanted), chunk):
+        batch = wanted[i:i + chunk]
+        res = get_search_volumes(batch) or {}
+        for r in res.get("results", []):
+            key = (r.get("original_keyword") or "").strip().lower()
+            if key:
+                got[key] = int(r.get("search_volume") or 0)
+        # Retry alleen wat NIET terugkwam -- niet wat 0 teruggaf.
+        missing = [k for k in batch if k not in got]
+        if missing:
+            res2 = get_search_volumes(missing) or {}
+            for r in res2.get("results", []):
+                key = (r.get("original_keyword") or "").strip().lower()
+                if key:
+                    got[key] = int(r.get("search_volume") or 0)
+            for k in missing:
+                got.setdefault(k, 0)
+
+    rows = [(k, v) for k, v in got.items()]
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        execute_values(cur, """
+            INSERT INTO pa.facet_watch_keyword_volume (keyword, search_volume)
+            VALUES %s
+            ON CONFLICT (keyword) DO UPDATE
+              SET search_volume = EXCLUDED.search_volume, fetched_at = now()
+        """, rows)
+        conn.commit()
+    finally:
+        cur.close()
+        return_db_connection(conn)
+    return {"requested": len(wanted), "fetched": len(rows),
+            "with_volume": sum(1 for _, v in rows if v > 0)}
+
+
+# ---------------------------------------------------------------------------
+# Verhuisde facetten (slug-wijzigingen)
+# ---------------------------------------------------------------------------
+# Wat "verhuisd" hier betekent, en waarom het NIET op naam matcht
+# ------------------------------------------------------------------------
+# De eerste lezing van "verwijderd op de ene plek, onder dezelfde naam terug op een
+# andere" was een DELETE/INSERT-paar op naam. Dat is in deze store niet te bouwen en
+# zou ook het verkeerde meten:
+#
+#   * Er staat GEEN ENKEL `Facet` DELETE of `Category Facet` DELETE in de store
+#     (14 entity/action-combinaties, 103k events) -- een facet wordt nooit als
+#     verwijderd gelogd, dus de "verwijderd"-helft van het paar bestaat niet.
+#   * 12.758 van de 13.113 `Facet Value` DELETEs dragen geen naam; via de
+#     value-cache is er 1.164 te herstellen, dus ~91% blijft naamloos.
+#   * Wat een naam-match dan wél oplevert is ruis: 1.493 paren over 206 namen, en
+#     dat zijn vrijwel allemaal MERK-waarden die tussen de 32 per-maincat
+#     `Merk`-facetten schuiven ("acelera" weg bij Merk-Speelgoed, aan bij
+#     Merk-Kleding). Dat is een merk dat producten verliest in de ene maincat en
+#     wint in de andere -- twee losse pagina's in twee categorieën, geen verhuizing,
+#     en een redirect ertussen zou een bezoeker naar een andere categorie sturen.
+#
+# Wat er WEL is, en wat exact hetzelfde probleem oplost: `Facet Label` UPDATE met
+# `UrlSlug` in de changed_fields, dat Old EN New meelevert. De facet-slug staat
+# letterlijk in de URL (`/products/<pad>/c/<slug>~<value-id>`), dus een slug-
+# wijziging is precies "dezelfde pagina, nieuwe plek" -- met beide kanten hard
+# geregistreerd in plaats van geraden.
+#
+# Waarom dat écht een redirect nodig heeft (gemeten 03-09-2026): de site vangt de
+# oude slug wel op, maar 301't naar de KALE categorie en gooit het facet weg:
+#   beslist.be/products/meubilair/meubilair_389370/c/stijl_test~393710
+#     -> 301 -> beslist.be/products/meubilair/meubilair_389370/
+# terwijl .../c/woonstijl~393710 200 geeft. De bezoeker verliest zijn filter.
+#
+# Twee valkuilen die de implementatie hieronder afdekt:
+#
+# 1. EEN SLUG IS NIET UNIEK OVER FACETTEN. `type` komt in 1.313 pa.urls-rijen voor,
+#    verdeeld over meerdere facetten. Van facet 4501, dat `type` -> `format`
+#    hernoemde, hoort daar 0 van bij. Daarom wordt de URL-set niet op de slug
+#    gekozen maar op de VALUE-IDS van dat facet (pa.facet_watch_value_facet):
+#    `/<slug>~<value-id>` met een value-id dat aantoonbaar in dit facet zit.
+#    Ongefilterd zou een `type`-hernoeming 1.313 vreemde URL's hebben omgeleid.
+#
+# 2. DE LOCALE STAAT NIET IN HET EVENT. Elk label-event is per locale, maar de
+#    payload draagt alleen Name/UrlSlug. De vier locales zijn alleen te scheiden
+#    door de HUIDIGE slugs live op te halen (`GET /api/Facets/{id}`) en de keten
+#    terug te lopen. Dat is geen detail: de wijzigingen van augustus landden op
+#    nl-BE, niet op nl-NL -- facet 2931 heeft nl-NL `stijl_test` (nog steeds 200 op
+#    beslist.nl) en nl-BE `woonstijl`. Wie de locale negeert zet een redirect op
+#    .nl die de goede pagina wegduwt. Terugwaarts lopen vangt ook de flip-flops:
+#    facet 2952 ging `opties` -> `met_matras_bed` -> `opties`, netto niets, en dat
+#    hoort er niet als verhuizing in te staan.
+_REDIRECT_COUNTRY = {"nl-NL": "NL", "nl-BE": "BE"}
+
+
+def _facet_locale_slugs(facet_id):
+    """locale -> huidige urlSlug, live. Geen cache: `facet_watch_facet_maincat`
+    bewaart alleen de nl-NL-slug, en juist het onderscheid tussen de locales is
+    hier de vraag."""
+    try:
+        f = _get(f"/api/Facets/{facet_id}")
+    except requests.RequestException:
+        return {}
+    out = {}
+    for l in f.get("labels") or []:
+        loc, slug = l.get("locale"), _clean(l.get("urlSlug"))
+        if loc and slug:
+            out[loc] = slug
+    return out
+
+
+def _resolve_slug_move(events, final_slug):
+    """Welke wijziging bracht deze locale op `final_slug`?
+
+    Geeft `(old_slug, [events], None)`, of `(None, [], reden)` als het niet
+    eenduidig is.
+
+    Eén hop, met opzet. Een keten terugwandelen (`new` van de vorige stap is de
+    `old` van de volgende) lijkt completer, maar de events dragen GEEN locale en de
+    vier locales van een facet delen hun slugs: facet 2952 heeft nl-NL
+    `opties -> met_matras_bed` en nl-BE `met_matras_bed -> opties`. Een wandeling
+    pakt dan de wijziging van de ándere locale als volgende stap, en levert een
+    redirect op die een werkende pagina wegduwt. Bij één hop kan dat niet: we
+    vragen alleen wie op de huidige slug is uitgekomen.
+
+    Meerdere kandidaten met een verschillende `old` (facet 4501 en-US: zowel
+    `t_papier -> format` als `type -> format`) zijn niet te scheiden en worden
+    gemeld in plaats van gekozen. Exacte duplicaten -- de audit log logt een
+    wijziging soms twee keer -- geven hetzelfde antwoord en zijn dus geen conflict.
+    """
+    cands = [e for e in events if e["new"] == final_slug]
+    if not cands:
+        return None, [], None                       # deze locale is niet gewijzigd
+    olds = {e["old"] for e in cands}
+    if len(olds) > 1:
+        return None, [], ("meerdere wijzigingen komen uit op '%s' (%s) — welke bij "
+                          "deze locale hoort is niet uit het event te halen"
+                          % (final_slug, ", ".join(sorted(olds))))
+    old = olds.pop()
+    if old == final_slug:
+        return None, [], None                       # heen en terug, netto niets
+    return old, cands, None
+
+
+def get_moved_facets(days=30, with_url_counts=True):
+    """Facetten waarvan de URL-slug is veranderd, per locale, met het aantal
+    bestaande URL's dat erdoor van adres wisselt."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT e.audit_id, e.ts_utc, e.facet_id, e.actor,
+                   e.changes->'UrlSlug'->>'Old'  AS old_slug,
+                   e.changes->'UrlSlug'->>'New'  AS new_slug,
+                   e.changes->'Name'->>'New'     AS new_name,
+                   fm.facet_name,
+                   (SELECT array_agg(m.name ORDER BY m.name)
+                      FROM pa.facet_watch_maincats m
+                     WHERE m.main_cat_id = ANY(fm.main_cat_ids)) AS main_cat_names
+            FROM pa.facet_watch_events e
+            LEFT JOIN pa.facet_watch_facet_maincat fm ON fm.facet_id = e.facet_id
+            WHERE e.ts_utc > now() - (%s || ' days')::interval
+              AND e.entity_name = 'Facet Label' AND e.action = 'UPDATE'
+              AND 'UrlSlug' = ANY(e.changed_fields)
+              AND e.changes->'UrlSlug'->>'Old' IS NOT NULL
+              AND e.changes->'UrlSlug'->>'New' IS NOT NULL
+            ORDER BY e.facet_id, e.ts_utc
+        """, (days,))
+        raw = [dict(r) for r in cur.fetchall()]
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+    by_facet = {}
+    for r in raw:
+        by_facet.setdefault(r["facet_id"], []).append(
+            {"old": r["old_slug"], "new": r["new_slug"], "ts": r["ts_utc"],
+             "actor": r["actor"], "new_name": r["new_name"]})
+
+    rows, unresolved = [], []
+    for fid, evs in by_facet.items():
+        meta = next(r for r in raw if r["facet_id"] == fid)
+        locales = _facet_locale_slugs(fid)
+        if not locales:
+            # Zonder de live labels is de locale niet te bepalen. Melden, niet gokken:
+            # een redirect op de verkeerde locale duwt een werkende pagina weg.
+            unresolved.append({"facet_id": fid, "facet_name": meta["facet_name"],
+                               "events": len(evs),
+                               "reason": "labels niet op te halen bij de Taxonomy API"})
+            continue
+        for locale, final_slug in sorted(locales.items()):
+            old_slug, used, why = _resolve_slug_move(evs, final_slug)
+            if why:
+                unresolved.append({"facet_id": fid, "facet_name": meta["facet_name"],
+                                   "locale": locale, "events": len(evs),
+                                   "reason": why})
+                continue
+            if not old_slug:
+                continue                      # niets veranderd, of heen en terug
+            rows.append({
+                "facet_id": fid,
+                "facet_name": meta["facet_name"],
+                "main_cat_names": meta["main_cat_names"] or [],
+                "locale": locale,
+                "old_slug": old_slug,
+                "new_slug": final_slug,
+                "first_change": min(e["ts"] for e in used),
+                "last_change": max(e["ts"] for e in used),
+                "actors": sorted({e["actor"] for e in used if e["actor"]}),
+                "redirect_country": _REDIRECT_COUNTRY.get(locale),
+                "affected_urls": None,
+            })
+
+    if with_url_counts and rows:
+        counts = _count_affected_urls([(r["facet_id"], r["old_slug"]) for r in rows])
+        for r in rows:
+            r["affected_urls"] = counts.get((r["facet_id"], r["old_slug"]), 0)
+
+    # Meeste te repareren URL's eerst; dat is de enige ordening die zegt waar het
+    # werk zit. Bij gelijk aantal de nieuwste wijziging boven.
+    rows.sort(key=lambda r: (-(r["affected_urls"] or 0),
+                             -(r["last_change"].timestamp() if r["last_change"] else 0)))
+    return {"moved": rows, "unresolved": unresolved, "days": days,
+            "slug_events": len(raw)}
+
+
+def _count_affected_urls(pairs):
+    """(facet_id, old_slug) -> aantal pa.urls-rijen dat die slug MET een value-id van
+    dat facet draagt. Zie valkuil 1 hierboven: op de slug alleen tellen is fout."""
+    if not pairs:
+        return {}
+    conn = get_db_connection()
+    cur = conn.cursor()
+    out = {}
+    try:
+        for fid, slug in pairs:
+            cur.execute("""
+                SELECT count(*) AS n
+                FROM pa.urls u
+                WHERE (u.url LIKE '%%/' || %s || '~%%'
+                       OR u.url LIKE '%%~~' || %s || '~%%')
+                  AND EXISTS (
+                        SELECT 1 FROM pa.facet_watch_value_facet vf
+                         WHERE vf.facet_id = %s
+                           AND (u.url LIKE '%%/'  || %s || '~' || vf.value_id || '%%'
+                             OR u.url LIKE '%%~~' || %s || '~' || vf.value_id || '%%'))
+            """, (slug, slug, fid, slug, slug))
+            out[(fid, slug)] = (cur.fetchone() or {}).get("n", 0)
+        return out
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def build_moved_facet_redirects(facet_id, old_slug, new_slug, limit=5000):
+    """De concrete oude -> nieuwe URL-paren voor één slug-wijziging.
+
+    Het hernoemen én het HERSORTEREN komen uit
+    `redirect_301_service.transform_and_sort_url`: de facetten in een `/c/`-pad staan
+    alfabetisch op slug, dus `stijl_test` -> `woonstijl` verplaatst het facet naar
+    achteren in datzelfde pad. Alleen de naam vervangen geeft een URL die de site
+    zelf weer zou omleiden. Die sorteerregel stond er al voor de Redirect Generator
+    en wordt hier hergebruikt in plaats van nagebouwd.
+
+    De regels krijgen het VALUE-ID mee (`slug~123` -> `new~123`) en niet alleen de
+    slug, zodat een URL die toevallig een gelijknamig facet van een ánder facet-id
+    draagt niet meeverandert.
+    """
+    from backend.redirect_301_service import FacetRule, transform_and_sort_url
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""SELECT value_id FROM pa.facet_watch_value_facet
+                       WHERE facet_id = %s""", (facet_id,))
+        value_ids = [r["value_id"] for r in cur.fetchall()]
+        if not value_ids:
+            return {"pairs": [], "total": 0, "value_ids": 0,
+                    "note": "Geen waarden van dit facet in de value-cache — "
+                            "zonder value-ids is de URL-set niet af te bakenen."}
+
+        cur.execute("""
+            SELECT u.url
+            FROM pa.urls u
+            WHERE (u.url LIKE '%%/' || %s || '~%%' OR u.url LIKE '%%~~' || %s || '~%%')
+              AND EXISTS (
+                    SELECT 1 FROM unnest(%s::bigint[]) AS v(value_id)
+                     WHERE u.url LIKE '%%/'  || %s || '~' || v.value_id || '%%'
+                        OR u.url LIKE '%%~~' || %s || '~' || v.value_id || '%%')
+            ORDER BY u.url
+            LIMIT %s
+        """, (old_slug, old_slug, value_ids, old_slug, old_slug, limit))
+        urls = [r["url"] for r in cur.fetchall()]
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+    rules = [FacetRule(old_facet=f"{old_slug}~{vid}", new_facet=f"{new_slug}~{vid}")
+             for vid in value_ids]
+    pairs, unchanged = [], 0
+    for u in urls:
+        new_url, changed = transform_and_sort_url(u, facet_rules=rules)
+        if not changed or new_url == u:
+            unchanged += 1
+            continue
+        pairs.append({"old": u, "new": new_url})
+    return {"pairs": pairs, "total": len(pairs), "value_ids": len(value_ids),
+            "scanned": len(urls), "unchanged": unchanged,
+            "truncated": len(urls) >= limit}
