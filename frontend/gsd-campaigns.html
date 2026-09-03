@@ -333,7 +333,7 @@
                     <table class="table table-sm table-hover campaign-table mb-0">
                         <thead class="table-light">
                             <tr>
-                                <th style="width:36px; text-align:center;"><input type="checkbox" id="selectAllCampaigns" onclick="toggleSelectAllCampaigns(this)" title="Select all on this page"></th>
+                                <th style="width:36px; text-align:center;"><input class="form-check-input" type="checkbox" id="selectAllCampaigns" onclick="toggleSelectAllCampaigns(this)" title="Select all on this page"></th>
                                 <th class="sortable" data-sort="created_date" onclick="sortBy('created_date')">Date</th>
                                 <th class="sortable" data-sort="shop_name" onclick="sortBy('shop_name')">Shop</th>
                                 <th class="col-model sortable" data-sort="model" onclick="sortBy('model')">Model</th>
@@ -851,7 +851,7 @@
                         ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #CC5500; color:#CC5500;">Paused</span>'
                         : `<span class="badge bg-transparent fw-bold" style="border:1px solid #6c757d; color:#6c757d;">${c.status || 'Unknown'}</span>`;
                 return `<tr class="${isNew ? 'row-new' : ''}">
-                    <td><input type="checkbox" class="camp-check"${selectedCampaigns.has(campKey(c)) ? ' checked' : ''} data-cid="${c.customer_id}" data-campid="${c.campaign_id}" data-name="${escapeHtml(c.campaign_name || '')}" data-status="${(c.status || '').toUpperCase()}" onclick="toggleCampaignSelection(this)"></td>
+                    <td><input type="checkbox" class="camp-check form-check-input"${selectedCampaigns.has(campKey(c)) ? ' checked' : ''} data-cid="${c.customer_id}" data-campid="${c.campaign_id}" data-name="${escapeHtml(c.campaign_name || '')}" data-status="${(c.status || '').toUpperCase()}" onclick="toggleCampaignSelection(this)"></td>
                     <td>${c.created_date || '-'}</td>
                     <td title="${escapeHtml(c.shop_name || '')}">${escapeHtml(c.shop_name || '-')}</td>
                     <td class="col-model">${modelBadge(c.model)}</td>
@@ -1278,7 +1278,7 @@
                 const chevR = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>';
                 const selInfo = selectable ? '<span class="text-muted" id="llPreviewSelectedInfo" style="font-size: 0.85rem;"></span>' : '';
                 const runSelBtnHtml = selectable ? `<button class="btn btn-sm btn-run" style="padding: 0.25rem 0.6rem; min-width: 70px;" onclick="runSelectedLowLinkage()" id="llRunSelectedBtn">Run selected</button>` : '';
-                const selectAllTh = selectable ? '<th style="width: 2.5rem; text-align: center;"><input type="checkbox" id="llPreviewSelectAll" title="Select all (filtered)" onclick="togglePreviewSelectAll(this.checked)"></th>' : '';
+                const selectAllTh = selectable ? '<th style="width: 2.5rem; text-align: center;"><input class="form-check-input" type="checkbox" id="llPreviewSelectAll" title="Select all (filtered)" onclick="togglePreviewSelectAll(this.checked)"></th>' : '';
                 html += `
                 <div class="filter-row d-flex gap-2 align-items-center mt-2 mb-2">
                     <input type="text" class="form-control form-control-sm" id="llPreviewFilter" placeholder="Filter shop, campaign, country..." oninput="applyPreviewFilter()" style="max-width: 260px;">
@@ -1559,7 +1559,7 @@
                 const allSel = selKeys.length > 0 && selKeys.every(k => llPreviewSelected.has(k));
                 const checkboxCell = llPreviewSelectable
                     ? (selKeys.length > 0
-                        ? `<td style="text-align:center;" onclick="event.stopPropagation();"><input type="checkbox" ${allSel ? 'checked' : ''} onchange="togglePreviewGroup('${g.groupKey}', this.checked)"></td>`
+                        ? `<td style="text-align:center;" onclick="event.stopPropagation();"><input class="form-check-input" type="checkbox" ${allSel ? 'checked' : ''} onchange="togglePreviewGroup('${g.groupKey}', this.checked)"></td>`
                         : '<td></td>')
                     : '';
 

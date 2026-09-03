@@ -198,7 +198,7 @@
                         <table id="previewTable" class="table table-sm table-hover align-middle mb-0">
                             <thead class="table-light">
                                 <tr>
-                                    <th class="col-chk"><input type="checkbox" id="previewSelectAll" onclick="toggleAllPreview(this.checked)" title="Select/unselect all on this page"></th>
+                                    <th class="col-chk"><input class="form-check-input" type="checkbox" id="previewSelectAll" onclick="toggleAllPreview(this.checked)" title="Select/unselect all on this page"></th>
                                     <th class="sortable col-cat" data-sort="cat_name" onclick="setPreviewSort('cat_name')">Deepest cat</th>
                                     <th class="sortable col-h1" data-sort="h1_title" onclick="setPreviewSort('h1_title')">H1 title</th>
                                     <th class="sortable col-facets" data-sort="key" onclick="setPreviewSort('key')">Facets</th>
@@ -544,7 +544,7 @@
             const start = pp === Infinity ? 0 : (previewPage - 1) * pp;
             const end = pp === Infinity ? total : Math.min(start + pp, total);
             const body = data.slice(start, end).map(x => { const id = selId(x); return `<tr>
-                <td><input type="checkbox" ${previewSelected.has(id) ? 'checked' : ''} onclick="togglePreviewSel('${id}', this.checked)"></td>
+                <td><input class="form-check-input" type="checkbox" ${previewSelected.has(id) ? 'checked' : ''} onclick="togglePreviewSel('${id}', this.checked)"></td>
                 <td>${esc(x.cat_name)}</td>
                 <td>${esc(x.h1_title)}</td>
                 <td>${x.source_url && /^https?:/i.test(x.source_url) ? `<a href="${esc(x.source_url.split('?')[0])}" target="_blank" rel="noopener"><code>${esc(x.key)}</code></a>` : `<code>${esc(x.key)}</code>`}</td>

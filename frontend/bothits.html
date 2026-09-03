@@ -1164,7 +1164,7 @@
         // .beslist.nl eindigt. Elke andere data-sink in dit bestand escapet al; dit
         // was er één van de twee die het niet deed.
         el.innerHTML = values.map((v, i) =>
-            `<label><input type="checkbox" value="${escapeHtml(v)}" checked> ${escapeHtml(labels ? labels[i] : v)}</label>`).join('');
+            `<label><input class="form-check-input" type="checkbox" value="${escapeHtml(v)}" checked> ${escapeHtml(labels ? labels[i] : v)}</label>`).join('');
     }
 
     // ---- Periode ---------------------------------------------------------

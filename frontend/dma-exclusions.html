@@ -238,7 +238,7 @@
                                 </colgroup>
                                 <thead style="position:sticky; top:0;">
                                     <tr>
-                                        <th><input type="checkbox" id="oosSelectAll" onclick="toggleAllOos(this.checked)"></th>
+                                        <th><input class="form-check-input" type="checkbox" id="oosSelectAll" onclick="toggleAllOos(this.checked)"></th>
                                         <th>EAN</th><th>Category</th>
                                         <th title="Live bestOffer shop from Beslist's index — whichever shop currently holds the headline offer.">Headline offer</th>
                                         <th class="text-end">Clicks 30d</th><th class="text-end">Spend 30d</th>
@@ -310,7 +310,7 @@
                                     <col style="width:140px">
                                 </colgroup>
                                 <thead>
-                                    <tr><th><input type="checkbox" id="savedSelectAll" onclick="toggleAllSaved(this.checked)" title="Select all enable-able rows on this page"></th><th class="sortable" data-sort="item_id" onclick="setSavedSort('item_id')" style="cursor:pointer; user-select:none;">Item id<span class="sort-ind"></span></th><th class="sortable" data-sort="market" onclick="setSavedSort('market')" style="cursor:pointer; user-select:none;">Country<span class="sort-ind"></span></th><th class="sortable" data-sort="source" onclick="setSavedSort('source')" style="cursor:pointer; user-select:none;">Source<span class="sort-ind"></span></th><th class="sortable" data-sort="category" onclick="setSavedSort('category')" style="cursor:pointer; user-select:none;">Category<span class="sort-ind"></span></th><th class="sortable" data-sort="headline_shop" onclick="setSavedSort('headline_shop')" style="cursor:pointer; user-select:none;" title="Live bestOffer shop from Beslist's index.">Headline offer<span class="sort-ind"></span></th><th class="sortable" data-sort="status" onclick="setSavedSort('status')" style="cursor:pointer; user-select:none;">Status<span class="sort-ind"></span></th><th class="sortable" data-sort="applied_at" onclick="setSavedSort('applied_at')" style="cursor:pointer; user-select:none;" title="Local time (Europe/Amsterdam). Stored in UTC — hover a cell for the raw value.">Timestamp<span class="sort-ind"></span></th></tr>
+                                    <tr><th><input class="form-check-input" type="checkbox" id="savedSelectAll" onclick="toggleAllSaved(this.checked)" title="Select all enable-able rows on this page"></th><th class="sortable" data-sort="item_id" onclick="setSavedSort('item_id')" style="cursor:pointer; user-select:none;">Item id<span class="sort-ind"></span></th><th class="sortable" data-sort="market" onclick="setSavedSort('market')" style="cursor:pointer; user-select:none;">Country<span class="sort-ind"></span></th><th class="sortable" data-sort="source" onclick="setSavedSort('source')" style="cursor:pointer; user-select:none;">Source<span class="sort-ind"></span></th><th class="sortable" data-sort="category" onclick="setSavedSort('category')" style="cursor:pointer; user-select:none;">Category<span class="sort-ind"></span></th><th class="sortable" data-sort="headline_shop" onclick="setSavedSort('headline_shop')" style="cursor:pointer; user-select:none;" title="Live bestOffer shop from Beslist's index.">Headline offer<span class="sort-ind"></span></th><th class="sortable" data-sort="status" onclick="setSavedSort('status')" style="cursor:pointer; user-select:none;">Status<span class="sort-ind"></span></th><th class="sortable" data-sort="applied_at" onclick="setSavedSort('applied_at')" style="cursor:pointer; user-select:none;" title="Local time (Europe/Amsterdam). Stored in UTC — hover a cell for the raw value.">Timestamp<span class="sort-ind"></span></th></tr>
                                 </thead>
                                 <tbody id="listBody">
                                     <tr><td colspan="8" class="text-center text-muted py-3">No exclusions yet.</td></tr>
@@ -630,7 +630,7 @@
             const rows = pageRows.map(x => {
                 const checkable = savedEnableable(x);
                 const cb = checkable
-                    ? `<input type="checkbox" ${savedSelected.has(x.id) ? "checked" : ""} onclick="event.stopPropagation(); toggleSavedSel(${x.id}, this.checked)">`
+                    ? `<input class="form-check-input" type="checkbox" ${savedSelected.has(x.id) ? "checked" : ""} onclick="event.stopPropagation(); toggleSavedSel(${x.id}, this.checked)">`
                     : "";
                 return `
                     <tr id="excl-row-${x.id}" style="cursor:pointer;" onclick="toggleExclDetail(${x.id})" title="Click to see the campaigns this was added to">
@@ -806,7 +806,7 @@
                 const dis = oosLocked(c) ? "disabled" : "";
                 const muted = c.already_excluded;
                 return `<tr class="${muted ? 'table-light text-muted' : ''}">
-                    <td><input type="checkbox" ${checked} ${dis} onclick="toggleOos('${esc(c.item_id)}', this.checked)"></td>
+                    <td><input class="form-check-input" type="checkbox" ${checked} ${dis} onclick="toggleOos('${esc(c.item_id)}', this.checked)"></td>
                     <td class="mono" title="${esc(c.plp_url) || esc(c.ean)}">${safeUrl(c.plp_url)
                         ? `<a href="${esc(safeUrl(c.plp_url))}" target="_blank" rel="noopener">${esc(c.ean)}</a>`
                         : esc(c.ean)}${c.already_excluded ? ' <span class="badge badge-excluded">excluded</span>' : ''}</td>

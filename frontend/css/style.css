@@ -800,6 +800,22 @@ thead.sticky-top {
  * eigen reden breder moet, zet zelf een `max-width` — die wint van deze regel. */
 input[type="file"].form-control { max-width: 32rem; }
 
+/* Selectievakjes ROND, dashboardbreed (Joep, 2026-09-03: "zoals in Auto-Redirects,
+ * dus niet vierkant zoals in Healthscore"). Stond als losse regel alleen in
+ * rurl-optimizer.html, waardoor die pagina ronde vakjes had en de twintig andere
+ * vierkante — precies het verschil dat opviel. Nu één keer hier; de lokale kopie in
+ * Auto-Redirects is weg.
+ *
+ * Alleen de kleur/vorm verandert, niet het accent: Bootstraps :checked-vulling en
+ * het vinkje blijven staan (UI_BLUEPRINT §Form controls — geen eigen skinning).
+ *
+ * Werkt alleen op een `.form-check-input`. Een blote `<input type="checkbox">` wordt
+ * door de browser zelf getekend en negeert border-radius; daarom hebben de elf
+ * blote vakjes in Bot Hits / DMA Exclusions / GSD Campaigns / SEO titles er bij
+ * deze wijziging de klasse bij gekregen in plaats van dat hier een `input[type=
+ * checkbox]`-regel staat die daar stil niets doet. */
+.form-check-input[type="checkbox"] { border-radius: 50%; }
+
 /* ------------------------------------------------------------------ *
  * Tabellen — vlakke kop op paneelkleur, lichte rijscheiding, accentzachte hover.
  * ------------------------------------------------------------------ */

@@ -1543,6 +1543,19 @@ carries through automatically:
   in a `.form-check` with a `.form-check-label`. Keep the default Bootstrap accent —
   don't recolour. (Canonicals' bulk-select adds a `canon-select` class alongside
   `form-check-input`; that's a local extension, not the shared default.)
+- **Selectievakjes zijn ROND**, net als de radio's (Joep, 2026-09-03: "zoals in
+  Auto-Redirects, dus niet vierkant zoals in Healthscore"). Eén gedeelde regel in
+  `style.css` — `.form-check-input[type="checkbox"] { border-radius: 50% }` — en dus
+  **niet per pagina neerzetten**; hij stond alleen in Auto-Redirects en dat was precies
+  het verschil dat opviel. Alleen de vorm, niet het accent: de `:checked`-vulling en het
+  vinkje blijven die van Bootstrap.
+  **Gevolg: een checkbox en een radio zijn niet meer op vorm te onderscheiden** — dat is
+  een bewuste keuze, dus laat het label of de context zeggen of je er meer dan één mag
+  aanzetten.
+  De regel werkt **alleen op een `.form-check-input`**. Een blote
+  `<input type="checkbox">` wordt door de browser zelf getekend en negeert
+  `border-radius`, dus zet die klasse er altijd op — de elf blote vakjes in Bot Hits,
+  DMA Exclusions, GSD Campaigns en SEO titles hebben hem op 2026-09-03 daarom gekregen.
 
 ### Een label hernoemen krimpt de control ernaast
 
