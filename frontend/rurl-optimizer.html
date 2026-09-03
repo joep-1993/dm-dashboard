@@ -45,11 +45,15 @@
         /* --- Push Redirects (push a run's redirects to production) --------
            Same visual language as the selection table in Canonicals and the
            Redirect Generator, which feed the same /api/redirect-tool pair. */
-        .url-cell { font-family: monospace; font-size: 0.78rem; word-break: break-all; white-space: normal; }
-        /* Selection counter. A page-local class rather than `.badge.bg-*`:
-           style.css re-themes Bootstrap's colour names to grey and the
-           put-it-back rules are not reliable (UI_BLUEPRINT §Labels / badges). */
-        .sel-count { background-color: #8b7bb5; }
+        /* URL-cellen breken op de URL zelf, maar dragen GEEN eigen font meer:
+           zelfde lettertype en -grootte als de Recent runs-tabel (.tool-table,
+           0.9rem). Hier stond monospace 0.78rem, waardoor de twee tabellen op
+           dezelfde pagina in twee verschillende lettertypes stonden. */
+        .url-cell { word-break: break-all; white-space: normal; }
+        /* Selection count. Plain text naast de select-all checkbox (UI_BLUEPRINT
+           §Bulk-select bar: telling links). Merkpaars i.p.v. grijs — grijs leest
+           als "geen waarde" (UI_BLUEPRINT §Labels). */
+        .sel-count { color: var(--color-navbar); font-size: 0.82rem; font-weight: 600; }
         /* Body cells get the header's 14px horizontal padding. Bootstrap's
            .table-sm gives a td 4px, which leaves every value 10px left of its
            own column head (UI_BLUEPRINT §Tables). Scoped to this table so the
@@ -279,48 +283,31 @@
                             <div class="form-check mb-0">
                                 <input class="form-check-input" type="checkbox" id="pushSelectAll" title="Select all visible rows">
                             </div>
-                            <div class="input-group input-group-sm" style="max-width: 265px;">
+                            <span id="pushSelCount" class="sel-count">0 selected</span>
+                            <div class="input-group input-group-sm" style="width: 165px;">
                                 <span class="input-group-text">Min. score</span>
-                                <select id="pushMinScore" class="form-select" title="Show and select every redirect with at least this reliability score. Tier A (>= 90) is what the engine itself calls safe for production."></select>
+                                <input type="number" class="form-control" id="pushMinScore" value="90" min="0" max="100" step="5"
+                                       title="Show and select every redirect with at least this reliability score. Tier A (>= 90) is what the engine itself calls safe for production.">
                             </div>
                             <div class="input-group input-group-sm" style="max-width: 260px;">
                                 <span class="input-group-text">Filter</span>
                                 <input type="text" id="pushFilter" class="form-control" placeholder="filter by URL part…">
                                 <button class="btn btn-outline-secondary" type="button" id="pushFilterClear">&times;</button>
                             </div>
-                            <div class="input-group input-group-sm" style="max-width: 170px;">
-                                <span class="input-group-text">Status code</span>
-                                <select id="pushStatusCode" class="form-select">
-                                    <option value="301" selected>301</option>
-                                    <option value="302">302</option>
-                                </select>
-                            </div>
-                            <div class="input-group input-group-sm" style="max-width: 185px;">
-                                <span class="input-group-text">Country</span>
-                                <select id="pushCountry" class="form-select">
-                                    <option value="NL+BE" selected>NL+BE</option>
-                                    <option value="NL">NL</option>
-                                    <option value="BE">BE</option>
-                                </select>
-                            </div>
-                            <span id="pushSelCount" class="badge sel-count ms-auto">0 selected</span>
                         </div>
-                        <p class="text-muted mb-2" style="font-size: 0.82rem;" id="pushSummary"></p>
                         <div class="alert alert-warning py-2 px-3 d-none" style="font-size: 0.82rem;" id="pushTruncWarn"></div>
                         <div class="tool-table-wrap" id="pushTableWrap">
                             <table class="table table-sm table-hover tool-table" id="pushTable">
                                 <thead class="table-light">
                                     <tr>
                                         <th style="width: 40px"></th>
+                                        <th>Old</th>
+                                        <th>New</th>
                                         <th class="col-center" style="width: 70px">Score</th>
-                                        <th>Old URL (R-url)</th>
-                                        <th>New URL</th>
-                                        <th class="col-center" style="width: 90px" title="Products behind the destination">Products</th>
-                                        <th class="col-center" style="width: 80px">Visits</th>
                                     </tr>
                                 </thead>
                                 <tbody id="pushBody">
-                                    <tr><td colspan="6" class="text-muted text-center p-3">No run loaded yet</td></tr>
+                                    <tr><td colspan="4" class="text-muted text-center p-3">No run loaded yet</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -871,9 +858,13 @@
         // selector — you pick a threshold, then untick the individual rows you
         // do not want.
         const REDIRECT_API = '/api/redirect-tool';
-        // Descending: buildScoreOptions accumulates the histogram in one pass.
-        const PUSH_SCORE_STEPS = [100, 95, 90, 85, 80, 75, 70, 60, 50, 25, 0];
         const PUSH_ROW_LIMIT = 5000;
+        const PUSH_MIN_SCORE_DEFAULT = 90;   // Tier A — wat de engine zelf veilig noemt
+        // Vast voor deze tool: de Redirect-API krijgt altijd een 301 voor NL+BE.
+        // Stonden als dropdowns in de balk; niemand zette ze ooit anders, en een
+        // keuze die nooit wijzigt kost alleen ruimte naast de filters.
+        const PUSH_STATUSCODE = '301';
+        const PUSH_COUNTRY = 'NL+BE';
 
         let pushRun = null;                 // { base, taskId, runLabel }
         let pushRows = [];                  // rows currently loaded (score >= threshold)
@@ -898,7 +889,7 @@
             pushDeselected = new Set();
             document.getElementById('pushCard').classList.add('d-none');
             document.getElementById('pushBody').innerHTML =
-                '<tr><td colspan="6" class="text-muted text-center p-3">No run loaded yet</td></tr>';
+                '<tr><td colspan="4" class="text-muted text-center p-3">No run loaded yet</td></tr>';
             updatePushSelectionCount();
         }
 
@@ -912,14 +903,15 @@
                 'Run ' + (runLabel ? runLabel + ' · ' : '') + taskId;
             document.getElementById('pushFilter').value = '';
             // Default to Tier A — the tier the engine itself calls safe for production.
-            await loadPushRows(90, true);
+            document.getElementById('pushMinScore').value = PUSH_MIN_SCORE_DEFAULT;
+            await loadPushRows(PUSH_MIN_SCORE_DEFAULT);
             document.getElementById('pushCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
 
-        async function loadPushRows(minScore, rebuildOptions) {
+        async function loadPushRows(minScore) {
             if (!pushRun) return;
             const tbody = document.getElementById('pushBody');
-            tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center p-3">Loading results…</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center p-3">Loading results…</td></tr>';
             try {
                 const r = await fetch(`${pushRun.base}/results/${pushRun.taskId}`
                     + `?min_score=${encodeURIComponent(minScore)}&limit=${PUSH_ROW_LIMIT}`);
@@ -931,73 +923,43 @@
                 const data = await r.json();
                 pushRows = data.rows || [];
                 pushMeta = data;
-                // The histogram covers the whole run and never changes, so the
-                // options are built once per run, not per threshold change.
-                if (rebuildOptions) buildScoreOptions(data.histogram, data.min_score);
                 renderPushRows();
             } catch (err) {
                 pushRows = [];
                 pushMeta = null;
-                tbody.innerHTML = `<tr><td colspan="6" class="text-danger text-center p-3">${escapeHtml(err.message)}</td></tr>`;
-                document.getElementById('pushSummary').textContent = '';
+                tbody.innerHTML = `<tr><td colspan="4" class="text-danger text-center p-3">${escapeHtml(err.message)}</td></tr>`;
                 document.getElementById('pushTruncWarn').classList.add('d-none');
                 updatePushSelectionCount();
             }
         }
 
-        // Label every threshold with how many redirects sit at or above it, so
-        // the choice is made on the numbers rather than on a guess.
-        function buildScoreOptions(histogram, selected) {
-            const desc = (histogram || []).slice().sort((a, b) => b.score - a.score);
-            const cum = new Map();
-            let running = 0, i = 0;
-            for (const step of PUSH_SCORE_STEPS) {
-                while (i < desc.length && desc[i].score >= step) { running += desc[i].count; i++; }
-                cum.set(step, running);
-            }
-            document.getElementById('pushMinScore').innerHTML = PUSH_SCORE_STEPS.map(step => {
-                const label = step === 0 ? 'alles' : tierLabel(step);
-                return `<option value="${step}"${step === selected ? ' selected' : ''}>`
-                    + `&ge; ${step} &middot; ${label} (${fmtInt(cum.get(step))})</option>`;
-            }).join('');
-        }
-
         function renderPushRows() {
             const tbody = document.getElementById('pushBody');
             if (!pushRows.length) {
-                tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center p-3">No redirects at or above this score.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center p-3">No redirects at or above this score.</td></tr>';
             } else {
                 tbody.innerHTML = pushRows.map((r, i) => {
                     const checked = pushDeselected.has(r.old_url) ? '' : ' checked';
                     const why = [tierLabel(r.score), r.reason].filter(Boolean).join(' — ');
                     return `<tr class="push-row" data-idx="${i}">
                         <td><input type="checkbox" class="push-select form-check-input" data-idx="${i}"${checked}></td>
-                        <td class="col-center tier-${escapeHtml(r.tier || '')}" title="${escapeHtml(why)}">${r.score}</td>
                         <td class="url-cell" title="${escapeHtml(r.old_url)}">${escapeHtml(r.old_url)}</td>
                         <td class="url-cell" title="${escapeHtml(r.new_url)}">${escapeHtml(r.new_url)}</td>
-                        <td class="col-center">${r.target_products == null ? '—' : fmtInt(r.target_products)}</td>
-                        <td class="col-center">${r.visits == null ? '—' : fmtInt(r.visits)}</td>
+                        <td class="col-center tier-${escapeHtml(r.tier || '')}" title="${escapeHtml(why)}">${r.score}</td>
                     </tr>`;
                 }).join('');
             }
-            renderPushSummary();
+            renderPushTruncWarning();
             applyPushFilter();
         }
 
-        function renderPushSummary() {
-            const el = document.getElementById('pushSummary');
+        // De regel "N of M redirects with score >= X · not pushable from this
+        // run: …" is er bewust uit. Wat blijft is de truncatie-waarschuwing:
+        // die gaat niet over context maar over een selectie die minder dekt dan
+        // je denkt, en dat moet wél in beeld staan.
+        function renderPushTruncWarning() {
             const warn = document.getElementById('pushTruncWarn');
-            if (!pushMeta) { el.textContent = ''; warn.classList.add('d-none'); return; }
-            const sk = pushMeta.skipped || {};
-            const left = [];
-            if (sk.no_target) left.push(`${fmtInt(sk.no_target)} without a destination`);
-            if (sk.no_score) left.push(`${fmtInt(sk.no_score)} without a score`);
-            if (sk.duplicate) left.push(`${fmtInt(sk.duplicate)} duplicate old URL`);
-            el.textContent = `${fmtInt(pushMeta.matched)} of ${fmtInt(pushMeta.total)} redirects `
-                + `with score ≥ ${pushMeta.min_score}`
-                + (left.length ? ` · not pushable from this run: ${left.join(', ')}` : '');
-            // A selection can only ever cover the rows it was shown, so say so
-            // rather than letting the count quietly mean something else.
+            if (!pushMeta) { warn.classList.add('d-none'); return; }
             if (pushMeta.truncated) {
                 warn.classList.remove('d-none');
                 warn.textContent = `Only the first ${fmtInt(pushMeta.returned)} of `
@@ -1067,7 +1029,13 @@
         document.getElementById('pushMinScore').addEventListener('change', (e) => {
             // Unticks survive a threshold change on purpose: widening the score
             // must not re-arm a row you already rejected.
-            loadPushRows(Number(e.target.value) || 0, false);
+            // Klemmen op 0-100: een teller laat een getypte 250 of -5 gewoon
+            // staan, en dan haalt de fetch een leeg resultaat op zonder dat het
+            // veld laat zien waarom.
+            const raw = Number(e.target.value);
+            const score = Math.min(100, Math.max(0, Number.isFinite(raw) ? Math.round(raw) : 0));
+            e.target.value = score;
+            loadPushRows(score);
         });
         document.getElementById('pushFilter').addEventListener('input', applyPushFilter);
         document.getElementById('pushFilterClear').addEventListener('click', () => {
@@ -1110,11 +1078,10 @@
                                      // re-preflight can't submit stale data
             const selected = getSelectedPushRows();
             if (!selected.length) { alert('No redirects selected'); return; }
-            const statuscode = document.getElementById('pushStatusCode').value || '301';
-            const country = document.getElementById('pushCountry').value || 'NL+BE';
             const label = `auto-redirects-${new Date().toISOString().split('T')[0]}`;
             const rows = selected.map(r => ({
-                old: r.old_url, new: r.new_url, statuscode, country, label,
+                old: r.old_url, new: r.new_url,
+                statuscode: PUSH_STATUSCODE, country: PUSH_COUNTRY, label,
             }));
             const minScore = document.getElementById('pushMinScore').value;
 
