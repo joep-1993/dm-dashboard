@@ -1,6 +1,116 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## De ankerdrift op de Keywords API komt uit de titel-keten, niet uit HS1.0 (2026-09-03, Healthscore)
+
+Live-check van de 12 testbuckets, 16 dagen na de re-push van 18 aug. **11 van de 12 url-sets zijn
+byte-identiek** aan `Downloads/claude/hs2_payloads_20260818/` — 0 weg, 0 extra. Fietsen 38000 was
+voor de tweede keer overschreven (6.972 rijen / 5.149 urls i.p.v. 13.304) en die urls zitten voor
+**100%** in `bt.new_hs_data` main_category_id=38000, dus HS1.0 is opnieuw de overschrijver. Kantoor
+361 staat óók als maincat in HS1.0 (201k urls) en bleef wél intact; waarom 38000 wél en 361 niet is
+nog steeds niet verklaard. Wat er wél bij kwam: **de live maincat-buckets zijn stuk voor stuk veel
+kleiner dan HS1.0's data per maincat** (0,03–0,21x over alle 32), dus de publisher schrijft een
+eigen selectie en zet niet gewoon `new_hs_data` terug.
+
+**De entry van 18-08 wees de ankerdrift naar dezelfde HS1.0-keten. Dat klopt niet.** Op de 11
+intacte buckets dragen 508 van de 36.560 rijen (1,4%) een ander anker dan wij pushten, en:
+
+| waar komt het live anker vandaan | rijen |
+|---|---|
+| staat letterlijk in `pa.unique_titles_content.h1_title` | 193 (38%) |
+| staat daar als casing-variant | 90 |
+| komt helemaal NIET voor in `bt.new_hs_data` | 396 (78%) |
+
+Dus iets ververst het ankerveld uit de unique-title-bron. Het is óók niet simpelweg "de huidige H1
+van de pagina": in een steekproef van 3 gedrifte urls was bij 2 juist **ons** anker de H1 die de
+pagina vandaag toont. Onze url-selectie wordt er niet door geraakt — alleen de ankertekst. De vorige
+conclusie kwam voort uit één waarneming ("beide varianten komen in `new_hs_data` voor") die op een
+klein aantal urls toevallig klopte; de tegenproef (hoevéél van de gedrifte ankers zitten er níet in)
+was toen niet gedaan.
+
+**Meet een bucket tegen de bewaarde payload, niet tegen een telling.** `totalCount` matchte bij
+Fietsen ook toen de inhoud een andere set was; alleen de set-vergelijking laat het zien. En de
+vergelijking moet op **(url, anker)** én op **url** apart: op url-niveau waren 11 buckets perfect,
+op paar-niveau maar 1 — die twee uitkomsten betekenen iets heel anders.
+
+---
+
+## Geen linter in dit project, dus parse-checks als vervanging (2026-09-03)
+
+`dm-dashboard` heeft geen ruff, flake8, eslint, pre-commit, `package.json` of `Makefile`. Bij een
+ronde die 9 HTML-pagina's en 6 python-bestanden raakte was de vervanging:
+
+```bash
+# python
+./venv/bin/python -c "import ast,io; [ast.parse(io.open(f,encoding='utf-8').read(),filename=f) for f in FILES]"
+```
+
+Let op: `python -m py_compile` faalt hier met `Permission denied` op `backend/__pycache__` — gebruik
+`ast.parse`, dat schrijft niets.
+
+Voor de inline `<script>`-blokken staat er nu een recept: een klein node-scriptje dat elk blok zonder
+`src=` door `new vm.Script()` haalt en het regelnummer van een kapot blok noemt. Dat vangt precies de
+fout die een grote string-substitutie maakt (een haakje kwijt, een template-literal die doorloopt) en
+kost een seconde over alle pagina's. Een browser-screenshot vangt die fout NIET altijd: een pagina met
+een kapot scriptblok rendert gewoon zijn HTML.
+
+---
+
+## Twee Claude-sessies in dezelfde repo: het bestand kan tussen twee reads veranderen (2026-09-03)
+
+Ik las `frontend/redirect-tool.html` twee keer met een paar tool-calls ertussen en kreeg op dezelfde
+regelnummers andere code. Geen leesfout en geen caching: een **andere Claude-sessie was op dat moment
+in datzelfde bestand aan het werk** (`ps aux | grep claude` gaf 4 sessies; `ls -l` gaf een mtime van
+enkele seconden oud; kort daarna stond de wijziging als commit `c2b9284` in de log).
+
+- Vóór je concludeert dat je iets verkeerd las: `ls -l --time-style=full-iso <bestand>`, `git status`
+  en `git log --oneline -2 -- <bestand>`. Die drie zeggen het in één keer.
+- `ListAgents` laat de peer-sessies zien. Handig om te weten wie er nog draait, niet om te raden wat
+  ze doen — dat vraag je aan Joep.
+- Raak een bestand waar een andere sessie in zit **niet** aan. In dit geval had die sessie dezelfde
+  bulk-select-balk daar al gebouwd, inclusief de paarse Export-knop, dus er was ook niets te doen.
+- Bekend gevolg (stond al in de entry van 02-09): `git pull --rebase` weigert op vreemde unstaged
+  wijzigingen. 0 commits achter betekent dat een gewone `git push` gewoon fast-forward is; `git stash`
+  zou het werk van de andere sessie eronder wegtrekken.
+
+---
+
+## `len(history) + 1` als id is een tijdbom zodra je één item kunt verwijderen (2026-09-03, DMA Bidding)
+
+`dma_bidding_service.run_dma_bidding` deed `run_id = len(_run_history) + 1`. Dat werkte zolang de
+historie alleen groeide of in zijn geheel gewist werd. Bij het toevoegen van een per-run delete
+(nodig voor de bulk-select-balk) wordt het stil fout: haal run 5 uit een lijst van 7, en de volgende
+run krijgt id 7 — dat er al is. `/history/{run_id}` geeft dan de eerste die hij tegenkomt.
+
+`max(bestaande ids) + 1` is de fix, en de reden hoort in de docstring te staan, want de oude vorm
+leest volkomen redelijk. **Bij elke id-generator die van een lengte of een telling afleidt: vraag of
+er ooit iets uit het midden weg kan.**
+
+---
+
+## Meet een herstel-pad door de OUDE versie uit git te laden (2026-09-03, daily_automation)
+
+De twee publish-stappen riepen `poll_task` aan zonder `restart_fn`, dus een herstart van uvicorn
+midden in een publish liet de status-URL 404'en en na 10 daarvan viel de hele daily automation om —
+bij de laatste stap, ná alle generatie. De fix is het patroon dat de validatie-stappen al hadden.
+
+Het bewijs was goedkoop en overtuigend: `git show HEAD:backend/daily_automation.py > /tmp/old_da.py`,
+via `importlib.util.spec_from_file_location` inladen naast de nieuwe module, in allebei
+`_get_with_deadline` en `SESSION.post` vervangen en dezelfde reeks afspelen (poll ok → 404 → klaar).
+Oud faalt met `Task polling failed after 10 consecutive errors, last: HTTP 404` na één POST, nieuw
+doet twee POSTs met een byte-identieke payload en schakelt over naar de nieuwe task-id. Zet
+`POLL_INTERVAL = 0` in de test, anders duurt hij minuten.
+
+**Wat je bij zo'n herstart-haak moet nalopen is niet of hij herstart, maar of opnieuw beginnen
+veilig is.** Hier wel, en dat is te controleren in plaats van aan te nemen: `_stamp()` /
+`_stamp_state()` staan in beide publishers in de `if ok:`-tak, dus voortgang zit per chunk/batch in
+PostgreSQL, en `mode="new"` selecteert op die state. **Wat er niet klopt na een herstart zijn de
+getallen**: `poll_task` geeft het resultaat van de herstarte taak terug, dus `urls_pushed` /
+`records_pushed` — die doorgaan naar de Slack-melding — tellen alleen de rest. Optellen over
+herstarts heen hoort in `poll_task` zelf en raakt alle vier de aanroepers; nog open.
+
+---
+
 ## Elke slimmere regel die ik verzon was duurder dan de bug (2026-09-03, rurl-stemmer)
 
 Twee tests stonden sinds 02-09 rood met de vraag erbij "of de morfologie of de test achterloopt".

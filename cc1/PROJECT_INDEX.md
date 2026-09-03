@@ -576,7 +576,8 @@ gotchas are in `backend/faq_v2_publisher.py`'s docstring.
 - `GET /api/seo-prio/runs` - Run history; `DELETE /api/seo-prio/runs/{run_id}` - delete run + results (409 while active)
 - `GET /api/seo-prio/summary/{run_id}` - Counts per action (total / turn_on / turn_off / keep)
 - `GET /api/seo-prio/results/{run_id}?limit=0` - All rows (limit=0 = no cap); the frontend sorts/filters/paginates client-side
-- `GET /api/seo-prio/export/{run_id}` - Excel export
+- `GET /api/seo-prio/export/{run_id}` - Excel export (één run)
+- `GET /api/seo-prio/export?run_ids=a,b,c` - Excel export van een selectie. Meerdere runs komen in één blad met een kolom `run` vooraan; één run is identiek aan de route hierboven. Staat BEWUST vóór `/export/{run_id}` in `main.py` — FastAPI matcht op declaratievolgorde.
 - `POST /api/seo-prio/apply/{run_id}` - **Write-back to taxv2.** Body `{"dry_run": bool, "selections": [{"deepest_cat_id", "facet_slug", "value"?}]}`. Max 300 rows per call (`APPLY_MAX_ROWS`); grouped per category, 4 categories in parallel, facets within a category sequentially. The value written comes from the stored row's `proposed_seo_prio` unless an explicit `value` overrides it — never from a client-supplied "current". Each write is GET-merge-PUT (`displayOrder` / `isHidden` / `businessRelevance` / `describesVariance` / `describesCommon` / `unitAmount` carried over) followed by a read-back that must match, else the row is reported `failed`. A row already at the target value is `skipped`, not written. Deliberately a **non-async** endpoint so FastAPI runs it in the threadpool.
 - `GET /api/seo-prio/apply-log?run_id=&limit=200` - Audit trail from `pa.seo_prio_apply_log` (dry runs included, flagged)
 
@@ -615,7 +616,7 @@ Check 4 (title variables) now samples 3 URLs each for `!!DISCOUNT!!`, `!!NR!!`, 
   Evaluate every account of the country and (unless dry_run) move campaigns between
   DMA Level 1/2/3. Result carries `accounts` (enabled + on-ladder counts) and an
   `account`/`account_name` on every campaign row.
-- `GET /api/dma-bidding/history` / `GET /api/dma-bidding/history/{run_id}` / `DELETE /api/dma-bidding/history`
+- `GET /api/dma-bidding/history` / `GET /api/dma-bidding/history/{run_id}` / `DELETE /api/dma-bidding/history` (alles) / `DELETE /api/dma-bidding/history/{run_id}` (één run, 404 als hij er niet is). De historie staat op schijf, niet in de DB; `run_id` is sinds 2026-09-03 `max(ids)+1` en niet `len(history)+1`, anders hergebruikt een nieuwe run het id van een verwijderde.
 - `POST /api/dma-bidding/revert?country=NL|BE` - Body `[{campaign_name, target_level}]`;
   looks the campaign up across all accounts of the country and writes in its own account.
 

@@ -3,6 +3,65 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-03 (6) — Healthscore live-check, en het selectiemechanisme van Auto-Redirects naar acht tools
+
+Drie vragen van Joep op één dag. Commits `a4498ae` (frontend + endpoints) en `f1af046`
+(daily_automation). Lessen in LEARNINGS, zelfde datum.
+
+Gedaan — **Healthscore live-check**:
+
+- [x] **Alle 12 testbuckets vergeleken met de bewaarde payloads van 18-08.** 11 zijn byte-identiek op
+      url-niveau (0 weg, 0 extra): Stoelen 4.844, Eetkamerstoelen 1.289, Sneakers 4.120, Voer 1.898,
+      Douchewanden 238, Mobiele telefoons 1.524, Airconditionings 450, Dekbedovertrekken 2.568,
+      Grasmaaiers 742, Shirts 1.978, Kantoor 16.909.
+- [x] **Fietsen 38000 was voor de TWEEDE keer overschreven** (6.972 rijen / 5.149 urls), 100% een
+      subset van `bt.new_hs_data` maincat 38000 met load_date 2026-09-02 → HS1.0 opnieuw. Joep heeft
+      hem tijdens de sessie zelf teruggezet via de tool (run #11, live weer 13.304, byte-identiek
+      teruggelezen).
+- [x] **De publisher schrijft een eigen selectie**, geen kopie van `new_hs_data`: alle 32 live
+      maincat-buckets zijn 0,03–0,21x de HS1.0-omvang van diezelfde maincat.
+- [x] **Ankerdrift verklaard en de conclusie van 18-08 gecorrigeerd** — het is de titel-keten, niet
+      HS1.0. 508 van 36.560 rijen (1,4%) wijken af; 193 zijn letterlijk
+      `pa.unique_titles_content.h1_title`, nog eens 90 als casing-variant, en 396 komen helemaal niet
+      in `new_hs_data` voor. Url-selectie blijft onaangeraakt.
+- [ ] **Waarom overschrijft HS1.0 wél 38000 en niet 361?** Nog steeds open. Fietsen blijft de kanarie
+      — als hij weer omvalt is de publisher nog niet gevonden.
+- [ ] **De HS1.0-publisher zelf lokaliseren.** Nu weten we dat hij een eigen (kleinere) selectie
+      schrijft; dat is een aanknopingspunt dat er 18-08 nog niet was.
+
+Gedaan — **selectiemechanisme uitgerold** (Auto-Redirects is de referentie; Redirect Generator kreeg
+hem in `c2b9284` van de parallelle sessie):
+
+- [x] **Alle 36 tool-pagina's langsgelopen** op "run-historie met knoppen per rij". Acht geraakt:
+      Healthscore, GSD Budgets, DMA+, DMA Bidding, GSD Tag Toppers, SEO Prio, SEO Rulings, Canonicals.
+      Buiten scope: 301-generator, DMA Exclusions, GSD Campaigns, SEO Titles, Unique Titles — daar
+      zitten de vinkjes op dátarijen, niet op runs.
+- [x] **Healthscore's selectiemodus eruit.** De vakjes verschenen pas ná een klik op Export of
+      Verwijder; nu staat de kolom er altijd en opent een rijklik weer gewoon de run.
+- [x] **Balk onder de tabel** met telling links en Export + Verwijder rechts, disabled tot er iets
+      aangevinkt is. **Export outlined paars i.p.v. oranje** (ook in Auto-Redirects zelf).
+- [x] **Twee ontbrekende endpoints gebouwd**: `DELETE /api/dma-bidding/history/{run_id}` en
+      `DELETE /api/gsd-tag-toppers/runs/{run_id}`. Bij DMA Bidding meteen de id-bom eruit
+      (`len(_run_history)+1` → `max(ids)+1`).
+- [x] **Bulk-export**: `GET /api/seo-prio/export?run_ids=…` naast de per-run route, en
+      `export_excel()` neemt nu een id of een lijst. Meerdere runs = één bestand met een kolom `run`
+      vooraan; end-to-end getest (2 runs → 12 rijen, `run` als eerste kolom).
+- [x] **`done`-label uit de Healthscore-runkaart** — "Run #11 push done" is nu "Run #11 · push". Een
+      status die níet done is blijft staan.
+- [x] **Regel in UI_BLUEPRINT §Bulk-select bar**: een run-historie zet de balk ONDER de tabel, een
+      werkvoorraad erboven. Met de vier dingen die er in de praktijk toe deden.
+- [x] **:8003 herstart** (pid 40785 → 55142) en de drie nieuwe endpoints live geraakt.
+
+Gedaan — **daily_automation**:
+
+- [x] **De twee publish-stappen krijgen `restart_fn=_start`**, zoals de validatie-stappen al hadden.
+      Zonder die haak liet een herstart van uvicorn midden in een publish de status-URL 404'en en viel
+      de hele daily automation om na 10 pogingen — bij de laatste stap, ná alle generatie. Gemeten
+      tegen de oude versie uit git: die faalt, de nieuwe herstart en levert af.
+- [ ] **`poll_task` telt niet op over herstarts heen.** Na een herstart rapporteren `urls_pushed` /
+      `records_pushed` alleen de rest, en die getallen gaan door naar de Slack-melding. De fix hoort
+      in `poll_task` zelf en raakt alle vier de aanroepers — bewust niet meegenomen.
+
 ### 2026-09-03 (5) — Openstaande punten uit TASKS opgeruimd: de rurl-stemmer, drie liegende kolommen, twee frontend-achterstanden
 
 Joep vroeg wat er nog in TASKS stond dat opgepakt kon worden; van de shortlist alles behalve de
