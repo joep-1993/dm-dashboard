@@ -1,6 +1,96 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een A/B waarvan je de controle-arm zelf net hebt geschreven, moet je óók toetsen (2026-09-03, rurl V68)
+
+De vloer die een "te hard afgestrafte" rij terugtilt kan per definitie alleen VERHOGEN. Mijn eerste
+A/B over 400 R-urls gaf: controle 123 tier C, nieuw 115 — de nieuwe versie had er MINDER. Dat is
+onmogelijk, en juist daarom bruikbaar: de uitkomst wees niet naar de regel maar naar de meetopstelling.
+
+De controle-arm was mijn eigen noodrem (`RURL_V68_PRODUCT_NOUNS=0`), die de woordenlijst leeg laat.
+En `_is_qualifier` stond als:
+
+```python
+return _is_size_or_colour(token) or not _is_product_noun(token)   # FOUT
+```
+
+Met een lege lijst is `_is_product_noun` altijd False, dus `not ...` altijd True, dus leest élk woord
+als bijzaak en vuurt de vloer op élke rij. De "uit"-stand deed het tegenovergestelde van uit. Correct
+is een expliciete tak: is het een maat of kleur → ja; is er geen woordenlijst → nee (het V67-antwoord);
+anders → niet-een-productwoord.
+
+**Twee dingen om mee te nemen.** Een noodrem die je voor de A/B gebruikt is code die nog niemand heeft
+getoetst — test hem apart voor je hem als nulmeting vertrouwt. En bij een verandering die maar één
+kant op kan (een vloer, een cap, een filter dat alleen verwijdert): controleer eerst of de RICHTING
+klopt, vóór je naar de aantallen kijkt. Een verkeerde richting is gratis diagnose.
+
+**En vergelijk per rij, niet op totalen.** Deze pijplijn bevraagt de live Search API, dus twee runs op
+dezelfde invoer verschillen sowieso (de cache heeft een TTL van 7 dagen, zie de `fetched_at`-entry van
+02-09). Alleen een join op `original_url` scheidt "mijn regel deed dit" van runruis; de eindtabel van
+de A/B was `12 omhoog, 0 omlaag, 0 bestemmingen veranderd`, en die drie getallen samen zijn het bewijs.
+
+---
+
+## Twee zwakke condities die samen wél scheiden (2026-09-03, rurl V68)
+
+De vorige sessie schreef op dat zijn kandidaat-regel ("categorienaam == kop van de query") niets
+scheidde, omdat hij óók ja zei tegen `kokers voor posters`. Dat klopte, en de reflex is dan een
+slimmere enkele regel te zoeken. Wat werkte was twee ZWAKKE condities die allebei nodig zijn:
+
+1. **elk gevallen woord is geen productwoord** — `dispenser` en `slang` staan in de categorienamen,
+   `solar` en `professionele` niet. Alleen dit: 10,5% van 400 rijen omhoog, met `Deep Blue Sea` →
+   Dekbedovertrekken erbij, want een filmtitel staat óók niet in de categorienamen.
+2. **de bestemming vertegenwoordigt de KOP van de query** — anders gaat de pagina niet over wat je
+   vroeg. Alleen dit zou `wattenschijfjes dispenser` niet tegenhouden.
+
+Samen: 3,0% omhoog en de stijgers zijn herkenbaar (`ivoor kleur pumps` → Pumps, `Ted Baker Elissa
+Shopper` → Shoppers). Als één regel niet scheidt, is de vraag niet "welke regel is slimmer" maar
+"welke tweede vraag stel ik erbij" — precies de additieve les uit de stemmer-entry hieronder, in een
+andere gedaante.
+
+Detail dat het verschil maakte: **staart-match, geen containment.** `slang` is de kop van
+"Tuinslangen" en telt dus als productwoord; `crepe` is een PREFIX van "Crepepapier" en telt niet —
+met containment was `crepe pannenkoekenpan` juist de rij geweest die de regel moest redden. Zelfde
+keuze als de V62-vloer in `9a4d822`, om dezelfde reden.
+
+---
+
+## Een overgeschreven TASKS-punt is geen open punt (2026-09-03)
+
+De cross-maincat fallback stond als open in de entry van 03-09, overgenomen uit die van 02-09. Hij was
+al gebouwd — in V67 (`151d800`), inclusief de A/B, en de commitboodschap beschrijft hem woord voor
+woord zoals het "openstaande" punt hem vraagt. Dat is de tweede keer in twee dagen: dezelfde sessie
+ontdekte al dat "de staart van `process_url_v2` is niet gedeeld" ook al door V67 was opgelost.
+
+**Voor je aan een meegesleept punt begint: `git log -S"<de functienaam>"` en lees de commitboodschap.**
+Dat kost een minuut en bespaarde hier een A/B over 1.400 URL's. Het patroon ontstaat doordat een
+sessie-entry de open punten van de vorige overneemt zonder ze opnieuw tegen de code te houden.
+
+---
+
+## Een scoringswijziging A/B'en hoeft geen Tier-A run te zijn (2026-09-03)
+
+`main_parallel_v2.py` neemt gewoon een CSV met een `r_url`-kolom, dus je kunt op precies de rijen
+draaien die je wilt beoordelen. 20 URL's duren een paar minuten, 400 een kwartier — waar een volle
+Tier-A run uren kost en geen backend-herstart overleeft.
+
+De review-URL's zelf zijn terug te vinden zonder de oude export: de zoekterm staat in de R-url-slug,
+dus `WHERE split_part(rtrim(url,'/'), '/r/', 2) = ANY(%s)` op `bt.hs_r_urls` met de queries als
+underscore-vorm gaf 20 van de 21 terug. Recept: gelabelde set voor de RICHTING (doet hij wat Joep
+vroeg), willekeurige steekproef voor de BLAST RADIUS (wat doet hij met de rest).
+
+---
+
+## `reconcile_run_logs` heelt alleen wat in zijn venster valt (2026-09-03, GSD)
+
+TASKS ging ervan uit dat drie stale `mc_ids_efficy`-waarden vanzelf goed zouden komen, want reconcile
+leest de merchant_id uit de live campagnes. Dat klopt alleen voor shops die hij ZIET: hij inventariseert
+via `change_event`, en Google Ads bewaart dat ~30 dagen. `reconcile_run_logs(days=30, dry_run=True)`
+zag 52 shops en plande 0 wijzigingen — deze drie zaten er niet bij, want er is voor hen al maanden geen
+campagne aangemaakt. De live waarden staan in de TASKS-entry; zelfheling komt hier niet.
+
+---
+
 ## Eén label dat zowel toestand als lidmaatschap is, kun je niet "gewoon laten staan" (2026-09-03, GSD low-linkage)
 
 Joep vroeg waarom `GSD_LL_PAUSED` bij het weer activeren verwijderd wordt, en of het niet kon

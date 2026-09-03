@@ -65,6 +65,43 @@ Open:
 - [ ] **Overweeg de backfill periodiek te draaien** i.p.v. eenmalig — nieuwe campagnes van een
       LL-shop krijgen hun lidmaatschap nu pas als die shop weer in de feed opduikt.
 
+### 2026-09-03 (7) — Openstaande TASKS-punten opgepakt: V68, de dependency-ingest en twee dubbele regels
+
+Joep vroeg de hoop "echt werk, kan ik oppakken" af te werken. Commits `030e5ea`, `d9c9b29`,
+`445c758`, `071cdf2`. Lessen in LEARNINGS (zelfde datum).
+
+Gedaan:
+
+- [x] **V68 — de te hard afgestrafte B→D-rijen**, 8 van de 9 gerepareerd. Zie het punt in entry (5)
+      voor de regel, de meting en de misser. De A/B ving twee fouten in mijn eigen werk: een noodrem
+      die de regel omkeerde en een conditie die zijn eigen docstring tegensprak.
+- [x] **De cross-maincat fallback bleek al gebouwd** in V67 (`151d800`), inclusief A/B. Punt gesloten
+      zonder code te schrijven; zie entry (5).
+- [x] **`Facet Value Dependency` wordt ingest** — 70 events over 25 aug, alle 70 resolved. Zie entry
+      (3) van 02-09.
+- [x] **`toRelativeUrl()` / `strip_domain()`** structureel dicht via een export-endpoint. Zie entry
+      (4) van 01-09.
+- [x] **`poll_task` telt op over herstarts heen**, met de tellingen gemarkeerd als ondergrens. Zie
+      entry (6).
+- [x] **De drie stale `mc_ids` gemeten** en de aanname in TASKS weerlegd: reconcile ziet ze niet, want
+      zijn venster is `change_event` (~30 dagen). Zie entry van 01-09 (5).
+
+Open:
+
+- [ ] **De drie `mc_ids`-writes wachten op Joeps go.** Waarden en plan staan in de entry van 01-09 (5);
+      schrijven gaat via `push_mc_ids_to_redshift()`, niet met de hand.
+- [ ] **De GSD-tripwire op "twee runs hebben gedraaid"** overgeslagen: `gsd_ll_service.py` en
+      `gsd-campaigns.html` waren op dat moment in gebruik bij een parallelle sessie (inmiddels
+      gecommit als `b060ab1`/`07b5970`, dus nu vrij).
+- [ ] **De twee UI-nafjes in Auto-Redirects** (histogramtelling terug, Old/New-cellen afkappen i.p.v.
+      `break-all`) staan in TASKS als "alleen als Joep hem mist" en "als dat netter moet" — dat is
+      smaak, dus gevraagd en nog geen antwoord.
+- [ ] **De Healthscore categorie/maincat-tweelingen** (~400 regels bijna-identieke SQL) is het enige
+      punt uit die hoop dat nog helemaal open staat. Vraagt volgens de notitie zelf een
+      OLD-vs-NEW-harness met een volledige build tegen Redshift.
+- [ ] **`grote wasknijpers` krijgt helemaal geen redirect meer** (0 D, geen bestemming). Was in de
+      review een van de negen te-hard-rijen; nu een ander probleem, niet door V68 geraakt.
+
 ### 2026-09-03 (6) — Healthscore live-check, en het selectiemechanisme van Auto-Redirects naar acht tools
 
 Drie vragen van Joep op één dag. Commits `a4498ae` (frontend + endpoints) en `f1af046`
@@ -120,9 +157,17 @@ Gedaan — **daily_automation**:
       Zonder die haak liet een herstart van uvicorn midden in een publish de status-URL 404'en en viel
       de hele daily automation om na 10 pogingen — bij de laatste stap, ná alle generatie. Gemeten
       tegen de oude versie uit git: die faalt, de nieuwe herstart en levert af.
-- [ ] **`poll_task` telt niet op over herstarts heen.** Na een herstart rapporteren `urls_pushed` /
-      `records_pushed` alleen de rest, en die getallen gaan door naar de Slack-melding. De fix hoort
-      in `poll_task` zelf en raakt alle vier de aanroepers — bewust niet meegenomen.
+- [x] **`poll_task` telt nu wél op over herstarts heen** (opgepakt 03-09). De poller onthoudt de
+      laatste `progress` van elke taak die hij loslaat en geeft die terug onder
+      `_interrupted_progress`; `_fold_interrupted()` telt ze per stap bij het eindresultaat op, met de
+      progress→result-sleutelmapping bij de stap die hem kent (`urls_done`→`urls_pushed` voor
+      kopteksten, `records_pushed`+`urls_done` voor FAQ). Optellen mág omdat `mode="new"` de herstarte
+      taak alleen de nog niet gelande URL's geeft: de pogingen zijn disjunct. **Het blijft een
+      ondergrens** — wat de stervende taak in zijn laatste seconden deed is nooit gepolld — en dat
+      staat nu in de melding in plaats van als exact getal: `5200+ URLs` plus
+      `[na 1 herstart(s), tellingen zijn ondergrenzen]`. Getest op drie gevallen: kopteksten
+      4.000+1.200=5.200, FAQ 36.000 records / 5.900 urls, en zonder herstart blijft het resultaat
+      byte-identiek (geen extra sleutels).
 
 ### 2026-09-03 (5) — Openstaande punten uit TASKS opgeruimd: de rurl-stemmer, drie liegende kolommen, twee frontend-achterstanden
 
@@ -171,21 +216,45 @@ Gedaan:
 
 Open:
 
-- [ ] **De 9 te hard afgestrafte rijen.** `toiletverhoger met armleuningen` → Toiletverhogers,
-      `solar buitendouche` → Buitendouches, `professionele mandoline` → Mandolines, `crepe
-      pannenkoekenpan` → Pannenkoekenpannen, `strandlaken voor ligbed` → Strandlakens, `grote
-      wasknijpers` → Wasknijpers, `toilet opstapje` → Opstapjes, `relax massagestoel` →
-      Massagestoelen, `solar+lampionnen` → Lampionnen. Allemaal: de categorienaam ís de kop van de
-      query en alleen een bijvoeglijke bepaling valt weg, maar dekking telt tókens en niet WELK token
-      — 50% is 50%, of je de kop raakt of juist mist, en V64 kapt beide af. **Mijn kandidaat-regel
-      ("categorienaam == kop van de query") is nagerekend en scheidt niets**: hij zegt óók ja tegen
-      `kokers voor posters` en `lopers gang`. Er is dus nog geen fix; wie het oppakt heeft een
-      discriminator nodig die wél werkt (kandidaat: is het onbedekte token een bijvoeglijk naamwoord
-      of een productwoord?).
-- [ ] **De cross-maincat fallback door `score_search_derived`** — het enige punt van de shortlist dat
-      ik niet gedaan heb. De notitie zegt zelf "raakt de hele populatie, dus eigen review + A/B", en
-      dat klopt: het vervangt de platte ladder 80/72/60/45 voor élke rij in die branch. Zonder A/B
-      over ~1.400 URL's is het gokken.
+- [x] **De 9 te hard afgestrafte rijen — V68, 8 van de 9 gerepareerd (03-09).** De discriminator is
+      niet de woordsoort maar of het gevallen woord een PRODUCT noemt: `wattenschijfjes dispenser` en
+      `hogedrukreinigers slang` laten `dispenser` en `slang` vallen, en dat zijn dingen die je koopt.
+      Een token telt als productwoord als het voorkomt in de categorienamen van de taxonomie —
+      gelijkheid, of het token is de STAART van een categorienaam (`slang` in "Tuinslangen"), want
+      Nederlands zet de kop achteraan. **Bewust geen vrije containment**: dat zou `crepe` aan
+      "Crepepapier" koppelen en juist de rij verliezen die de regel moet redden (zelfde keuze als de
+      V62-vloer in `9a4d822`). De woordenlijst wordt door de worker geïnjecteerd
+      (`set_category_vocabulary`), zodat de scorer geen eigen datadependency krijgt.
+      **Tweede voorwaarde, en die was nodig:** de bestemming moet de KOP van de query
+      vertegenwoordigen. Zonder die eis tilde de A/B `Deep Blue Sea` → Dekbedovertrekken en `emaille`
+      → Installatiedraden naar tier C — een filmtitel is net zo min een productwoord als `solar`.
+      Kop = laatste inhoudswoord, of het woord vóór het eerste voorzetsel (`toiletverhoger MET
+      armleuningen` gaat over de toiletverhoger).
+      **Gemeten, in twee rondes.** Op de 20 gelabelde rijen: 8/9 te-hard staat nu in C
+      (toiletverhoger 41→50, professionele mandoline 41→50, crepe pannenkoekenpan 44→50, solar
+      lampionnen 41→50; de andere vier stonden al in C), `wattenschijfjes dispenser`,
+      `hogedrukreinigers slang` en `thermostaat schakelaar` blijven in D, en van de twijfelgevallen
+      gaat alleen `volwassen luiers` mee. **Eén bekende misser**: `toiletsteunen hulpmiddelen` 41→50,
+      want "Toiletsteunen" bestaat niet als categorienaam — dat is D→C, dus de reviewwachtrij in en
+      niet naar productie. Op 400 willekeurige R-urls: **12 omhoog (3,0%), 0 omlaag, 0 bestemmingen
+      veranderd**. `grote wasknijpers` krijgt inmiddels helemaal geen redirect meer (0 D) — dat is een
+      ander probleem dan de vloer.
+      **De A/B ving een fout in mijn eigen noodrem.** `_is_qualifier` stond als
+      `size_or_colour(t) or not product_noun(t)`, en met een lege woordenlijst leest dan élk woord als
+      bijzaak — de "V67"-arm kwam terug met MEER tier C dan V68, wat een vloer nooit kan doen. Zonder
+      woordenlijst moet het antwoord V67's antwoord zijn. Er staat nu een test op.
+      Noodrem: `RURL_V68_PRODUCT_NOUNS=0`. 153 tests groen (was 148 + 5 nieuwe).
+
+- [x] **De cross-maincat fallback was al gebouwd — in V67 (`151d800`), niet open (vastgesteld 03-09).**
+      Het punt is per ongeluk overgeschreven uit de entry van 02-09 zonder de code te toetsen; zelfde
+      soort stale punt als "de staart van `process_url_v2` is niet gedeeld". `_cross_maincat_base()`
+      draagt sinds V67 alleen de identiteitsclaim (72/65/45) en `score_search_derived` doet dekking,
+      dominantie en producttelling — met de dekking gemeten tegen de EINDbestemming
+      (`matched_category` + `facet_value_names` + `redirect_url`) en `target_is_faceted=bool(facet_fragment)`,
+      precies zoals het punt het beschrijft. De A/B staat in de commitboodschap van `151d800`:
+      `bloempotten 20 liter` → Bloempotten viel op de H1-recall van 80 naar 38 en staat met
+      `_tokens_not_represented` op 78, en `printer en computer tafel` → Printers leest onder beide
+      metrieken 33% en blijft gedegradeerd.
 - [ ] **De prijs van de vloer-guard** (uit entry 7 van 02-09) blijft een beslissing voor Joep: een
       verloren redirect in D tegen een onzin-match in de reviewwachtrij.
 - [ ] **Er stond werk van een andere sessie in de working copy** (`frontend/redirect-tool.html`,
@@ -309,9 +378,10 @@ Open:
 - [ ] **Modelnaam 5514 (Laptops) is niet getoetst**: in die categorie staat élk facet op
       `isSeoFacet=false` en bevat het noscript alleen "Kies categorie". Zoek een categorie waar de
       parent (Productlijn 2306) zelf wél gelinkt wordt.
-- [ ] **De backend op :8003 draait nog zonder deze wijziging** — geen `--reload`, dus de vaste combo
-      gaat pas mee vanaf de eerstvolgende herstart (kill + relaunch, zie
-      [[dm_tools_backend_no_reload]]). De frontend-wijzigingen zijn wél al live (statische bestanden).
+- [x] **Live sinds de herstart van 03-09 13:11.** Nagemeten met een echte run: 3 rijen in
+      `no_script_facet_links`, slot 1 is `430884` / `populaire_serie~4379309` met `pinned: true`,
+      facet 3821 Type, `present: true`, http 200 — en alle zes checks `passed`. Bevestigt meteen
+      dat de dependent-facet-bug ook vandaag nog weg is.
 
 ### 2026-09-02 (8) — Auto-Redirects: een run doorvoeren vanuit de tool zelf
 
@@ -547,8 +617,8 @@ tegen een limiet van 2 uur.
 
 **Open:**
 
-- [ ] **Niet live geverifieerd.** De backend op :8003 is niet herstart (draait zonder `--reload`), en
-      er is geen run gedaan — niet tegen staging en niet tegen productie. De volgende dagelijkse
+- [ ] **Half af: de code draait live sinds de herstart van 03-09 13:11, maar er is nog geen run
+      overheen gegaan** — niet tegen staging en niet tegen productie. De volgende dagelijkse
       automation is het eerste echte bewijs; kijk in het runresultaat naar `duration_sec` en naar
       `skipped`-regels met `delete failed:`.
 - [ ] **20 workers is een gok, geen meting.** Niemand weet wat website-configuration aan concurrency
@@ -664,10 +734,18 @@ https://claude.ai/code/artifact/7e69740b-5ad7-41ec-bac9-341128dc3ce5
 - [ ] **Eén record wijkt af in de verkeerde richting:** cat 9002870 / `productlijn_koffiepads~s_boon
       ~s_smaak` kreeg op 27-08 handmatig `!!sub_category!!` op de tweede plek en zegt nu "Shop
       Koffiepads met korting" waar de andere ~86k de volle frase herhalen. Status `pushed`.
-- [ ] **`Facet Value Dependency` wordt nog niet ingest.** Bestaat wél (2.497 events / 30 dagen) en is
-      volgens `022ac44` het mechanisme waarmee een productlijn-facet aan zijn maincats komt, maar de
-      payload draagt `ChildFacetId`/`ParentFacetId` en geen `FacetId` — `_extract()` moet daarvoor
-      uitgebreid worden. De boekhouding maakt het nu wel zichtbaar.
+- [x] **Wordt nu ingest (03-09).** `Facet Value Dependency` staat in `FACET_ENTITIES` én in
+      `FACET_LEVEL` (een dependency bepaalt wáár een facet verschijnt — een feit over het facet, niet
+      over één van zijn waarden). De payload is
+      `{ChildFacetId, ParentFacetId, ParentFacetValueId, CreatedAt, Notes}` en `entityId` is het id
+      van de dependency-RIJ, dus geen facet en geen waarde: die mag je niet als een van beide lezen.
+      **Toegewezen aan het CHILD-facet**, en bewust **zonder** `value_id`: `ParentFacetValueId` is een
+      waarde van het PARENT-facet, en pass 2 voert elk (value_id, facet_id)-paar dat hij ziet in
+      `pa.facet_watch_value_facet` — die combinatie zou die map voor elke latere lookup vergiftigen.
+      Echte ingest over 25 aug gedraaid: **70 dependency-events, alle 70 `resolved`**, toegewezen aan
+      Productlijnen: UGG / Swarovski / Gucci / NIVEA / Schwarzkopf / Teva / JBL / Hot Wheels mét hun
+      volledige maincat-lijst. Precies de familie die de watch niet kon zien. Ze vallen onder
+      `exclude_auto` (dat staat default aan), dus het overzicht loopt er niet mee vol.
 - [ ] **Fase 5 rest:** de Healthscore categorie/maincat-tweelingen samenvoegen (~400 regels
       bijna-identieke SQL die de tabellen voedt waar live vanuit gepusht wordt — vraagt een
       OLD-vs-NEW-harness met een volledige build tegen Redshift), en de listing-tree-helpers naar
@@ -677,8 +755,8 @@ https://claude.ai/code/artifact/7e69740b-5ad7-41ec-bac9-341128dc3ce5
       Alle tien consumenten doen uitsluitend reads, dus dit voegt alleen retry en een consistente
       `X-User-Name` toe; `keyword_redirect_service` deelt zijn sessie met de Search API (alleen de
       taxv2-call omgezet) en `ai_titles_service` had al eigen retry.
-- [ ] **Backend is niet herstart,** dus niets hiervan draait live op :8003. Uvicorn draait zonder
-      `--reload`.
+- [x] **Herstart gedaan op 03-09 13:11**, dus alles uit deze sessie draait nu live op :8003
+      (inclusief de gedeelde taxv2-client uit `6fe9a7c`).
 - [x] **Het auditrapport noemde 156 s voor GSD Check** — gecorrigeerd naar de gemeten 9,4 s, plus
       een statusblok per fase. Zelfde URL.
 - [x] **De "mogelijke bug" in DMA Exclusions** (`parent_resource` onvoorwaardelijk toegewezen) —
@@ -786,8 +864,10 @@ Gedaan:
 
 Nog te doen:
 
-- [ ] Op de live :8003 bekijken. De backend draaide deze sessie niet in WSL, dus alleen op de mock
-      gecontroleerd. Hard refresh (Ctrl+Shift+R) nodig, anders pak je de gecachte HTML.
+- [x] **Op de live :8003 bekeken** (03-09, screenshot op 1400px): de standup-tabellen renderen met
+      echte data en de categorienamen staan op één regel — "Kledingkasten / Meubels",
+      "Vuilnisbakken / Woonaccessoires", "Rolgordijnen / Woonaccessoires". Geen afbreking, geen
+      scrollbalk nodig op die breedte.
 
 ### 2026-09-01 (6) — Twee GSD-runs tegelijk: de oorzaak achter de errors, de dubbele MC-accounts en de halve listing-trees
 
@@ -890,9 +970,16 @@ Open:
       (lock per (parent, shopnaam) + hercheck ín de lock) en de twee weesaccounts zijn verwijderd.
       Correctie op de inventarisatie hierboven: het waren er **twee**, niet vier — Hondenvoerdirect NL
       en Speelgoedvoorvolwassenen hebben één MC id en kregen twee *campagnesets*.
-- [ ] **Drie stale waarden** (Kamera-express 182 NL, Hbm-machines 207860 NL, Welhof.com|BE 651763 BE)
-      staan er nog. Geen dubbelen, dus buiten de opdracht gelaten; `reconcile_run_logs` corrigeert die
-      zodra hij die shops in zijn venster ziet, want hij leest de merchant_id uit de live campagnes.
+- [ ] **Drie stale waarden — gemeten op 03-09, alle drie bevestigd stale; de write staat klaar maar
+      is niet gedaan.** Live merchant_id uit de ENABLED campagnes van die shops, één consistente
+      waarde per shop: **182 Kamera-express.nl NL** 5619578895 → `670182955` (7 campagnes),
+      **207860 Hbm-machines.com|NL** 5832402430 → `677034425` (6), **651763 Welhof.com|BE BE**
+      5834452853 → `746168817` (5). `reconcile_run_logs(days=30, dry_run=True)` ziet 52 shops en
+      plant 0 wijzigingen: **deze drie vallen buiten zijn venster**, want er is voor hen geen recente
+      campagne aangemaakt — zelfheling komt hier dus niet vanzelf. `mc_upsert_plan()` met de gemeten
+      waarden plant netjes 3 updates, 0 inserts, 0 repairs. Schrijven gaat via
+      `push_mc_ids_to_redshift()` (delete-before-insert + advisory lock), niet met de hand.
+      **Wacht op Joeps go**: het is productie-state aan de GSD-kant.
 
 ### 2026-09-01 (4) — Excel-export van Canonicals en Redirect Generator in het Redirect-tool-formaat
 
@@ -925,9 +1012,14 @@ Gedaan:
 
 Open:
 
-- [ ] **`toRelativeUrl()` en `strip_domain()` moeten in sync blijven.** Wie de pad-regel aanpast,
-      moet `301-generator.html` meenemen. Het gat structureel dichten betekent een export-endpoint
-      voor de Redirect Generator geven, zoals Canonicals er een heeft — niet een derde kopie.
+- [x] **Structureel dicht (03-09).** De Redirect Generator heeft nu zijn eigen export-endpoint,
+      `POST /api/301-generator/export-excel`, precies zoals Canonicals er een heeft: zelfde
+      kolomcontract, statuscode 301 en label `JVS Redirects <dd-mm-jjjj>`. `toRelativeUrl()` en
+      `_labelDate()` zijn uit `301-generator.html` verdwenen — de pad-regel staat weer op één plek
+      (`strip_domain`) en de labeldatum komt van de server, dus ook het UTC-risico na 22:00 CEST is
+      weg. Getest tegen het draaiende endpoint met de vijf randgevallen: volledige URL met facet,
+      bare hostname, al-relatief, query+fragment (worden gestript), hostname zonder pad (→ `/`),
+      lege waarde en een kale slug (→ `/losse_slug`). Allemaal identiek aan `strip_domain`.
 - [ ] **"Copy for Excel" kopieert nog twee kolommen met absolute URL's** in beide tools. Bewust
       gelaten: dat klembord is voor los kijkwerk, niet voor de import. Als dat in de praktijk
       tóch de route naar de Redirect tool is, moet hij mee.
@@ -978,8 +1070,9 @@ Gedaan:
 
 Open:
 
-- [ ] **Backend herstarten** — `--reload` staat uit, dus de Python-fix én de dropdown zijn nog niet
-      live. Bewust niet zelf gedaan: kill+relaunch sloopt een lopende Tier-A/optimizer-run.
+- [x] **Herstart gedaan op 03-09 13:11** (met Joeps toestemming, niets liep). `GET
+      /api/indexnow/domains` antwoordt live met beide domeinen en `configured:false` voor
+      www.beslist.be — precies zoals bedoeld zolang `INDEXNOW_KEY_BE` leeg is.
 - [ ] **`INDEXNOW_KEY_BE` invullen** — Joep laat een .be-key aanmaken en hosten en communiceert die
       later (afgesproken 2026-09-01). Tot die tijd weigert de tool .be-submits vooraf, zoals bedoeld.
 - [ ] **n8n-tak voor .be** — de fetch-query filtert op `dv.url like '%beslist.nl%'`, dus de
