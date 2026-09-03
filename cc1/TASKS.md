@@ -3,6 +3,47 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-03 (11) — Facet Watch: doorklikken naar de facetwaarden, plus vijf UI-wensen
+
+Commits `7c60bee` (feature) en `a5a96e3` (labels + hover). Lessen in LEARNINGS en UI_BLUEPRINT,
+zelfde datum. Vijf punten van Joep uit `suggestions.txt`, plus drie die hij tijdens het bouwen zag.
+
+Gedaan:
+
+- [x] **Doorklikken naar de facetwaarden**, het echte verzoek ("kan ik op de één of andere manier
+      vanuit de uitklaptabel en via *Laatst aangemaakte / gewijzigde facetten* bij de eigenlijke
+      facet values komen?"). Eén paneel voor beide plekken; `data-cols` op de rij zegt alleen hoe
+      breed de tabel eromheen is (8 in de maincat-uitklap, 9 in de facettabel). Nieuw endpoint
+      `GET /api/facet-watch/facet-values` dat drie bronnen samenvoegt: de **eventstore** (welke
+      waarden geraakt zijn, wanneer, door wie, en of het de waarde, het label of een afhankelijkheid
+      betrof), de **Taxonomy API** (seoPriority, sequence, invalidReason) en **pa.urls** (of er een
+      pagina op die waarde bestaat). Eventstore is de primaire bron — zie LEARNINGS voor waarom en
+      wat het kost. Gewijzigde waarden bovenaan, aanvullen tot 300 op sequence, en het paneel zegt
+      zelf of dat het hele facet is.
+- [x] **Het URL-aantal ís de link**, naar de kortste pagina op die waarde. Een telling zonder de
+      bijbehorende pagina is de helft van het antwoord, en het scheelt een kolom die bij deze
+      tabelbreedte toch buiten beeld viel.
+- [x] **Uitklaptabel-kop niet meer in kapitalen** en **1,5rem lucht** boven en onder de uitklaprij.
+- [x] **Export outlined paars, tekst "Export"** — bij Nieuwe productlijnen én bij de knop bovenaan
+      dezelfde pagina, want UI_BLUEPRINT stelt sinds 03-09 dat Export paars is. De knoppentabel in
+      dat document zei nog "oranje (Export)" en sprak zijn eigen regel tegen; rechtgezet.
+- [x] **De 301/locale-uitleg ook onder de "i"** naast Verhuisde facetten, en later ook de
+      klik-uitleg onder een nieuwe "i" bij *Laatst aangemaakte / gewijzigde facetten*.
+- [x] **Waarde-labels outlined** (`nieuw`, `gewijzigd`, `ongeldig`, `verwijderd`) en **`.table-hover`
+      weg** bij de facettabel. Beide van Joep tijdens het bouwen.
+- [x] **De subtabellen op `width: auto`.** Ze stonden op 100% en rekten mee met de tabel eromheen,
+      die met `.tbl-nowrap` breder is dan de kaart — de laatste kolom stond als `Doo` / `Lists`
+      buiten beeld. Gold al voor de bestaande maincat-uitklap, niet alleen voor de nieuwe tabel.
+
+Open:
+
+- [ ] **De naam van een verwijderde waarde is `?`** als het DELETE-event er geen droeg. De garbage
+      bin (`/api/garbage-bin`, al gebruikt door `get_deletions`) kent die naam wél — dat zou de rij
+      compleet maken. Klein, en alleen zichtbaar bij verwijderde waarden.
+- [ ] **De pa.urls-scan draait bij elke paneel-opening** (2,4 s worst case op `merk`). Prima voor
+      klikken met de hand; als het paneel ooit vaker opengaat, is een cache per (slug, dag) de
+      volgende stap.
+
 ### 2026-09-03 (10) — Facet Watch: vier modules erbij, en ronde selectievakjes dashboardbreed
 
 Commits `7a33b8c` (facet-watch) en `f29142f` (ui). Lessen in LEARNINGS, zelfde datum. Vier verzoeken

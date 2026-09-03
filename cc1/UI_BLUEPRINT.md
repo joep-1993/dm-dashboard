@@ -203,6 +203,24 @@ other tool uses the grey default. New tools follow the grey default.
   zien welke je leest. Zet dat gewicht niet op de bijschriftklasse (`.muted-note` in Bot Hits
   zit óók op veldlabels en statusregels) maar op een eigen `.chart-title`: zelfde maat en
   kleur, alleen zwaarder.
+- **Een subtabel in een uitklappaneel staat op `width: auto`, niet op 100%** (Facet Watch,
+  2026-09-03). De `<td colspan="N">` van een detailrij is zo breed als de TABEL eromheen, en
+  die is met `.tbl-nowrap` breder dan de kaart. Op `width: 100%` rekt de subtabel dus mee tot
+  buiten het zichtbare vlak en staat zijn laatste kolom achter de horizontale scroll — in de
+  screenshot van die dag als `Doo` en `Lists`. Content-breed pakt hij links en past hij binnen
+  de kaart. Zet daarnaast de kolom die je komt halen niet achteraan: bij Facet Watch schoof de
+  link naar de pagina naar de URL-telling zelf (het aantal *is* de link), zodat er één kolom
+  minder is om buiten beeld te vallen. En scrol bij het openen de wrapper terug naar links
+  (`wrap.scrollTo({left: 0})`) — anders opent het paneel met zijn begin buiten beeld.
+- **Een tabel met uitklaprijen krijgt GEEN `.table-hover`** (Joep, 2026-09-03). `style.css` tint
+  een hover-rij met `--flat-accent-soft`; de open rij heeft al zijn eigen tint `#f1edfa` en het
+  paneel eronder zijn eigen grond. Bij het bewegen van de rij naar het paneel liep er dan een
+  derde kleur over de tabel. De caret en `cursor: pointer` dragen de klikbaarheid al.
+- **Een tweede uitklapniveau krijgt een eigen tint en één-open-tegelijk over beide niveaus**
+  (Facet Watch, 2026-09-03: maincat > facet > waarde). De diepere laag is iets paarser dan de
+  bovenliggende, zodat bij een dubbele uitklap te zien is welk paneel bij welke rij hoort. Bouw
+  het paneel één keer en laat de rij zeggen hoe breed de tabel eromheen is (`data-cols`), dan
+  werkt dezelfde functie in twee tabellen met een verschillend aantal kolommen.
 - **A cell that drives another section: pointer + hover tint + a pinned row**
   (SEO Stats' Per-day overview, 2026-08-17). Two text columns there are clickable —
   Day filters the table on that weekday, Date sets the Top categories and
@@ -711,8 +729,8 @@ inline the hexes.
 | Purpose | Class | Look | Placement |
 |---------|-------|------|-----------|
 | Run / execute (primary CTA) | `btn btn-run` | **full orange** `#CC5500`, hover coral | **far right** of the section (`d-flex justify-content-end`) |
-| Orange non-run action (Export, **"+ Add rule"**) | `btn btn-outline-orange` | orange outline, fills orange on hover | bij de rij die hij aanvult |
-| Any other action, **Refresh**, **Preview** | `btn btn-outline-purple` | **purple outline** `#5e4a90`, fills purple with white text on hover | usually right (`ms-auto`) |
+| Orange non-run action (**"+ Add rule"**) | `btn btn-outline-orange` | orange outline, fills orange on hover | bij de rij die hij aanvult |
+| Any other action, **Refresh**, **Preview**, **Export** | `btn btn-outline-purple` | **purple outline** `#5e4a90`, fills purple with white text on hover | usually right (`ms-auto`) |
 | Refresh specifiek | `btn btn-outline-purple` + `↻` glyph | idem, mét het pijltje ervoor | card-header of filterrij, rechts |
 | Destructive (Stop / Remove / Cancel) | `btn btn-outline-red` | **rode outline** `#d64545` met label `#c03b3b`, vult bij hover **vol rood** `#d64545` met witte tekst — *only while available* | — |
 | Geen eigen betekenis | `btn btn-outline-secondary` / `-primary` / `-info` / `-success` / `-warning`, `btn-secondary`, `btn-preset` | **neutraal grijze outline**, grijze hover | — |
@@ -1189,6 +1207,28 @@ is de voorkeur voor een *nieuwe* labelkolom, niet iets om er halverwege een rij 
 pas vanaf ongeveer `#CC5500` (4,32:1) en dan nog krap. Reken het na voor je een nieuwe
 `badge-*`-tint invoert.
 
+**Outlined labels: de randkleur is niet de tekstkleur** (Facet Watch, 2026-09-03). Staat een label
+in ELKE rij van een lange tabel, dan nemen gevulde vlakken het beeld over en wil je de outlined
+variant. Maar dezelfde hex die als rand prima leest, faalt als tekst op wit: `#ffc107` haalt 1,7:1
+en `#fd7e14` 2,9:1. Neem de donkere tegenhanger die elders in de app al die rol heeft, en zet de
+rand met `box-shadow: inset 0 0 0 1px` (net als `.badge-unknown`) zodat een outlined label niet 2px
+groter wordt dan zijn gevulde buur:
+
+| gevuld | outlined: rand | outlined: tekst | herkomst van die tekstkleur |
+|---|---|---|---|
+| `badge-new` `#198754` | `#198754` | `#146c43` | donkere groentint |
+| `badge-attached` `#ffc107` | `#ffc107` | `#8a5a00` | `.info-note`-tekst |
+| `badge-auto` `#fd7e14` | `#fd7e14` | `#b45309` | de DRY RUN-badges |
+| `badge-del` `#d64545` | `#d64545` | `#c03b3b` | `btn-outline-red`-label |
+
+Gebruik het verschil, want het draagt betekenis: in Facet Watch is **gevuld = deze RIJ is
+nieuw/aangehangen** en **outlined = deze WAARDE veranderde**, twee niveaus in dezelfde tabel.
+
+**Een vinkje in een tabelkolom is geen label.** Voor een aan/uit-kolom (`seoPriority`) is een badge
+per rij te veel; een groen `✓` en een gedempte `–` zeggen hetzelfde. Let op het teken: `✔` (U+2714)
+pakt in Chrome de emoji-font en **negeert je `color`** — hij blijft blauwpaars hoe hard je ook groen
+zet. `✓` (U+2713) niet.
+
 ## Info tooltips — the "i" button
 
 For a "what is this?" hint next to a header or field, use the inline
@@ -1203,6 +1243,14 @@ nudge `vertical-align:-2px`:
 Give the `<title>` an `id` and rewrite its text at runtime to update the hint
 (e.g. GSD Campaigns' "last successful data load"). In use across GSD Campaigns,
 SEO titles / prio / stats, DMA Exclusions, DM Review, Redirect Tool, R-URL Optimizer.
+
+**Een tooltip van meerdere alinea's: één regel per alinea in de bron** (Facet Watch,
+2026-09-03). De browser toont de tekst van een `<title>` letterlijk, dus de indentatie van je
+HTML komt mee de tooltip in als spaties vooraan elke regel. Breek de zin dus niet netjes af op
+80 tekens; zet elke alinea op één (lange) regel en scheid ze met een lege regel. Een uitlegblok
+kan zo prima ónder de "i" gaan staan in plaats van als banner boven de tabel — Joep vroeg dat
+op 2026-09-03 twee keer op één pagina. Een `.info-note`-banner blijft de vorm voor iets dat je
+móét lezen; de "i" is voor wat je erbij wilt kunnen halen.
 
 ## Het vlakke thema — sinds 2026-08-14 gewoon `style.css`
 

@@ -1,6 +1,62 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## De goedkoopste call bepaalt de vorm van je drill-down (2026-09-03, Facet Watch → facetwaarden)
+
+Een facetrij moest doorklikbaar worden naar zijn waarden. De eerste opzet — "haal de waarden van dit
+facet op en toon ze" — hield stand tot Merk: **9.026 waarden, 3.262 geraakt in 30 dagen, 14,8 s.**
+Twee metingen draaiden dat om:
+
+| call | kosten |
+|---|---|
+| `GET /api/Facets/{id}/values?skip&take` | 500 waarden in ~0,3 s (~290 kB) |
+| `GET /api/Facets/values/{value_id}` | één waarde in ~0,03 s — **42 parallelle lookups in 0,18 s** |
+
+Omdat een losse waarde zó goedkoop is, hoeft de lijst niet de bron te zijn. De **eventstore** is de
+primaire bron (welke waarden zijn geraakt, wanneer, door wie), de API verrijkt alleen — één pagina
+van 500 voor de context, en per id voor wat daarbuiten valt. Uitkomst 1,7 s voor een klein facet en
+4,6 s voor Merk, waarvan 2,4 s de pa.urls-scan.
+
+Drie dingen die daarbij horen:
+
+- **`/api/Facets/{id}/values` geeft 204 bij een facet zonder waarden.** `get_json` struikelt over het
+  lege body; check de status apart. Zelfde familie als de bekende val dat `/api/Facets/values?facetValueId=`
+  niet filtert maar 555k rijen teruggeeft.
+- **Een 404 op een losse waarde is bewijs, een timeout niet.** Alleen de 404 zegt "deze waarde bestaat
+  niet meer"; een netwerkfout zegt dat wij het niet weten. Die twee als hetzelfde tonen is precies de
+  fout die `lookup_failed` in de ingest ooit maakte, dus ze krijgen elk een eigen vlag
+  (`deleted` uit de log, `missing_live` uit de 404).
+- **Een verwijderde waarde bestaat live niet meer en ontbreekt dus juist waar hij interessant is.**
+  Die komt uit de eventstore en wordt gemarkeerd, niet weggelaten. Zijn naam kan `?` zijn: de DELETE
+  in de audit log draagt vaak geen naam (zie de 97%-meting van 28-08).
+
+---
+
+## Eén scan met een regexp verslaat n LIKE-queries op pa.urls (2026-09-03, Facet Watch)
+
+Om per facetwaarde te tonen of er een pagina op bestaat, wilde ik `pa.urls` (1,02 M rijen) bevragen.
+Per waarde een `LIKE '%slug~<id>%'` is n scans; het kan in één:
+
+```sql
+WITH hit AS (
+    SELECT (regexp_match(u.url, '(?:/|~~)' || %s || '~([0-9]+)'))[1]::bigint AS value_id, u.url
+    FROM pa.urls u
+    WHERE u.url LIKE '%/' || %s || '~%' OR u.url LIKE '%~~' || %s || '~%'
+)
+SELECT value_id, count(*) AS n, (array_agg(url ORDER BY length(url), url))[1] AS sample
+FROM hit WHERE value_id = ANY(%s) GROUP BY value_id
+```
+
+De value-id komt uit de URL en wordt **pas daarna** tegen de waarden van dít facet gehouden — op de
+slug alleen filteren is fout, want een slug is niet uniek over facetten (`merk` zit in 540 k URL's,
+verdeeld over tientallen facet-ids). Dezelfde valkuil als in `_count_affected_urls`.
+
+Kosten gemeten: 0,44 s voor alleen de LIKE, 2,4 s met de regexp erbij op de slug `merk`, 0,6 s op een
+gewone slug. **De kortste URL is het beste voorbeeld**: dat is de pagina met alleen dit facet
+geselecteerd, niet een stapeling van zes filters — `min(url)` geeft alfabetisch, niet kortst.
+
+---
+
 ## Een layout-meting in een headless probe: vergelijk met de KLEINSTE rij (2026-09-03, Auto-Redirects)
 
 Ik wilde weten hoeveel rijen van de Push Redirects-tabel over twee regels breken, en had er twee
