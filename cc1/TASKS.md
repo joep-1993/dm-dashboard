@@ -3,6 +3,74 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-03 (5) — Openstaande punten uit TASKS opgeruimd: de rurl-stemmer, drie liegende kolommen, twee frontend-achterstanden
+
+Joep vroeg wat er nog in TASKS stond dat opgepakt kon worden; van de shortlist alles behalve de
+backend-herstart en een echte push vanuit Push Redirects (die twee sloeg hij over). Commits
+`9a4d822`, `9dbdc6b`, `826fd4f`. Lessen in LEARNINGS (zelfde datum, "Elke slimmere regel die ik
+verzon was duurder dan de bug").
+
+Gedaan:
+
+- [x] **De twee falende tests** (`test_v48_bridge_morphology`) — geen achterlopende test maar een bug
+      in `_bridge_stem`: de slot-s werd altijd als meervoudsuitgang afgeknipt, dus 'doos' stamde naar
+      'do' en 'dozen' naar 'dos'. Opgelost met een tweede stamvorm (`strip_plural_s=False`) die de
+      bridge ernaast vergelijkt, plus de consonant-degeminatie die er nog niet in zat (fles/flessen,
+      pan/pannen). De V62-vloer laat een stam van 3 letters nu bridgen op de KOP van een
+      samenstelling ('dos' in 'hobbydos') maar niet vooraan ('bor' in 'bordeauxrod'), met een test
+      van beide kanten. **148 tests groen, was 134 + 2 rood.**
+- [x] **Blast radius gemeten** vóór het commit, want deze stemmer voedt óók de dekkingsteller: 13,3%
+      van de stammen verandert (allemaal korter), stam-botsingen 31 → 33 met de twee nieuwe terecht en
+      **nul verloren**, en over 20.000 willekeurige categorie-paren 52 → 53 bridges (1 erbij, 0 eraf).
+- [x] **`h1_similarity` stond hard op 0** bij de cross-maincat-fallback-return — een rij die wél een
+      bestemming heeft. Nu berekend op de bestemming ná pruning. Bij de returns zónder bestemming is 0
+      juist en dat staat er nu bij.
+- [x] **Dubbele dict-key** op diezelfde plek (`redirect_url` twee keer). Werkte toevallig; nu weg, met
+      een AST-test op de hele klasse. De scan vond verder niets.
+- [x] **"Vloerkleden Buiten, Buiten"** — de dedupe van waardenamen stond in twee vormen in het bestand
+      en ontbrak op de derde plek. Nu één `_join_value_names()` voor alle drie.
+- [x] **`fetched_at` van het search-bewijs** reist mee tot in de output (`search_derived_fetched_at`).
+      `_cache_get` stempelt het op de payload; nagemeten tegen de echte cache dat het tot in
+      `derive_redirect` komt, de vorm die de workers aanroepen.
+- [x] **`_tool-template.html`**: 29 ontbrekende nav-iconen bijgewerkt (droeg er 4 van 33). De nav is nu
+      byte-identiek aan een live pagina op merknaam en actieve dropdown na. Regel + betrap-commando's
+      in UI_BLUEPRINT §Page skeleton.
+- [x] **`seo-stats.html` sparklines** op `fill: 'start'` + `grace: '12%'`, gelijk aan Shop campaigns.
+      Per screenshot bekeken.
+- [x] **Punt "de staart van `process_url_v2` is niet gedeeld" kan DICHT** — V67 heeft
+      `_finalize_redirect()` al gebouwd en die doet alle vier de stappen. De notitie stamt van vóór
+      die commit.
+- [x] **De 28 B→D-rijen langsgelopen** (24 uniek). Verdeling: **10 terecht** (bestemming is een ánder
+      product — `kokers voor posters` → Schilderijen & posters, `lopers gang` → Rode lopers,
+      `wattenschijfjes dispenser` → de schijfjes, `hogedrukreinigers slang` → de machines,
+      `12v koelkast auto` → Koelkasten, `barbecue`/`badkamer ventilator` → huiskamerventilatoren,
+      `toiletsteunen hulpmiddelen` → de brede parent, plus de twee 33%-rijen), **9 te hard** en
+      **5 twijfel** (`thermostaat schakelaar`, `voetbal- en fietspomp`, `antenne haaienvin`,
+      `kunstplanten klimop`, `volwassen luiers`).
+
+Open:
+
+- [ ] **De 9 te hard afgestrafte rijen.** `toiletverhoger met armleuningen` → Toiletverhogers,
+      `solar buitendouche` → Buitendouches, `professionele mandoline` → Mandolines, `crepe
+      pannenkoekenpan` → Pannenkoekenpannen, `strandlaken voor ligbed` → Strandlakens, `grote
+      wasknijpers` → Wasknijpers, `toilet opstapje` → Opstapjes, `relax massagestoel` →
+      Massagestoelen, `solar+lampionnen` → Lampionnen. Allemaal: de categorienaam ís de kop van de
+      query en alleen een bijvoeglijke bepaling valt weg, maar dekking telt tókens en niet WELK token
+      — 50% is 50%, of je de kop raakt of juist mist, en V64 kapt beide af. **Mijn kandidaat-regel
+      ("categorienaam == kop van de query") is nagerekend en scheidt niets**: hij zegt óók ja tegen
+      `kokers voor posters` en `lopers gang`. Er is dus nog geen fix; wie het oppakt heeft een
+      discriminator nodig die wél werkt (kandidaat: is het onbedekte token een bijvoeglijk naamwoord
+      of een productwoord?).
+- [ ] **De cross-maincat fallback door `score_search_derived`** — het enige punt van de shortlist dat
+      ik niet gedaan heb. De notitie zegt zelf "raakt de hele populatie, dus eigen review + A/B", en
+      dat klopt: het vervangt de platte ladder 80/72/60/45 voor élke rij in die branch. Zonder A/B
+      over ~1.400 URL's is het gokken.
+- [ ] **De prijs van de vloer-guard** (uit entry 7 van 02-09) blijft een beslissing voor Joep: een
+      verloren redirect in D tegen een onzin-match in de reviewwachtrij.
+- [ ] **Er stond werk van een andere sessie in de working copy** (`frontend/redirect-tool.html`,
+      lettertype-unificatie). Niet aangeraakt en niet gecommit; `git pull --rebase` weigerde daardoor,
+      maar de push kon fast-forward. Zie LEARNINGS.
+
 ### 2026-09-03 (4) — SEA-piek 2 september: de tROAS-lus uitgezocht
 
 Vraag van Joep, geen code gewijzigd — analyse over Redshift + Google Ads API, opgeleverd als

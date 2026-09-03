@@ -22,6 +22,18 @@ hexes inline, use the token or the class that references it:
   `nav-dropdown-item active` and its group toggle `nav-dropdown-toggle nav-dropdown-active`.
   **Adding a tool means adding its link to the navbar of *every* page**, not just
   the new one.
+
+  **En `_tool-template.html` is een van die pagina's.** Op 03-09-2026 droeg het
+  template 4 iconen op 33 nav-items: precies de vier die ná de icoon-uitrol zijn
+  toegevoegd. De rest was nooit bijgewerkt, want het template staat op geen enkele
+  route en dus valt daar niets op. Dat is de duurste plek om achter te lopen — wie
+  er een nieuwe tool van kopieert, erft de helft. Twee regels om het te betrappen:
+  `grep -c 'nav-dropdown-item' frontend/_tool-template.html` naast dezelfde telling
+  op een echte pagina, en `grep -c 'nav-dropdown-item"><svg'` voor de iconen.
+  Bijwerken kan mechanisch: bouw `href -> <svg>…</svg>` uit een live pagina en vul
+  de items zonder icoon aan. Daarna hoort de hele `<nav>` byte-identiek te zijn op
+  de merknaam en de actieve dropdown na — de enige twee dingen die per pagina
+  verschillen.
 - **Apps button** (far-right, `a.btn.btn-light.nav-dashboard-btn`, links to
   `dashboard.html`): icon-only, inline 9-square-grid SVG with `fill="currentColor"`,
   recoloured brand purple via `.nav-dashboard-btn svg { color:#5e4a90 }`. It and

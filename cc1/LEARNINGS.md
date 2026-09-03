@@ -1,6 +1,66 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Elke slimmere regel die ik verzon was duurder dan de bug (2026-09-03, rurl-stemmer)
+
+Twee tests stonden sinds 02-09 rood met de vraag erbij "of de morfologie of de test achterloopt".
+Het was geen van beide: `_bridge_stem` knipte de **slot-s altijd** af als meervoudsuitgang. In
+'tafels' klopt dat, in 'doos' niet — en dan stamt 'doos' naar 'do' terwijl 'dozen' naar 'dos' stamt,
+dus het enkelvoud ontmoet zijn eigen meervoud nooit. Precies de klasse waarvoor V48 bestaat.
+`aftakdoos`~`aftakdozen` kwam alleen door omdat 'aftakdo' toevallig een prefix van 'aftakdos' is; de
+V62-vloer (stam >= 4) haalde 'doos' en 'poot' daarna alsnog onderuit en toen werden de tests rood.
+
+### De les zit in wat er daarna gebeurde
+
+Ik heb drie keer een "betere regel" bedacht en die drie keer **gemeten voor ik hem hield**:
+
+| Regel | Repareert | Sloopt |
+|---|---|---|
+| s alleen ná een medeklinker | doos, huis, glas | élk verkleinwoord (`opstapjes`) en elke -e-stam (`douches`, `mandolines`) |
+| s alleen als de stam >= 2 lettergrepen | + `mandolines`, `opstapjes` | `shirt~shirts`, `boot~boots`, `bureau~bureaus`; en `lakens` botst op `lak` |
+| + lange-klinkerkern-uitzondering | ook `aftakdoos` | nog steeds de Engelse leenmeervouden |
+
+Elke variant repareerde zijn eigen voorbeeld en brak een groep die ik niet in beeld had. Wat wél
+werkte was niet slimmer maar **additief**: `_bridge_stem(w, strip_plural_s=False)` als tweede vorm,
+en de aanroeper vergelijkt ze allebei. Dat is precies wat de docstring van dat bestand al eiste
+("the bridge must be ADDITIVE") en wat ik drie rondes lang probeerde te omzeilen met een regel die
+het in één keer goed zou doen.
+
+**Als een normalisatie onder twee consumenten hangt, is "slimmer" bijna altijd duurder dan "meer".**
+Deze stemmer voedt de bridge én de dekkingsteller (`_tokens_not_represented`), dus elke regelwijziging
+verschuift scores in de hele populatie.
+
+### Hoe je zo'n wijziging afmeet zonder een run te draaien
+
+Drie goedkope metingen, alle drie op echte data en samen genoeg om het aan te durven:
+
+1. **Hoeveel stammen veranderen** over de 3.596 woorden in de categorienamen (`backend/data/cat_urls.csv`).
+   Eindstand 13,3%, allemaal door de degeminatie — korter, nooit anders van vorm.
+2. **Stam-botsingen gewonnen/verloren.** Groepeer de vocabulaire op stam en vergelijk de parenverzameling
+   vóór en ná: 31 → 33, en de twee nieuwe (`mes~messen`, `pak~pakken`) zijn terecht. **Nul verloren** —
+   dat is het getal dat "additief" hard maakt, en het was bij de tweede variant 5.
+3. **De oude functie erbij laden uit git** (`git show HEAD:path > /tmp/old.py` +
+   `importlib.util.spec_from_file_location`) en beide over 20.000 willekeurige paren halen: 52 → 53
+   bridges, 1 erbij en 0 eraf. Zo zie je de gedragsverandering zonder de hele pijplijn te draaien.
+
+### Drie kleinere dingen uit dezelfde sessie
+
+- **Een dubbele dict-key doet niets en zegt niets.** `'redirect_url'` stond twee keer in dezelfde
+  return; Python houdt stil de laatste over. Die was toevallig de goede (de geprunde URL), dus het
+  wérkte — maar wie de regels herordent verliest de V61-pruning zonder foutmelding. Er staat nu een
+  AST-test op de hele klasse in plaats van op dit geval, en die scan vond verder niets: één regel
+  bewaken is goedkoper dan één bug herstellen.
+- **Toets een kandidaat-regel op de rijen waar hij NIET mag vuren.** Voor de 9 te hard afgestrafte
+  B→D-rijen leek "categorienaam == kop van de query" de fix. Nagerekend zegt die regel óók "ja" tegen
+  `kokers voor posters` → Schilderijen & posters en `lopers gang` → Rode lopers, die juist terecht
+  zakten. De regel scheidt dus niets. Niet doorgevoerd — een fix die de goede en de foute gevallen
+  niet uit elkaar houdt, is geen fix.
+- **`git pull --rebase` weigert met vreemde unstaged wijzigingen, en dat is een signaal.** Er stond
+  werk van een ándere sessie in `frontend/redirect-tool.html`. `git stash` zou dat onder die sessie
+  wegtrekken. Check in plaats daarvan `git rev-list --count HEAD..origin/main`: is dat 0, dan is een
+  gewone `git push` een fast-forward en heb je die rebase helemaal niet nodig. Zelfde familie als de
+  `git add`-val uit `1afce51`.
+
 ## Het effect stond drie dagen ná de oorzaak, en het meetgereedschap loog stil (2026-09-03, SEA-piek 2 september)
 
 Vraag van Joep: wat verklaart de piek in SEA-bezoeken? Op 2 september 13.229 bot-gefilterde
