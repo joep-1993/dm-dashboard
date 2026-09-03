@@ -1067,6 +1067,262 @@ def get_facets(days=1, main_cat_id=None, limit=300, exclude_auto=True):
         return_db_connection(conn)
 
 
+# ---------------------------------------------------------------------------
+# Facetwaarden van één facet — de drill-down onder een facetrij
+# ---------------------------------------------------------------------------
+# Twee ophaalvormen, want de facetten lopen van 30 tot 9.026 waarden uiteen:
+#
+#   `GET /api/Facets/{id}/values?skip&take`  -> 500 waarden per call, ~0,3 s
+#   `GET /api/Facets/values/{value_id}`      -> één waarde, ~0,03 s (42 parallelle
+#                                               lookups in 0,18 s gemeten)
+#
+# De hele lijst tonen is alleen zinnig bij een klein facet; bij Merk (9.026
+# waarden, 3.262 gewijzigd in 30 dagen) is de vraag "welke zijn geraakt", niet
+# "toon negenduizend rijen". Daarom is de EVENTSTORE de primaire bron en wordt
+# live alleen verrijkt — per id als de waarde niet in de eerste pagina zat.
+VALUES_PAGE = 500           # `take` per call; 500 waarden is ~290 kB
+CHANGED_MAX = 300           # gewijzigde waarden per drill-down
+VALUE_WORKERS = 8
+
+
+def _fetch_values_page(facet_id, skip=0, take=VALUES_PAGE):
+    """Eén pagina waarden + het totaal. Een facet ZONDER waarden geeft 204 met een
+    leeg body, en daar struikelt `get_json` over — vandaar de losse status-check."""
+    r = taxv2.get(f"/api/Facets/{facet_id}/values",
+                  params={"skip": skip, "take": take}, timeout=HTTP_TIMEOUT)
+    if r.status_code == 204:
+        return [], 0
+    r.raise_for_status()
+    d = r.json() or {}
+    items = d.get("items") or []
+    return items, (d.get("total") if d.get("total") is not None else len(items))
+
+
+def _fetch_values_by_id(value_ids):
+    """value_id -> dto voor losse waarden, plus de ids die aantoonbaar WEG zijn.
+
+    Het onderscheid tussen 404 en een netwerkfout is het hele punt: een 404 zegt
+    dat de waarde niet meer bestaat (en dus verwijderd is), een timeout zegt
+    alleen dat wij het niet weten. Die twee als hetzelfde tonen is precies de
+    fout die `lookup_failed` in de ingest ooit maakte.
+    """
+    found, gone = {}, set()
+    if not value_ids:
+        return found, gone
+
+    def one(vid):
+        try:
+            r = taxv2.get(f"/api/Facets/values/{vid}", timeout=HTTP_TIMEOUT)
+            if r.status_code == 404:
+                return vid, None, True
+            r.raise_for_status()
+            return vid, r.json(), False
+        except (requests.RequestException, ValueError):
+            return vid, None, False
+
+    with ThreadPoolExecutor(max_workers=VALUE_WORKERS) as ex:
+        for vid, dto, is_gone in ex.map(one, list(value_ids)):
+            if dto:
+                found[vid] = dto
+            elif is_gone:
+                gone.add(vid)
+    return found, gone
+
+
+def _facet_slug_nl(facet_id):
+    """De nl-NL-naam en -slug, uit de cache en pas daarna live. pa.urls houdt
+    NL-paden, dus dit is de slug waarmee een URL-lookup zin heeft."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""SELECT facet_name, facet_slug FROM pa.facet_watch_facet_maincat
+                       WHERE facet_id = %s""", (facet_id,))
+        row = cur.fetchone()
+    finally:
+        cur.close()
+        return_db_connection(conn)
+    if row and row.get("facet_slug"):
+        return row["facet_name"], row["facet_slug"]
+    name, slug = _fetch_facet_meta(facet_id)
+    return (row or {}).get("facet_name") or name, slug
+
+
+def _value_url_samples(slug, value_ids):
+    """value_id -> (aantal URL's, kortste URL) voor de waarden van dít facet.
+
+    Eén scan over pa.urls (1,02 M rijen) in plaats van één LIKE-query per waarde.
+    De value-id wordt uit de URL getrokken en pas daarna tegen de meegegeven set
+    gehouden: op de slug alléén filteren is fout, want dezelfde slug hangt aan
+    meerdere facet-ids (`merk` zit in 540 k URL's) — dezelfde valkuil als in
+    `_count_affected_urls`.
+
+    De KORTSTE URL is het voorbeeld: dat is de pagina met alleen dit facet
+    geselecteerd in plaats van een stapeling van zes filters.
+    """
+    if not slug or not value_ids:
+        return {}
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            WITH hit AS (
+                SELECT (regexp_match(u.url, '(?:/|~~)' || %s || '~([0-9]+)'))[1]::bigint
+                           AS value_id,
+                       u.url
+                FROM pa.urls u
+                WHERE u.url LIKE '%%/' || %s || '~%%'
+                   OR u.url LIKE '%%~~' || %s || '~%%'
+            )
+            SELECT value_id, count(*) AS n,
+                   (array_agg(url ORDER BY length(url), url))[1] AS sample
+            FROM hit
+            WHERE value_id = ANY(%s)
+            GROUP BY value_id
+        """, (slug, slug, slug, list(value_ids)))
+        return {r["value_id"]: (r["n"], r["sample"]) for r in cur.fetchall()}
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def _changed_values(days, facet_id):
+    """value_id -> wat er in dit venster met die waarde gebeurde, nieuwste eerst."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT e.facet_value_id                            AS value_id,
+                   count(*)                                    AS events,
+                   min(e.ts_utc)                               AS first_change,
+                   max(e.ts_utc)                               AS last_change,
+                   array_agg(DISTINCT e.action)                AS actions,
+                   array_agg(DISTINCT e.entity_name)           AS entities,
+                   array_agg(DISTINCT e.actor)                 AS actors,
+                   max(e.value_name)                           AS value_name,
+                   bool_or(e.entity_name = 'Facet Value' AND e.action = 'INSERT')
+                                                               AS is_new,
+                   bool_or(e.entity_name = 'Facet Value' AND e.action = 'DELETE')
+                                                               AS is_deleted
+            FROM pa.facet_watch_events e
+            WHERE e.ts_utc > now() - (%s || ' days')::interval
+              AND e.facet_id = %s
+              AND e.facet_value_id IS NOT NULL
+            GROUP BY e.facet_value_id
+            ORDER BY max(e.ts_utc) DESC
+        """, (days, facet_id))
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def _value_row(vid, dto, ev, gone):
+    """Eén tabelrij. `dto` is de live waarde (of None), `ev` de eventaggregatie
+    (of None), `gone` of de per-id lookup een 404 gaf."""
+    return {
+        "value_id": vid,
+        # De live naam heeft voorrang: het event bewaart de naam van TOEN, en bij
+        # een label-wijziging is dat juist niet wat er nu op de pagina staat.
+        "name": (_value_name(dto) if dto else None) or (ev or {}).get("value_name"),
+        "seo_priority": bool(dto.get("seoPriority")) if dto else None,
+        "sequence": dto.get("sequence") if dto else None,
+        "updated_at": dto.get("updatedAt") if dto else None,
+        "invalid_reason": _clean(dto.get("invalidReason")) if dto else None,
+        # `deleted` = er staat een `Facet Value DELETE` in de log. `missing_live` =
+        # de API kent het id niet meer. Meestal hetzelfde, maar niet altijd: een
+        # DELETE zonder 404 betekent teruggezet, een 404 zonder DELETE-event
+        # betekent verwijderd buiten dit venster (of buiten de log).
+        "deleted": bool((ev or {}).get("is_deleted")),
+        "missing_live": vid in gone,
+        "events": (ev or {}).get("events") or 0,
+        "first_change": (ev or {}).get("first_change"),
+        "last_change": (ev or {}).get("last_change"),
+        "actions": [a for a in ((ev or {}).get("actions") or []) if a],
+        "entities": [x for x in ((ev or {}).get("entities") or []) if x],
+        "actors": [a for a in ((ev or {}).get("actors") or []) if a],
+        "is_new": bool((ev or {}).get("is_new")),
+    }
+
+
+def get_facet_values(facet_id, days=30, with_urls=True, limit=CHANGED_MAX):
+    """De waarden van één facet, met wat er in dit venster aan gebeurde.
+
+    Drie bronnen die elk iets weten wat de andere twee niet hebben:
+
+      * onze eventstore  -> welke waarden zijn geraakt, wanneer en door wie
+      * de Taxonomy API  -> hoe de waarde er NU uitziet: seoPriority, sequence
+      * pa.urls          -> of er een pagina op die waarde bestaat, en welke
+
+    De gewijzigde waarden staan altijd bovenaan, daarna vullen de niet-geraakte
+    waarden aan tot `limit`. Dat plafond is er omdat Merk 9.026 waarden heeft
+    waarvan 3.262 geraakt in 30 dagen: alles tonen is geen tabel meer. `complete`
+    zegt of de lijst hieronder het hele facet is.
+
+    Een in dit venster verwijderde waarde bestaat live niet meer en zou juist
+    ontbreken waar hij interessant is. Die komt daarom uit de events en wordt
+    gemarkeerd, niet weggelaten.
+    """
+    facet_name, slug = _facet_slug_nl(facet_id)
+    changed = _changed_values(days, facet_id)
+    shown = changed[:limit]
+
+    try:
+        page, total = _fetch_values_page(facet_id)
+    except (requests.RequestException, ValueError) as e:
+        page, total, api_error = [], None, str(e)
+    else:
+        api_error = None
+    live = {v.get("id"): v for v in page if v.get("id") is not None}
+    # `total` kán ontbreken als de API omvalt; dan is "compleet" niet vast te
+    # stellen en tonen we de lijst niet als compleet.
+    complete = total is not None and len(page) >= total
+
+    gone = set()
+    if not api_error:
+        missing = [c["value_id"] for c in shown if c["value_id"] not in live]
+        found, gone = _fetch_values_by_id(missing)
+        live.update(found)
+
+    rows = [_value_row(c["value_id"], live.get(c["value_id"]), c, gone) for c in shown]
+    # De niet-geraakte waarden erachteraan tot `limit` vol is, op sequence: dat is
+    # de orde waarin de site ze toont. Zonder deze staffel is een facet dat wél in
+    # de tabel staat maar geen WAARDE-events had (een label- of settingwijziging)
+    # een leeg paneel, terwijl het 1.729 waarden heeft.
+    ev_ids = {c["value_id"] for c in changed}
+    rest = [v for v in page if v.get("id") is not None and v["id"] not in ev_ids]
+    rest.sort(key=lambda v: (v.get("sequence") if v.get("sequence") is not None
+                             else 10 ** 9, v.get("id")))
+    rows += [_value_row(v["id"], v, None, gone) for v in rest[:max(0, limit - len(rows))]]
+    # Strenger dan de check hierboven: die zei "de API gaf alles", dit zegt "er
+    # ontbreekt onder deze tabel geen waarde meer" — ook na het `limit`-plafond.
+    complete = complete and len(rows) >= (total or 0)
+
+    if with_urls and slug:
+        urls = _value_url_samples(slug, [r["value_id"] for r in rows])
+        for r in rows:
+            n, sample = urls.get(r["value_id"], (0, None))
+            r["url_count"], r["sample_url"] = n, sample
+    else:
+        for r in rows:
+            r["url_count"], r["sample_url"] = None, None
+
+    return {
+        "facet_id": facet_id,
+        "facet_name": facet_name,
+        "facet_slug": slug,
+        "days": days,
+        "total": total,                       # waarden die het facet nu heeft
+        "changed": len(changed),              # geraakt in dit venster
+        "changed_shown": len(shown),
+        "complete": complete,                 # staat de hele lijst hieronder?
+        "rows": len(rows),
+        "seo_priority": sum(1 for r in rows if r["seo_priority"]),
+        "with_urls": bool(with_urls and slug),
+        "api_error": api_error,
+        "values": rows,
+    }
+
+
 def get_events(days=1, main_cat_id=None, facet_id=None, entity_name=None,
                action=None, actor=None, limit=500, offset=0):
     """Raw event rows behind the aggregates."""

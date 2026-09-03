@@ -63,6 +63,22 @@ async def facets(days: int = Query(1, ge=1, le=365),
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/facet-values")
+async def facet_values(facet_id: int,
+                       days: int = Query(30, ge=1, le=365),
+                       with_urls: bool = Query(True),
+                       limit: int = Query(300, ge=1, le=2000)):
+    """De waarden van één facet: welke er in dit venster veranderden (uit de
+    eventstore, live verrijkt) en of er een pagina op bestaat. `limit` begrenst
+    de gewijzigde waarden; `with_urls=false` slaat de pa.urls-scan over, die bij
+    een veelgebruikte slug als `merk` ~2,5 s kost."""
+    try:
+        return fw.get_facet_values(facet_id, days, with_urls, limit)
+    except Exception as e:
+        logger.exception("facet-watch facet-values failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/events")
 async def events(days: int = Query(1, ge=1, le=365),
                  main_cat_id: Optional[int] = None,

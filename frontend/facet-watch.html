@@ -85,15 +85,50 @@
         .fw-caret { display: inline-block; width: 0.8rem; color: #8a8a96; transition: transform .12s ease; }
         tr.is-open .fw-caret { transform: rotate(90deg); }
         .tool-table tbody tr.maincat-row.is-open > td { background: #f1edfa; font-weight: 600; }
-        .tool-table tbody tr.mc-detail > td { background: #fbfbfd !important; padding: 1rem 1.25rem !important;
+        /* 1,5rem boven en onder, niet 1rem (Joep, 2026-09-03): de uitklaprij is een
+           tabel binnen een tabel, en met te weinig lucht leest zijn kop als een rij
+           van de tabel eromheen in plaats van als het begin van een nieuwe. */
+        .tool-table tbody tr.mc-detail > td { background: #fbfbfd !important; padding: 1.5rem 1.25rem !important;
                                               --bs-table-bg-state: transparent; }
         .tool-table tbody tr.mc-detail:hover > td { background: #fbfbfd !important; }
         /* De subtabel is een tabel BINNEN een tabelcel; hij erft .tbl-nowrap niet en
-           moet zijn eigen breedte houden. */
-        .mc-detail table { width: 100%; margin: 0; }
-        .mc-detail table th { font-size: 0.78rem; text-transform: uppercase; color: #6c757d;
+           moet zijn eigen breedte houden.
+
+           `width: auto` en niet 100% (2026-09-03): de cel eromheen is zo breed als de
+           TABEL eromheen, en die is met `.tbl-nowrap` breder dan de kaart. Op 100%
+           rekte de subtabel mee en viel zijn laatste kolom ("Door") buiten beeld —
+           zichtbaar in de screenshot van vandaag: `Doo` / `Lists`. Content-breed
+           gepakt de subtabel links en past hij binnen de kaart. */
+        .mc-detail table { width: auto; margin: 0; }
+        /* GEEN text-transform (Joep, 2026-09-03). De kop stond in kapitalen — dat is
+           de vorm van de tegel-labels, en die zijn vier woorden lang; een tabelkop met
+           "W +" en "Laatste wijziging" wordt er alleen slechter leesbaar van. Grootte
+           en kleur dragen de hiërarchie al. */
+        .mc-detail table th, .fv-table th { font-size: 0.78rem; color: #6c757d;
                               font-weight: 600; padding: 4px 10px; border-bottom: 1px solid #e3e3ea; white-space: nowrap; }
-        .mc-detail table td { padding: 5px 10px; font-size: 0.85rem; vertical-align: middle; }
+        .mc-detail table td, .fv-table td { padding: 5px 10px; font-size: 0.85rem; vertical-align: middle; }
+
+        /* ---- Uitklaprij per facet: de facetwaarden ----
+           Derde niveau (maincat > facet > waarde) en tegelijk het TWEEDE onder de
+           facettabel verderop — dezelfde vorm op beide plekken, want het is dezelfde
+           vraag. Eigen tint, iets paarser dan het maincat-paneel, zodat je bij een
+           dubbele uitklap ziet welk paneel bij welke rij hoort. */
+        tr.facet-row { cursor: pointer; }
+        .tool-table tbody tr.facet-row.is-open > td, .mc-detail tr.facet-row.is-open > td { background: #f1edfa; }
+        tr.fv-detail > td { background: #f6f4fb !important; padding: 1.25rem 1.25rem !important;
+                            --bs-table-bg-state: transparent; }
+        tr.fv-detail:hover > td { background: #f6f4fb !important; }
+        .fv-table { width: auto; margin: 0; }   /* zie de .mc-detail-regel hierboven */
+        /* 300 waarden is een legitieme uitkomst (Merk had er 3.262 geraakt in 30
+           dagen); zonder eigen scroll duwt dat paneel de tabel eronder buiten beeld. */
+        .fv-scroll { max-height: 420px; overflow: auto; }
+        .fv-table thead th { position: sticky; top: 0; background: #f6f4fb; z-index: 1; }
+        .fv-name { font-size: 0.85rem; }
+        .fv-url { font-size: 0.78rem; word-break: break-all; }
+        /* seoPriority aan/uit is geen label maar een vinkje: een badge per rij zou
+           in een lijst van 300 waarden de tabel overnemen. Groen `#198754`, dezelfde
+           tint als `badge-new`. */
+        .fv-yes { color: #198754; font-weight: 700; }
         .chg-cell { font-size: 0.78rem; max-width: 420px;
                     word-break: break-word; color: #495057; }
         .note { font-size: 0.82rem; color: #636e72; }
@@ -231,7 +266,9 @@
                                 </select>
                             </div>
                             <div class="col-md-8 d-flex justify-content-end gap-2 align-items-end">
-                                <button class="btn btn-sm btn-outline-orange" onclick="exportCsv()">Export Excel</button>
+                                <!-- Outlined PAARS, niet oranje (UI_BLUEPRINT, 2026-09-03): oranje is
+                                     de kleur van "dit doet iets", en downloaden doet niets aan de data. -->
+                                <button class="btn btn-sm btn-outline-purple" onclick="exportCsv()">Export</button>
                                 <button class="btn btn-sm btn-run" onclick="runIngest()" id="ingestBtn">Ophalen</button>
                             </div>
                         </div>
@@ -321,6 +358,9 @@
                             <button class="btn btn-sm btn-outline-purple ms-auto" onclick="clearKindFilter()"
                                     id="clearKindBtn" style="display: none;">Toon alles</button>
                         </div>
+                        <div class="note mb-2">Klik een facet om zijn <em>waarden</em> uit te klappen —
+                            met wat er in dit venster aan veranderde, of ze <code>seoPriority</code> hebben
+                            en hoeveel bestaande URL's erop staan.</div>
                         <div class="tool-table-wrap">
                             <table class="table table-sm table-hover tool-table tbl-nowrap">
                                 <thead class="table-light">
@@ -367,7 +407,7 @@
                                 <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
                             </svg>
                         </h5>
-                        <button class="btn btn-sm btn-outline-orange ms-auto" onclick="exportProductLines()">Export Excel</button>
+                        <button class="btn btn-sm btn-outline-purple ms-auto" onclick="exportProductLines()">Export</button>
                         <button class="btn btn-sm btn-run" onclick="loadVolumes()" id="volBtn">Zoekvolume ophalen</button>
                     </div>
                     <div class="card-body">
@@ -429,7 +469,11 @@
                     <div class="card-header d-flex align-items-center gap-2">
                         <h5 class="mb-0">Verhuisde facetten
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px; margin-left: 4px;">
-                                <title>Facetten waarvan de URL-slug is veranderd. De slug staat letterlijk in de URL (/products/&lt;pad&gt;/c/&lt;slug&gt;~&lt;value-id&gt;), dus een wijziging verplaatst elke bestaande facetpagina. Uit `Facet Label` UPDATE, dat oude EN nieuwe slug meelevert — niet uit een naam-match op verwijderde facetten, want een DELETE van een facet wordt nergens gelogd.</title>
+                                <title>Facetten waarvan de URL-slug is veranderd. De slug staat letterlijk in de URL (/products/&lt;pad&gt;/c/&lt;slug&gt;~&lt;value-id&gt;), dus een wijziging verplaatst elke bestaande facetpagina. Uit `Facet Label` UPDATE, dat oude EN nieuwe slug meelevert — niet uit een naam-match op verwijderde facetten, want een DELETE van een facet wordt nergens gelogd.
+
+De site vángt een oude slug wel op, maar 301't naar de kale categorie en gooit het facet weg — gemeten 03-09-2026: beslist.be/…/c/stijl_test~393710 → de categorie zonder filter, terwijl …/c/woonstijl~393710 een 200 geeft. De bezoeker verliest zijn selectie, dus hier hoort een gerichte 301 op de equivalente pagina.
+
+Het label-event draagt geen locale, dus die wordt bepaald door de huidige slugs live op te halen. Dat is geen detail: de wijzigingen van augustus landden op nl-BE, niet op nl-NL. Alleen nl-NL (NL) en nl-BE (BE) zijn door te zetten naar de Redirect Tool; en-US en de-DE staan er wel bij, maar de Redirect API bedient die domeinen niet.</title>
                                 <circle cx="8" cy="8" r="8" fill="#5e4a90"/>
                                 <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
                                 <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
@@ -821,6 +865,7 @@
         det.querySelector('td').innerHTML = `
             <div class="note mb-2"><strong>${rows.length}</strong> ${rows.length === 1 ? 'facet' : 'facetten'}
                  gewijzigd in ${esc(catName)} — nieuwste eerst</div>
+            <div class="note mb-2">Klik een facet om zijn <em>waarden</em> uit te klappen.</div>
             <table>
                 <thead><tr>
                     <th>Laatste wijziging</th><th>Facet</th>
@@ -828,24 +873,174 @@
                     <th class="col-center">W −</th><th class="col-center">Upd</th>
                     <th>Door</th><th></th>
                 </tr></thead>
-                <tbody>${rows.map(r => {
-                    const badges = [];
-                    if (r.is_new_facet) badges.push('<span class="badge badge-new">nieuw facet</span>');
-                    if (r.newly_attached) badges.push('<span class="badge badge-attached">aangehangen</span>');
-                    if (r.is_auto) badges.push('<span class="badge badge-auto" title="Automatisch aangemaakt productlijn-facet">auto</span>');
-                    return `<tr>
+                <tbody>${rows.map(r => `
+                    <tr class="facet-row" data-fid="${r.facet_id}"
+                        data-fname="${esc(r.facet_name || '?')}" data-cols="8">
                         <td class="ts">${fmtTs(r.last_change)}</td>
-                        <td><strong>${esc(r.facet_name || '?')}</strong>
+                        <td><span class="fw-caret">▸</span><strong>${esc(r.facet_name || '?')}</strong>
                             <span class="facet-slug">${esc(r.facet_slug || '')} · ${r.facet_id}</span></td>
                         <td class="col-center">${r.events}</td>
                         <td class="col-center">${r.values_added}</td>
                         <td class="col-center">${r.values_deleted}</td>
                         <td class="col-center">${r.updates}</td>
                         <td class="note">${esc((r.actors || []).filter(Boolean).join(', '))}</td>
-                        <td>${badges.join(' ')}</td>
-                    </tr>`;
-                }).join('')}</tbody>
+                        <td>${facetBadges(r)}</td>
+                    </tr>`).join('')}</tbody>
             </table>`;
+        bindFacetRows(det);
+    }
+
+    // ---------------- uitklaprij per facet: de facetwaarden ----------------
+    // Joep, 2026-09-03: "kan ik vanuit de uitklaptabel en via Laatst aangemaakte /
+    // gewijzigde facetten bij de eigenlijke facet values komen?" Dat is dezelfde
+    // vraag op twee plekken, dus ook één paneel: `data-cols` op de rij zegt alleen
+    // hoe breed de tabel eromheen is (8 in de maincat-uitklap, 9 in de facettabel).
+    //
+    // Eén paneel open tegelijk, net als de maincat-uitklap. Anders staat er bij een
+    // dubbele uitklap een tabel in een tabel in een tabel en is niet meer te zien
+    // welk paneel bij welke rij hoort.
+    function facetBadges(r) {
+        const b = [];
+        if (r.is_new_facet) b.push('<span class="badge badge-new">nieuw facet</span>');
+        if (r.newly_attached) b.push('<span class="badge badge-attached">aangehangen</span>');
+        if (r.is_auto) b.push('<span class="badge badge-auto" title="Automatisch aangemaakt productlijn-facet">auto</span>');
+        return b.join(' ');
+    }
+
+    function bindFacetRows(scope) {
+        scope.querySelectorAll('tr.facet-row').forEach(tr => {
+            tr.onclick = () => toggleFacetValues(tr);
+        });
+    }
+
+    function closeFacetValues() {
+        document.querySelectorAll('tr.fv-detail').forEach(d => d.remove());
+        document.querySelectorAll('tr.facet-row.is-open')
+            .forEach(r => r.classList.remove('is-open'));
+    }
+
+    async function toggleFacetValues(tr) {
+        const wasOpen = tr.classList.contains('is-open');
+        closeFacetValues();
+        if (wasOpen) return;                      // dit was een klik om te sluiten
+
+        const fid = tr.dataset.fid, fname = tr.dataset.fname;
+        tr.classList.add('is-open');
+        const det = document.createElement('tr');
+        det.className = 'fv-detail';
+        det.innerHTML = `<td colspan="${tr.dataset.cols || 8}">
+            <span class="spinner-border spinner-border-sm"></span>
+            <span class="note">Waarden van ${esc(fname)} laden…</span></td>`;
+        tr.after(det);
+        // Staat de omliggende tabel naar rechts gescrold, dan opent dit paneel met
+        // zijn linkerhelft buiten beeld. Terugzetten, want daar begint de inhoud.
+        const wrap = tr.closest('.tool-table-wrap');
+        if (wrap && wrap.scrollLeft > 0) wrap.scrollTo({ left: 0, behavior: 'smooth' });
+
+        let d;
+        try {
+            d = await jget(`${API}/facet-values?facet_id=${encodeURIComponent(fid)}`
+                           + `&days=${days()}`);
+        } catch (e) {
+            det.querySelector('td').innerHTML =
+                `<span class="text-danger">Waarden laden mislukt: ${esc(e.message)}</span>`;
+            return;
+        }
+        if (!det.parentNode) return;              // inmiddels gesloten of hertekend
+        det.querySelector('td').innerHTML = facetValuesHtml(d);
+    }
+
+    // Welk SOORT event de waarde raakte. "Facet Value Label" is een naam- of
+    // slugwijziging en "Facet Value" de waarde zelf — dat verschil bepaalt of er een
+    // pagina van adres wisselde, dus het hoort in de tabel en niet alleen in de log.
+    const FV_ENTITY = {
+        'Facet Value': 'waarde', 'Facet Value Label': 'label',
+        'Facet Value Dependency': 'afhankelijkheid',
+    };
+
+    function fvStateBadges(v) {
+        const b = [];
+        if (v.is_new) b.push('<span class="badge badge-new">nieuw</span>');
+        if (v.deleted) b.push('<span class="badge badge-del">verwijderd</span>');
+        else if (v.missing_live) b.push('<span class="badge badge-unknown"'
+            + ' title="De Taxonomy API kent dit id niet meer, maar er staat geen'
+            + ' DELETE in de log — verwijderd buiten dit venster, of buiten de log.">weg</span>');
+        else if (v.events && !v.is_new) b.push('<span class="badge badge-attached">gewijzigd</span>');
+        if (v.invalid_reason) b.push(`<span class="badge badge-auto" title="${esc(v.invalid_reason)}">ongeldig</span>`);
+        return b.join(' ');
+    }
+
+    // Het AANTAL is de link, in plaats van een eigen kolom "Pagina". Twee redenen:
+    // de tabel eromheen scrollt horizontaal en een zesde kolom viel buiten beeld, en
+    // een telling zonder de bijbehorende pagina is precies de helft van het antwoord.
+    // De link wijst naar de KORTSTE URL op die waarde: de pagina met alleen dit
+    // facet gekozen, niet een stapeling van zes filters.
+    function fvUrlCell(v) {
+        if (v.url_count === null || v.url_count === undefined)
+            return '<span class="facet-slug" title="URL-telling overgeslagen">?</span>';
+        if (!v.url_count || !v.sample_url)
+            return `<span class="facet-slug" title="Geen pagina in pa.urls op deze waarde">${v.url_count}</span>`;
+        return `<a href="https://www.beslist.nl${esc(v.sample_url)}" target="_blank" rel="noopener"
+                   title="Kortste van ${v.url_count.toLocaleString('nl-NL')} URL's: ${esc(v.sample_url)}"
+                   >${v.url_count.toLocaleString('nl-NL')} ↗</a>`;
+    }
+
+    function facetValuesHtml(d) {
+        const vals = d.values || [];
+        const bits = [];
+        bits.push(d.total === null || d.total === undefined
+            ? 'Aantal waarden onbekend'
+            : `<strong>${d.total.toLocaleString('nl-NL')}</strong> ${d.total === 1 ? 'waarde' : 'waarden'}`);
+        bits.push(d.changed
+            ? `<strong>${d.changed.toLocaleString('nl-NL')}</strong> geraakt in dit venster`
+            : 'geen enkele geraakt in dit venster');
+        // Wat er hieronder staat is niet altijd het hele facet, en dat mag geen
+        // stille afkapping zijn: bij een groot facet is het "de geraakte eerst,
+        // daarna op sequence tot de limiet" en dat hoort er te staan.
+        if (!d.complete && vals.length)
+            bits.push(`<strong>${vals.length.toLocaleString('nl-NL')}</strong> hieronder`
+                + (d.changed ? ' — geraakte eerst, dan op sequence' : ' — op sequence'));
+        if (d.seo_priority !== null && d.seo_priority !== undefined && vals.length)
+            bits.push(`${d.seo_priority.toLocaleString('nl-NL')} van de ${vals.length} met seoPriority`);
+        if (d.facet_slug) bits.push(`slug <code>${esc(d.facet_slug)}</code>`);
+
+        const head = `<div class="note mb-2">${bits.join(' · ')}</div>`
+            + (d.api_error ? `<div class="note mb-2 text-danger">Live waarden niet`
+                + ` opgehaald: ${esc(d.api_error)} — wat hieronder staat komt uit de`
+                + ` eventstore.</div>` : '');
+        if (!vals.length) {
+            return head + '<span class="note">Dit facet heeft geen waarden om te tonen.</span>';
+        }
+        // Kolomvolgorde is hier geen smaak: dit paneel zit in een tabel die BREDER is
+        // dan de kaart (`.tbl-nowrap` op "Per main categorie" scrollt horizontaal), dus
+        // de laatste kolom staat buiten beeld tot je scrollt. Wat je komt halen —
+        // welke waarde, wanneer geraakt, door wie — staat daarom links, `sequence` heeft
+        // helemaal geen kolom meer (die stond op 10.753 en zei niemand iets) en de link
+        // naar de pagina zit in de URL-telling zelf.
+        return head + `<div class="fv-scroll"><table class="fv-table">
+            <thead><tr>
+                <th>Waarde</th>
+                <th>Gewijzigd</th>
+                <th>Door</th>
+                <th class="col-center">SEO-prio</th>
+                <th class="col-center">URL's</th>
+            </tr></thead>
+            <tbody>${vals.map(v => {
+                const ents = (v.entities || []).map(e => FV_ENTITY[e] || e);
+                return `<tr>
+                <td class="fv-name" title="${v.sequence === null || v.sequence === undefined
+                    ? '' : 'sequence ' + v.sequence}"><strong>${esc(v.name || '?')}</strong>
+                    <span class="facet-slug">${v.value_id}</span> ${fvStateBadges(v)}</td>
+                <td class="ts">${v.last_change ? fmtTs(v.last_change) : '<span class="facet-slug">–</span>'}
+                    ${ents.length ? `<span class="facet-slug">${esc(ents.join(', '))}</span>` : ''}</td>
+                <td class="note">${esc((v.actors || []).join(', '))}</td>
+                <td class="col-center">${v.seo_priority === true ? '<span class="fv-yes">✓</span>'
+                    : v.seo_priority === false ? '<span class="facet-slug">–</span>'
+                    : '<span class="facet-slug" title="Niet opgehaald bij de Taxonomy API">?</span>'}</td>
+                <td class="col-center">${fvUrlCell(v)}</td>
+            </tr>`;
+            }).join('')}</tbody>
+        </table></div>`;
     }
 
     function renderFacets() {
@@ -871,14 +1066,11 @@
         const page = rows.slice((fcPage - 1) * size, fcPage * size);
 
         const b = document.getElementById('fcBody');
-        b.innerHTML = page.length ? page.map(r => {
-            const badges = [];
-            if (r.is_new_facet) badges.push('<span class="badge badge-new">nieuw facet</span>');
-            if (r.newly_attached) badges.push('<span class="badge badge-attached">aangehangen</span>');
-            if (r.is_auto) badges.push('<span class="badge badge-auto" title="Automatisch aangemaakt productlijn-facet">auto</span>');
-            return `<tr>
+        b.innerHTML = page.length ? page.map(r => `
+            <tr class="facet-row" data-fid="${r.facet_id}"
+                data-fname="${esc(r.facet_name || '?')}" data-cols="9">
                 <td class="ts">${fmtTs(r.last_change)}</td>
-                <td><strong>${esc(r.facet_name || '?')}</strong>
+                <td><span class="fw-caret">▸</span><strong>${esc(r.facet_name || '?')}</strong>
                     <span class="facet-slug">${esc(r.facet_slug || '')} · ${r.facet_id}</span></td>
                 <td>${esc(r.main_cat_name)}</td>
                 <td class="col-center">${r.events}</td>
@@ -886,9 +1078,9 @@
                 <td class="col-center">${r.values_deleted}</td>
                 <td class="col-center">${r.updates}</td>
                 <td class="note">${esc((r.actors || []).filter(Boolean).join(', '))}</td>
-                <td>${badges.join(' ')}</td>
-            </tr>`;
-        }).join('') : '<tr><td colspan="9" class="text-center text-muted py-3">Geen facetten.</td></tr>';
+                <td>${facetBadges(r)}</td>
+            </tr>`).join('') : '<tr><td colspan="9" class="text-center text-muted py-3">Geen facetten.</td></tr>';
+        bindFacetRows(b);
 
         document.getElementById('pageInfo').textContent =
             `${rows.length ? (fcPage - 1) * size + 1 : 0}–${Math.min(fcPage * size, rows.length)} van ${rows.length}`;
