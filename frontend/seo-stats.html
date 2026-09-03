@@ -2476,7 +2476,14 @@
                         borderColor: colour,
                         backgroundColor: colour + '22',
                         borderWidth: 1.75,
-                        fill: true,
+                        // 'start' = vul tot de ONDERKANT van de schaal. `fill: true` is
+                        // in Chart.js een alias voor 'origin' (y=0): zodra een reeks door
+                        // nul gaat, vult hij alleen de band tussen de lijn en de nullijn
+                        // en blijft het vlak onder de lijn leeg. Geen van deze metrics
+                        // kán vandaag negatief worden, maar dat is een eigenschap van de
+                        // huidige set en niet van de component — vandaar dezelfde vorm
+                        // als in Shop campaigns (Joep, 31-08).
+                        fill: 'start',
                         tension: 0.35,
                         pointRadius: 0,
                         pointHoverRadius: 3,
@@ -2491,7 +2498,14 @@
                     layout: { padding: 0 },
                     // No axes at all: the tile already states the number and the unit;
                     // the line is only there for shape.
-                    scales: { x: { display: false }, y: { display: false } },
+                    //
+                    // `grace` is geen opsmuk: zonder marge loopt de y-as exact van
+                    // datamin tot datamax, wordt de hoogste piek op de bovenste pixel
+                    // getekend en valt de helft van de 1,75px-lijn buiten het canvas.
+                    // Hier milder dan in Shop campaigns omdat de tegel hoger is (34px),
+                    // maar het is dezelfde afkapping. Percentage, geen vaste pixels: de
+                    // marge moet met het bereik meeschalen.
+                    scales: { x: { display: false }, y: { display: false, grace: '12%' } },
                     interaction: { mode: 'index', intersect: false },
                     plugins: {
                         legend: { display: false },
