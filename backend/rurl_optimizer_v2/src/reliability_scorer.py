@@ -167,7 +167,7 @@ def _v27_reject_reason(
     return None
 
 
-def _bridge_stem(w: str) -> str:
+def _bridge_stem(w: str, strip_plural_s: bool = True) -> str:
     """Normalize a single token to a comparable Dutch stem for bridging.
 
     Strips one plural suffix, then undoes the two spelling changes Dutch makes
@@ -178,7 +178,22 @@ def _bridge_stem(w: str) -> str:
         'aa','ee','oo','uu' to a single vowel.
     So kruimeldief == kruimeldieven and aftakdoos == aftakdozen after stemming,
     which the old `rstrip('s').rstrip('e')` could not reach (f/v, s/z, oo/o)."""
-    for suf in ('eren', 'en', 's'):
+    # `strip_plural_s=False` laat de slot-s staan. Nodig omdat die s twee dingen
+    # kan zijn en je van buiten niet ziet welke: in 'tafels' is het de
+    # meervoudsuitgang, in 'doos' hoort hij bij het woord. Knip je hem altijd
+    # af, dan stamt 'doos' naar 'do' terwijl 'dozen' naar 'dos' stamt en
+    # ontmoet het enkelvoud zijn eigen meervoud nooit — precies de klasse
+    # waarvoor V48 bestaat. ('aftakdoos'~'aftakdozen' kwam alleen door omdat
+    # 'aftakdo' toevallig een prefix van 'aftakdos' is.)
+    #
+    # Waarom een tweede variant en geen slimmere regel: elk criterium dat ik
+    # gemeten heb, kost meer dan het oplevert. Op een medeklinker sturen sloopt
+    # elk verkleinwoord (-je/-jes) en elke -e-stam (douche-s); op lettergrepen
+    # sturen haalt 'shirt'~'shirts', 'boot'~'boots' en 'bureau'~'bureaus' uit
+    # elkaar en laat 'lakens' op 'lak' botsen (gemeten over de 3.596 woorden in
+    # de categorienamen). De aanroeper vergelijkt daarom BEIDE vormen — additief,
+    # zoals de rest van V48.
+    for suf in (('eren', 'en', 's') if strip_plural_s else ('eren', 'en')):
         if w.endswith(suf) and len(w) - len(suf) >= 3:
             w = w[:-len(suf)]
             break
@@ -186,7 +201,14 @@ def _bridge_stem(w: str) -> str:
         w = w[:-1] + 'f'
     elif w.endswith('z'):
         w = w[:-1] + 's'
-    return re.sub(r'([aeou])\1+', r'\1', w)
+    w = re.sub(r'([aeou])\1+', r'\1', w)
+    # De spiegel van de dubbele klinker: in een gesloten lettergreep VERDUBBELT
+    # het Nederlands de eindconsonant bij het meervoud — fles/flessen,
+    # pan/pannen, bus/bussen. De klinkerkant zat er al in, deze niet, dus
+    # 'flessen' stamde naar 'fless' en 'fles' naar 'fles'. Alleen aan het EIND
+    # en alleen voor consonanten die dit doen; 'stress' wordt 'stres', maar
+    # 'stressen' ook, en symmetrie is precies wat deze functie moet leveren.
+    return re.sub(r'([bdfgklmnprst])\1$', r'\1', w)
 
 
 def _keyword_bridges_value(keyword: Optional[str], value_names: Optional[str]) -> bool:
@@ -206,7 +228,9 @@ def _keyword_bridges_value(keyword: Optional[str], value_names: Optional[str]) -
         return False
     for k in kt:
         ks = k.rstrip('s').rstrip('e')          # original loose stem
-        kstem = _bridge_stem(k)                 # voicing + double-vowel stem
+        # Beide stamvormen: met en zonder afgeknipte slot-s. Zie _bridge_stem —
+        # 'doos' hoort bij 'dozen', maar alleen als die s blijft staan.
+        kstems = {_bridge_stem(k), _bridge_stem(k, strip_plural_s=False)}
         for v in vt:
             if k == v:
                 return True
@@ -218,15 +242,29 @@ def _keyword_bridges_value(keyword: Optional[str], value_names: Optional[str]) -
             # doos~dozen). Guarded on ORIGINAL token length so an aggressive
             # stem can't drop a match below the length floor.
             if len(k) >= 4 and len(v) >= 4:
-                vstem = _bridge_stem(v)
-                # V62: the >= 4 floor has to hold for the STEMS as well, not just
-                # the tokens it started from. _bridge_stem('boren') is 'bor', and
-                # 'bor' sits inside 'bordeauxrod' - which is how the leftover
-                # tokens "zonder boren" got kleurtint 'Bordeauxrood' appended to
-                # a Gordijnroedes redirect. Three letters is not a bridge.
-                if (len(kstem) >= 4 and len(vstem) >= 4
-                        and (kstem in vstem or vstem in kstem)):
-                    return True
+                vstems = {_bridge_stem(v), _bridge_stem(v, strip_plural_s=False)}
+                for kstem in kstems:
+                    for vstem in vstems:
+                        # V62: the >= 4 floor has to hold for the STEMS as well,
+                        # not just the tokens it started from.
+                        # _bridge_stem('boren') is 'bor', and 'bor' sits inside
+                        # 'bordeauxrod' - which is how the leftover tokens
+                        # "zonder boren" got kleurtint 'Bordeauxrood' appended to
+                        # a Gordijnroedes redirect. Three letters is not a bridge.
+                        if (len(kstem) >= 4 and len(vstem) >= 4
+                                and (kstem in vstem or vstem in kstem)):
+                            return True
+                        # Een stam van drie letters mag wél bridgen op de KOP van
+                        # een samenstelling: Nederlands zet die achteraan, dus
+                        # 'dos' ('doos') hoort bij 'hobbydos' ('Hobbydozen') en
+                        # 'pot' ('poot') is 'pot' ('Poten'). Wat de V62-vloer
+                        # moest tegenhouden zat juist vooraan of middenin — 'bor'
+                        # in 'bordeauxrod' — en dat blijft geblokkeerd. Vandaar
+                        # suffix/gelijkheid in plaats van vrije containment.
+                        if (len(kstem) >= 3 and len(vstem) >= 3
+                                and (kstem == vstem or vstem.endswith(kstem)
+                                     or kstem.endswith(vstem))):
+                            return True
     return False
 
 
