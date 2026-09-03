@@ -1210,7 +1210,10 @@
             const pausedN = data.paused_count ?? (data.paused || []).length;
             const enabledN = data.enabled_count ?? (data.enabled || []).length;
             const skippedN = (data.skipped || []).length;
-            const errorsN = (data.errors || []).length;
+            const darkN = (data.dark_unowned || []).length;
+            const labelFailN = (data.member_label_failures || []).length;
+            const errorsN = (data.errors || []).length + labelFailN;
+            const membersN = data.members_labeled_count ?? (data.members_labeled || []).length;
             const tag = data.dry_run ? ' <span class="badge" style="background:#CC5500;color:#fff;">dry run</span>' : '';
 
             const llTile = (act, count, label, color, bg, border) => {
@@ -1224,15 +1227,18 @@
             let html = `<div class="fw-bold mb-2">Done${tag}</div>`;
             html += `<div class="d-flex flex-wrap gap-3 mb-2">
                 <div id="llTile-all" data-border="#adb5bd" class="p-2 px-3 rounded" style="background:#f1f3f5; border:1px solid #adb5bd; cursor:pointer;${allActive ? ' box-shadow:0 0 0 2px #adb5bd inset;' : ''}" onclick="selectLLTile('all')" title="Show all rows">
-                    <div style="font-size:1.5rem; font-weight:700; color:#495057;">${pausedN + enabledN + skippedN + errorsN}</div>
+                    <div style="font-size:1.5rem; font-weight:700; color:#495057;">${pausedN + enabledN + skippedN + darkN + errorsN}</div>
                     <div style="font-size:0.8rem; color:#495057;">all rows</div>
                 </div>
                 ${llTile('Paused', pausedN, 'paused', '#e65100', '#fff3e0', '#fb8c00')}
                 ${llTile('Enabled', enabledN, 'enabled', '#00b894', '#e8f7f3', '#00b894')}
+                ${llTile('Dark', darkN, 'dark, niet van LL', '#936305', '#fdf7e6', '#fdb62b')}
                 ${llTile('Skipped', skippedN, 'skipped', '#5e4a90', '#f3f0fa', '#5e4a90')}
                 ${llTile('Error', errorsN, 'errors', '#d63031', '#fdecea', '#d63031')}
             </div>
             <div class="text-muted mb-2" style="font-size:0.8rem;">from ${data.feed_rows || 0} feed rows${
+                membersN ? ` · <strong>${membersN}</strong> campagne(s) ${data.dry_run ? 'krijgen' : 'kregen'} het <code>GSD_LL</code> lidmaatschapslabel` : ''
+            }${
                 data.snapshot_date ? ` · stored Excel data for <strong>${escapeHtml(data.snapshot_date)}</strong>` : ''
             }${data.excel_file ? ` · ${escapeHtml(data.excel_file)}` : ''}</div>`;
             // Say it out loud when the picked date had no snapshot and an
@@ -1250,8 +1256,13 @@
             llPreviewRows = [
                 ...(data.paused || []).map(c => ({ ...c, action: 'Paused', _selectable: true })),
                 ...(data.enabled || []).map(c => ({ ...c, action: 'Enabled', _selectable: true })),
+                // Dark = PAUSED member campaigns low-linkage does NOT own, so no
+                // enable run will ever revive them. Never selectable: the tool
+                // can't tell a stranded campaign from a deliberately retired one,
+                // so this is a review list, not an action list.
+                ...(data.dark_unowned || []).map(c => ({ ...c, action: 'Dark', _selectable: false })),
                 ...(data.skipped || []).map(c => ({ ...c, action: 'Skipped', _selectable: false, campaign_name: c.reason || c.campaign_name || '' })),
-                ...(data.errors || []).map(c => ({ ...c, action: 'Error', _selectable: false, _origName: c.campaign_name || '', shop_name: c.shop_name || c.step || '', campaign_name: c.error ? String(c.error).slice(0, 140) : (c.campaign_name || '') })),
+                ...[...(data.errors || []), ...(data.member_label_failures || []).map(c => ({ ...c, step: 'member_label', error: 'GSD_LL label kon niet worden aangebracht' }))].map(c => ({ ...c, action: 'Error', _selectable: false, _origName: c.campaign_name || '', shop_name: c.shop_name || c.step || '', campaign_name: c.error ? String(c.error).slice(0, 140) : (c.campaign_name || '') })),
             ].map((r, i) => ({ ...r, _key: i }));
             // Preview shows the full set a plain "Run" would touch, so start every
             // actionable (paused/enabled) row checked; skipped/error rows are not
@@ -1337,7 +1348,7 @@
         }
 
         function updateLLTileActive() {
-            ['all', 'Paused', 'Enabled', 'Skipped', 'Error'].forEach(act => {
+            ['all', 'Paused', 'Enabled', 'Dark', 'Skipped', 'Error'].forEach(act => {
                 const el = document.getElementById(`llTile-${act}`);
                 if (!el) return;
                 const isActive = act === 'all' ? !llPreviewActionFilter : llPreviewActionFilter === act;
@@ -1440,6 +1451,7 @@
             const badgeMap = {
                 Paused: '<span class="badge bg-transparent fw-bold" style="border:1px solid #CC5500; color:#CC5500;">Paused</span>',
                 Enabled: '<span class="badge badge-active">Enabled</span>',
+                Dark: '<span class="badge bg-transparent fw-bold" style="border:1px solid #fdb62b; color:#936305;" title="PAUSED en lid van de LL-set, maar zonder GSD_LL_PAUSED — geen enable-run zet deze ooit aan">Dark</span>',
                 Skipped: '<span class="badge bg-transparent fw-bold" style="border:1px solid #5e4a90; color:#5e4a90;">Skipped</span>',
                 Error: '<span class="badge bg-transparent fw-bold" style="border:1px solid #d63031; color:#d63031;">Error</span>',
             };
@@ -1531,6 +1543,7 @@
             const badgeMap = {
                 Paused: '<span class="badge bg-transparent fw-bold" style="border:1px solid #CC5500; color:#CC5500;">Paused</span>',
                 Enabled: '<span class="badge badge-active">Enabled</span>',
+                Dark: '<span class="badge bg-transparent fw-bold" style="border:1px solid #fdb62b; color:#936305;" title="PAUSED en lid van de LL-set, maar zonder GSD_LL_PAUSED — geen enable-run zet deze ooit aan">Dark</span>',
                 Skipped: '<span class="badge bg-transparent fw-bold" style="border:1px solid #5e4a90; color:#5e4a90;">Skipped</span>',
                 Error: '<span class="badge bg-transparent fw-bold" style="border:1px solid #d63031; color:#d63031;">Error</span>',
             };

@@ -40,7 +40,9 @@ from google.ads.googleads.errors import GoogleAdsException
 from google.protobuf import field_mask_pb2
 
 from backend.database import get_db_connection, return_db_connection, get_redshift_connection, return_redshift_connection
-from backend.gsd_campaigns_service import _get_client, ACCOUNTS, _name_contains_regexp
+from backend.gsd_campaigns_service import (
+    _get_client, ACCOUNTS, _name_contains_regexp, _mutate_with_retry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +52,34 @@ logger = logging.getLogger(__name__)
 
 FEED_URL = "https://pixel-monitor.aks.beslist.nl/api/gsd/feed.csv"
 
+# Two labels, two meanings — do not collapse them into one (Joep, 2026-09-03).
+#
+#   LL_LABEL        = transient STATE: "this campaign is paused right now BY the
+#                     low-linkage flow". It IS the enable-side selector
+#                     (_find_labeled_campaigns), so it is applied on pause and
+#                     removed again on enable. Anything that leaves a paused
+#                     campaign without it is invisible to every future enable run.
+#   LL_MEMBER_LABEL = permanent MEMBERSHIP: "this campaign is in scope for the
+#                     low-linkage flow". Applied to every non-REMOVED Shopping
+#                     campaign of a processed shop regardless of status, and
+#                     NEVER removed. Purely informational — it gives a filterable
+#                     view of the managed set in the Google Ads UI and lets the
+#                     tool report campaigns that are dark without LL owning them.
+#
+# Keeping only LL_LABEL and never removing it looks tempting but breaks three
+# things: the enable selector would re-"enable" already-enabled campaigns every
+# run (a mutation, an audit row and a shop-cycle bump per campaign per day),
+# and gsd_campaigns_service reads LL_LABEL as an ownership claim before enabling
+# a paused campaign of a shop that just switched back on.
 LL_LABEL = "GSD_LL_PAUSED"
+LL_MEMBER_LABEL = "GSD_LL"
+
+# background colour + description used when a label has to be created.
+LABEL_STYLES: Dict[str, Tuple[str, str]] = {
+    LL_LABEL: ("#E0A800", "Paused by GSD low-linkage automation"),
+    LL_MEMBER_LABEL: ("#5E4A90", "In scope for GSD low-linkage automation "
+                                 "(membership marker — never removed)"),
+}
 
 ADMIN_TABLE = "pa.jvs_gsd_ll_campaigns"
 
@@ -1738,9 +1767,17 @@ def _escape_gaql(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
-def _ensure_label(client, customer_id: str, label_name: str) -> str:
-    """Return the resource name of label_name in the account, creating it if
-    absent."""
+class _AlreadySwept(Exception):
+    """Control-flow marker: this (account, shop) pair was already swept for
+    membership in this run, so skip it rather than double-count."""
+
+
+def _lookup_label(client, customer_id: str, label_name: str) -> Optional[str]:
+    """Resource name of an existing label, or None. READ-ONLY.
+
+    Split out of _ensure_label so a dry run can resolve a label without
+    creating one — creating a label is a mutation, and a preview promises none.
+    """
     ga_service = client.get_service("GoogleAdsService")
     query = f"""
         SELECT label.resource_name
@@ -1752,13 +1789,24 @@ def _ensure_label(client, customer_id: str, label_name: str) -> str:
             return row.label.resource_name
     except GoogleAdsException as ex:
         logger.warning("Label lookup failed for %s in %s: %s", label_name, customer_id, ex)
+    return None
 
+
+def _ensure_label(client, customer_id: str, label_name: str) -> str:
+    """Return the resource name of label_name in the account, creating it if
+    absent. Colour/description come from LABEL_STYLES."""
+    existing = _lookup_label(client, customer_id, label_name)
+    if existing:
+        return existing
+
+    colour, description = LABEL_STYLES.get(
+        label_name, ("#E0A800", "GSD low-linkage automation"))
     label_service = client.get_service("LabelService")
     op = client.get_type("LabelOperation")
     label = op.create
     label.name = label_name
-    label.text_label.background_color = "#E0A800"
-    label.text_label.description = "Paused by GSD low-linkage automation"
+    label.text_label.background_color = colour
+    label.text_label.description = description
     response = label_service.mutate_labels(customer_id=customer_id, operations=[op])
     return response.results[0].resource_name
 
@@ -1881,28 +1929,39 @@ def _find_labeled_campaigns(client, customer_id: str, shop_id: int) -> List[Dict
     return out
 
 
-def _find_all_shopping_campaigns(client, customer_id: str, shop_id: int) -> List[Dict[str, str]]:
+def _find_all_shopping_campaigns(client, customer_id: str, shop_id: int) -> List[Dict[str, Any]]:
     """All non-REMOVED Shopping campaigns for this shop, regardless of status or label.
 
-    Used for diagnostics when the primary lookup returns no results, to explain
-    *why* (already paused, already enabled, no campaigns at all, etc.).
+    This is the low-linkage MEMBERSHIP set for one shop in one account: same
+    ``[shop_id:{id}]`` + ``SHOPPING`` guard as the pause/enable lookups, minus
+    their status and label filters. Two callers:
+
+      * _sync_member_labels() — stamps LL_MEMBER_LABEL on everything here;
+      * _diagnose_no_campaigns() — explains why a primary lookup found nothing
+        (already paused, already enabled, no campaigns at all).
+
+    Returns resource_name and labels as well, so a caller can tell membership
+    and state apart without a second round trip.
     """
     ga_service = client.get_service("GoogleAdsService")
     name_pattern = _name_contains_regexp(f"[shop_id:{int(shop_id)}]")
     query = f"""
-        SELECT campaign.id, campaign.name, campaign.status
+        SELECT campaign.id, campaign.name, campaign.status,
+               campaign.resource_name, campaign.labels
         FROM campaign
         WHERE campaign.status != 'REMOVED'
           AND campaign.advertising_channel_type = 'SHOPPING'
           AND campaign.name REGEXP_MATCH '{name_pattern}'
     """
-    out: List[Dict[str, str]] = []
+    out: List[Dict[str, Any]] = []
     try:
         for row in ga_service.search(customer_id=customer_id, query=query):
             out.append({
                 "campaign_id": str(row.campaign.id),
                 "campaign_name": row.campaign.name,
                 "status": row.campaign.status.name,
+                "resource_name": row.campaign.resource_name,
+                "labels": list(row.campaign.labels),
             })
     except GoogleAdsException as ex:
         logger.error("All-campaign lookup failed (%s, shop_id=%s): %s", customer_id, shop_id, ex)
@@ -1910,15 +1969,296 @@ def _find_all_shopping_campaigns(client, customer_id: str, shop_id: int) -> List
     return out
 
 
-def _diagnose_no_campaigns(client, country: str, shop_id: int, gsd: int) -> Tuple[str, List[Dict[str, str]]]:
+def _sync_member_labels(
+    client,
+    customer_id: str,
+    shop_id: int,
+    member_label_resource: Optional[str],
+    state_label_resource: Optional[str],
+    *,
+    dry_run: bool,
+    campaigns: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Stamp LL_MEMBER_LABEL on every campaign of one shop in one account.
+
+    Membership is deliberately status-blind: unlike the pause lookup (ENABLED
+    only), this labels campaigns that are already PAUSED too. It attaches a
+    label and nothing else — no status is ever mutated here — so it is safe to
+    run over the whole managed estate on every pass.
+
+    ``member_label_resource`` may be None on a dry run (the label does not exist
+    yet and a preview must not create it); the campaigns that *would* be
+    labelled are still reported.
+
+    Returns
+    -------
+    {"labeled": [...], "failed": [...], "dark_unowned": [...]} where
+
+      * labeled      — campaigns that got (or on a dry run would get) the label;
+      * failed       — label attach failed. Not fatal: membership is
+                       informational, so unlike a failed state-label attach this
+                       never rolls anything back;
+      * dark_unowned — PAUSED members WITHOUT the state label. These are dark
+                       for some reason other than low-linkage (already paused
+                       when LL first swept the shop, paused by the shop-off flow,
+                       by a script, or by hand), so no enable run will ever
+                       revive them. Reported, never touched — the tool cannot
+                       tell a stranded campaign from a deliberately retired one.
+    """
+    if campaigns is None:
+        campaigns = _find_all_shopping_campaigns(client, customer_id, shop_id)
+
+    res: Dict[str, List[Dict[str, Any]]] = {"labeled": [], "failed": [], "dark_unowned": []}
+    for camp in campaigns:
+        labels = camp.get("labels") or []
+        entry = {
+            "campaign_id": camp["campaign_id"],
+            "campaign_name": camp["campaign_name"],
+            "status": camp["status"],
+        }
+        if camp["status"] == "PAUSED" and (
+                not state_label_resource or state_label_resource not in labels):
+            res["dark_unowned"].append(entry)
+
+        if member_label_resource and member_label_resource in labels:
+            continue        # already a member — nothing to do
+        if dry_run:
+            res["labeled"].append(entry)
+            continue
+        if not member_label_resource:
+            continue        # cannot attach what we could not resolve/create
+        if _apply_label(client, customer_id, camp["resource_name"], member_label_resource):
+            res["labeled"].append(entry)
+        else:
+            res["failed"].append(entry)
+    return res
+
+
+# ---------------------------------------------------------------------------
+# One-off membership backfill
+# ---------------------------------------------------------------------------
+
+# [shop_id:12345] token every GSD campaign name carries — the shop key used
+# everywhere in this module, parsed locally here instead of per-shop REGEXP_MATCH.
+_SHOP_ID_IN_NAME = re.compile(r"\[shop_id:(\d+)\]")
+
+# CampaignLabelService accepts up to 1000 operations per request.
+_LABEL_BATCH = 1000
+
+
+def _all_shopping_campaigns_in_account(client, customer_id: str) -> List[Dict[str, Any]]:
+    """Every non-REMOVED Shopping campaign in one account, with labels.
+
+    The per-shop lookups filter on ``[shop_id:X]`` server-side, which is right
+    when you process a handful of shops but would cost one round trip per shop
+    per account across the whole estate. The backfill instead pulls the account
+    once and matches shop ids locally.
+    """
+    ga_service = client.get_service("GoogleAdsService")
+    query = """
+        SELECT campaign.id, campaign.name, campaign.status,
+               campaign.resource_name, campaign.labels
+        FROM campaign
+        WHERE campaign.status != 'REMOVED'
+          AND campaign.advertising_channel_type = 'SHOPPING'
+    """
+    out: List[Dict[str, Any]] = []
+    for row in ga_service.search(customer_id=customer_id, query=query):
+        out.append({
+            "campaign_id": str(row.campaign.id),
+            "campaign_name": row.campaign.name,
+            "status": row.campaign.status.name,
+            "resource_name": row.campaign.resource_name,
+            "labels": list(row.campaign.labels),
+        })
+    return out
+
+
+def backfill_member_labels(dry_run: bool = True) -> Dict[str, Any]:
+    """Stamp LL_MEMBER_LABEL on the whole low-linkage estate in one pass.
+
+    run_low_linkage() only sweeps the shops in that day's feed, and the feed is
+    a list of shops at or below the linkage threshold — not the full GSD roster.
+    So the membership set fills in shop by shop as shops dip. This backfill
+    completes it in one go: for every account, every non-REMOVED Shopping
+    campaign whose ``[shop_id:X]`` shop is flagged ``is_gsd_<country>_shop = 1``
+    in bt.shop_list gets the label.
+
+    Scope note: accounts come from COUNTRY_CUSTOMER_IDS, i.e. exactly the
+    accounts the low-linkage flow itself queries. The retired BE account in
+    PAUSE_EXTRA_CUSTOMER_IDS is deliberately left out — no enable or pause run
+    reaches it, so marking its campaigns as members would claim a membership the
+    tool cannot act on.
+
+    Labels only: no campaign status is ever mutated here, so this is safe to run
+    against a live estate. ``dry_run=True`` (the default) reports what it would
+    do and writes nothing at all — not even the label itself.
+    """
+    logger.warning("GSD LL membership backfill STARTED — dry_run=%s  pid=%s",
+                   dry_run, os.getpid())
+    started = datetime.now()
+    result: Dict[str, Any] = {
+        "started_at": started.isoformat(timespec="seconds"),
+        "dry_run": dry_run,
+        "accounts": {},
+        "totals": {"campaigns_in_account": 0, "members": 0, "already_member": 0,
+                   "labeled": 0, "failed": 0, "not_gsd_shop": 0, "no_shop_id": 0,
+                   "dark_unowned": 0},
+        "dark_unowned": [],
+        "errors": [],
+    }
+    client = _get_client()
+
+    # 1. Pull every account once, and collect the shop ids that appear in it.
+    per_account: Dict[str, Dict[str, Any]] = {}
+    shop_ids: Set[int] = set()
+    for country, customer_ids in sorted(COUNTRY_CUSTOMER_IDS.items()):
+        for customer_id in sorted(customer_ids):
+            try:
+                camps = _all_shopping_campaigns_in_account(client, customer_id)
+            except Exception as ex:
+                logger.error("Backfill: account read failed (%s/%s): %s",
+                             country, customer_id, ex)
+                result["errors"].append({"country": country, "customer_id": customer_id,
+                                         "step": "read", "error": str(ex)})
+                continue
+            per_account[customer_id] = {"country": country, "campaigns": camps}
+            for c in camps:
+                m = _SHOP_ID_IN_NAME.search(c["campaign_name"] or "")
+                if m:
+                    shop_ids.add(int(m.group(1)))
+            logger.info("Backfill: %s (%s) holds %d non-removed Shopping campaigns",
+                        customer_id, country, len(camps))
+
+    if not per_account:
+        result["finished_at"] = datetime.now().isoformat(timespec="seconds")
+        return result
+
+    # 2. One Redshift round trip for the GSD flags of every shop seen.
+    try:
+        flags = get_shop_flags(sorted(shop_ids))
+    except Exception as ex:
+        logger.error("Backfill: shop_list flags failed: %s", ex)
+        result["errors"].append({"step": "shop_flags", "error": str(ex)})
+        result["finished_at"] = datetime.now().isoformat(timespec="seconds")
+        return result
+    logger.info("Backfill: %d shop ids in campaign names, %d found in shop_list",
+                len(shop_ids), len(flags))
+
+    # 3. Per account: decide membership, then batch the label attaches.
+    flag_col = {c: col for col, c in FLAG_TO_COUNTRY.items()}
+    for customer_id, info in per_account.items():
+        country = info["country"]
+        col = flag_col.get(country)
+        member_label = (_lookup_label(client, customer_id, LL_MEMBER_LABEL) if dry_run
+                        else _ensure_label(client, customer_id, LL_MEMBER_LABEL))
+        state_label = _lookup_label(client, customer_id, LL_LABEL)
+
+        acct = {"country": country, "campaigns_in_account": len(info["campaigns"]),
+                "members": 0, "already_member": 0, "labeled": 0, "failed": 0,
+                "not_gsd_shop": 0, "no_shop_id": 0, "dark_unowned": 0}
+        to_label: List[Dict[str, Any]] = []
+        for c in info["campaigns"]:
+            m = _SHOP_ID_IN_NAME.search(c["campaign_name"] or "")
+            if not m:
+                acct["no_shop_id"] += 1
+                continue
+            shop_id = int(m.group(1))
+            shop = flags.get(shop_id)
+            if not shop or not col or shop.get(col) != 1:
+                # Not a GSD shop for this account's country: out of scope for
+                # low-linkage, so not a member. Includes retired shops, whose
+                # flags drop to 0 while their campaigns linger.
+                acct["not_gsd_shop"] += 1
+                continue
+            acct["members"] += 1
+
+            if c["status"] == "PAUSED" and (
+                    not state_label or state_label not in c["labels"]):
+                acct["dark_unowned"] += 1
+                result["dark_unowned"].append({
+                    "shop_id": shop_id, "country": country, "customer_id": customer_id,
+                    "campaign_id": c["campaign_id"], "campaign_name": c["campaign_name"],
+                    "status": c["status"],
+                })
+
+            if member_label and member_label in c["labels"]:
+                acct["already_member"] += 1
+                continue
+            to_label.append(c)
+
+        if dry_run:
+            acct["labeled"] = len(to_label)
+        elif to_label and member_label:
+            label_service = client.get_service("CampaignLabelService")
+            for i in range(0, len(to_label), _LABEL_BATCH):
+                chunk = to_label[i:i + _LABEL_BATCH]
+                req = client.get_type("MutateCampaignLabelsRequest")
+                req.customer_id = customer_id
+                for c in chunk:
+                    op = client.get_type("CampaignLabelOperation")
+                    op.create.campaign = c["resource_name"]
+                    op.create.label = member_label
+                    req.operations.append(op)
+                # partial_failure: one campaign that already carries the label
+                # (a race with a concurrent run) must not sink the whole chunk.
+                req.partial_failure = True
+                try:
+                    resp = _mutate_with_retry(
+                        f"backfill GSD_LL labels ({customer_id})",
+                        lambda req=req: label_service.mutate_campaign_labels(request=req),
+                    )
+                except Exception as ex:
+                    logger.error("Backfill: label chunk failed (%s, %d ops): %s",
+                                 customer_id, len(chunk), ex)
+                    result["errors"].append({"country": country, "customer_id": customer_id,
+                                             "step": "label", "error": str(ex),
+                                             "batch_size": len(chunk)})
+                    acct["failed"] += len(chunk)
+                    continue
+                # With partial_failure the failed operations come back with an
+                # empty resource_name, so the successes are countable.
+                ok = sum(1 for r in resp.results if r.resource_name)
+                acct["labeled"] += ok
+                acct["failed"] += len(chunk) - ok
+                if resp.partial_failure_error and resp.partial_failure_error.code:
+                    logger.warning("Backfill: %d/%d ops failed in %s: %s",
+                                   len(chunk) - ok, len(chunk), customer_id,
+                                   resp.partial_failure_error.message)
+                logger.info("Backfill: %s labelled %d/%d in this chunk",
+                            customer_id, ok, len(chunk))
+
+        result["accounts"][customer_id] = acct
+        for k, v in acct.items():
+            if k in result["totals"]:
+                result["totals"][k] += v
+
+    result["finished_at"] = datetime.now().isoformat(timespec="seconds")
+    logger.warning("GSD LL membership backfill DONE (dry_run=%s): %s",
+                   dry_run, result["totals"])
+    return result
+
+
+def _diagnose_no_campaigns(
+    client, country: str, shop_id: int, gsd: int,
+    member_cache: Optional[Dict[tuple, List[Dict[str, Any]]]] = None,
+) -> Tuple[str, List[Dict[str, str]]]:
     """Determine why no actionable campaigns were found for a shop+country.
 
     Returns (reason, campaigns) where *campaigns* is a list of
     ``{"campaign_name": ..., "status": ...}`` dicts so the frontend can
     show them in the expandable detail row.
+
+    ``member_cache`` is the {(customer_id, shop_id): campaigns} map the
+    membership sweep already filled for this run — reused so diagnosing a shop
+    costs zero extra reads instead of re-querying every account for it.
     """
-    all_camps: List[Dict[str, str]] = []
+    all_camps: List[Dict[str, Any]] = []
     for cid in sorted(COUNTRY_CUSTOMER_IDS.get(country, set())):
+        cached = member_cache.get((cid, shop_id)) if member_cache is not None else None
+        if cached is not None:
+            all_camps.extend(cached)
+            continue
         try:
             for camp in _find_all_shopping_campaigns(client, cid, shop_id):
                 all_camps.append(camp)
@@ -2001,6 +2341,12 @@ def run_low_linkage(
         "enabled": [],
         "skipped": [],
         "errors": [],
+        # Membership bookkeeping (LL_MEMBER_LABEL) — never a status mutation.
+        "members_labeled": [],
+        "member_label_failures": [],
+        # PAUSED members that low-linkage does NOT own: reported for review, the
+        # tool never enables them by itself (see _sync_member_labels).
+        "dark_unowned": [],
     }
 
     # 1. Feed — from cached Excel data, fresh Excel read, or pixel-monitor CSV
@@ -2094,14 +2440,30 @@ def run_low_linkage(
 
     _progress_set(phase="Processing shops…")
 
-    # 3. Shared Google Ads client + per-account label cache
+    # 3. Shared Google Ads client + per-account label caches
     client = _get_client()
-    label_cache: Dict[str, str] = {}
+    # (customer_id, label_name) -> resource name. A dry run only LOOKS labels up
+    # (so the value can be None when the label does not exist yet); a real run
+    # creates what is missing. Creating a label is a mutation, and a preview
+    # promises none — including of the bookkeeping kind.
+    label_cache: Dict[tuple, Optional[str]] = {}
+    # (customer_id, shop_id) -> every non-REMOVED Shopping campaign of that shop,
+    # filled by the membership sweep and reused by _diagnose_no_campaigns.
+    member_cache: Dict[tuple, List[Dict[str, Any]]] = {}
+
+    def label_res(customer_id: str, label_name: str) -> Optional[str]:
+        key = (customer_id, label_name)
+        if key not in label_cache:
+            label_cache[key] = (
+                _lookup_label(client, customer_id, label_name) if dry_run
+                else _ensure_label(client, customer_id, label_name)
+            )
+        return label_cache[key]
 
     def label_resource(customer_id: str) -> str:
-        if customer_id not in label_cache:
-            label_cache[customer_id] = _ensure_label(client, customer_id, LL_LABEL)
-        return label_cache[customer_id]
+        """State label, for the pause path. Only ever called on a real run,
+        where _ensure_label guarantees a resource name."""
+        return label_res(customer_id, LL_LABEL)
 
     if not dry_run:
         ensure_admin_table()
@@ -2143,6 +2505,44 @@ def run_low_linkage(
                 found_in_country = 0
                 had_error = False
                 for customer_id in sorted(COUNTRY_CUSTOMER_IDS.get(country, set())):
+                    # Membership sweep FIRST, and regardless of gsd: every
+                    # non-REMOVED Shopping campaign of this shop gets
+                    # LL_MEMBER_LABEL, whatever its status. Runs before the
+                    # pause/enable branch so the set is complete even for a
+                    # shop where nothing is actionable today, and touches no
+                    # status — a failure here must never stop the real work.
+                    try:
+                        if (customer_id, shop_id) in member_cache:
+                            # Same account already swept for this shop under
+                            # another country — one account can serve two, and
+                            # sweeping twice would double-count dark_unowned.
+                            raise _AlreadySwept
+                        member_campaigns = _find_all_shopping_campaigns(
+                            client, customer_id, shop_id)
+                        member_cache[(customer_id, shop_id)] = member_campaigns
+                        sync = _sync_member_labels(
+                            client, customer_id, shop_id,
+                            label_res(customer_id, LL_MEMBER_LABEL),
+                            label_res(customer_id, LL_LABEL),
+                            dry_run=dry_run, campaigns=member_campaigns,
+                        )
+                        meta = {"shop_id": shop_id, "shop_name": shop_name,
+                                "country": country, "customer_id": customer_id}
+                        result["members_labeled"] += [{**meta, **c} for c in sync["labeled"]]
+                        result["member_label_failures"] += [{**meta, **c} for c in sync["failed"]]
+                        result["dark_unowned"] += [{**meta, **c} for c in sync["dark_unowned"]]
+                    except _AlreadySwept:
+                        pass
+                    except Exception as ex:
+                        logger.warning(
+                            "GSD LL: membership sweep failed (%s, shop_id=%s): %s",
+                            customer_id, shop_id, ex)
+                        result["errors"].append({
+                            "shop_id": shop_id, "shop_name": shop_name,
+                            "country": country, "customer_id": customer_id,
+                            "step": "member_label", "error": str(ex),
+                        })
+
                     try:
                         if gsd == 0:
                             campaigns = _find_enabled_campaigns(client, customer_id, shop_id)
@@ -2223,7 +2623,8 @@ def run_low_linkage(
                 # diagnose WHY so the preview shows a useful reason.
                 if found_in_country == 0 and not had_error:
                     try:
-                        reason, diag_camps = _diagnose_no_campaigns(client, country, shop_id, gsd)
+                        reason, diag_camps = _diagnose_no_campaigns(
+                            client, country, shop_id, gsd, member_cache)
                     except Exception:
                         reason, diag_camps = "lookup_failed", []
                     result["skipped"].append({
@@ -2252,9 +2653,13 @@ def run_low_linkage(
     result["finished_at"] = datetime.now().isoformat(timespec="seconds")
     result["paused_count"] = len(result["paused"])
     result["enabled_count"] = len(result["enabled"])
-    logger.info("GSD LL done (dry_run=%s): %d paused, %d enabled, %d skipped, %d errors",
+    result["members_labeled_count"] = len(result["members_labeled"])
+    result["dark_unowned_count"] = len(result["dark_unowned"])
+    logger.info("GSD LL done (dry_run=%s): %d paused, %d enabled, %d skipped, %d errors, "
+                "%d newly labelled as member, %d dark without LL ownership",
                 dry_run, result["paused_count"], result["enabled_count"],
-                len(result["skipped"]), len(result["errors"]))
+                len(result["skipped"]), len(result["errors"]),
+                result["members_labeled_count"], result["dark_unowned_count"])
     return result
 
 
@@ -2298,27 +2703,75 @@ def apply_selected(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
         "enabled": [],
         "skipped": [],
         "errors": [],
+        "members_labeled": [],
+        "member_label_failures": [],
+        "dark_unowned": [],
     }
 
     if not entries:
         result["finished_at"] = datetime.now().isoformat(timespec="seconds")
         result["paused_count"] = 0
         result["enabled_count"] = 0
+        result["members_labeled_count"] = 0
+        result["dark_unowned_count"] = 0
         return result
 
     _progress_set(phase="Applying selection…", total=len(entries))
 
     client = _get_client()
     campaign_service = client.get_service("CampaignService")
-    label_cache: Dict[str, str] = {}
+    label_cache: Dict[tuple, str] = {}
     # Cache of labeled-campaign lookups per (customer_id, shop_id) so the
     # enable fallback doesn't re-query the same account/shop repeatedly.
     labeled_cache: Dict[tuple, Dict[str, str]] = {}
+    # (customer_id, shop_id) already swept for membership this call.
+    members_done: Set[tuple] = set()
+
+    def label_res(customer_id: str, label_name: str) -> str:
+        key = (customer_id, label_name)
+        if key not in label_cache:
+            label_cache[key] = _ensure_label(client, customer_id, label_name)
+        return label_cache[key]
 
     def label_resource(customer_id: str) -> str:
-        if customer_id not in label_cache:
-            label_cache[customer_id] = _ensure_label(client, customer_id, LL_LABEL)
-        return label_cache[customer_id]
+        return label_res(customer_id, LL_LABEL)
+
+    def sync_members(customer_id: str, shop_id: Any, shop_name: str, country: str) -> None:
+        """Stamp the membership label on this shop's campaigns, once per
+        (account, shop) per call.
+
+        The preview→Apply flow is the one that actually mutates, so the sweep
+        has to live here as well as in run_low_linkage — a membership label that
+        only ever got applied during a dry run would never exist. Best-effort by
+        design: this attaches labels, never statuses, so a failure is recorded
+        and the selected pause/enable proceeds regardless.
+        """
+        key = (customer_id, str(shop_id))
+        if key in members_done:
+            return
+        members_done.add(key)
+        try:
+            sync = _sync_member_labels(
+                client, customer_id, int(shop_id),
+                label_res(customer_id, LL_MEMBER_LABEL),
+                label_res(customer_id, LL_LABEL),
+                dry_run=False,
+            )
+        except (ValueError, TypeError):
+            return              # non-numeric shop_id — no lookup possible
+        except Exception as ex:
+            logger.warning("GSD LL apply: membership sweep failed (%s, shop_id=%s): %s",
+                           customer_id, shop_id, ex)
+            result["errors"].append({
+                "shop_id": shop_id, "shop_name": shop_name, "country": country,
+                "customer_id": customer_id, "step": "member_label", "error": str(ex),
+            })
+            return
+        meta = {"shop_id": shop_id, "shop_name": shop_name,
+                "country": country, "customer_id": customer_id}
+        result["members_labeled"] += [{**meta, **c} for c in sync["labeled"]]
+        result["member_label_failures"] += [{**meta, **c} for c in sync["failed"]]
+        result["dark_unowned"] += [{**meta, **c} for c in sync["dark_unowned"]]
 
     def campaign_label_for(customer_id: str, shop_id: Any, campaign_id: str) -> Optional[str]:
         key = (customer_id, str(shop_id))
@@ -2358,6 +2811,9 @@ def apply_selected(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
             if action not in ("Paused", "Enabled") or not customer_id or not campaign_id:
                 result["skipped"].append({**e, "reason": "invalid_entry"})
                 continue
+
+            if shop_id is not None:
+                sync_members(customer_id, shop_id, shop_name, country)
 
             try:
                 if action == "Paused":
@@ -2415,9 +2871,13 @@ def apply_selected(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
     result["finished_at"] = datetime.now().isoformat(timespec="seconds")
     result["paused_count"] = len(result["paused"])
     result["enabled_count"] = len(result["enabled"])
-    logger.info("GSD LL apply done: %d paused, %d enabled, %d skipped, %d errors",
+    result["members_labeled_count"] = len(result["members_labeled"])
+    result["dark_unowned_count"] = len(result["dark_unowned"])
+    logger.info("GSD LL apply done: %d paused, %d enabled, %d skipped, %d errors, "
+                "%d newly labelled as member, %d dark without LL ownership",
                 result["paused_count"], result["enabled_count"],
-                len(result["skipped"]), len(result["errors"]))
+                len(result["skipped"]), len(result["errors"]),
+                result["members_labeled_count"], result["dark_unowned_count"])
     return result
 
 
