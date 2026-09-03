@@ -31,6 +31,16 @@
            wit op #fd7e14 haalt maar 2,57:1, zwart 8,17:1. Zelfde silhouet als de
            buur, alleen de tint verschilt. */
         .badge-conflict { background-color: #fd7e14; color: #000; cursor: help; }
+        /* "current: <url>" — de badge die zegt waarheen de oude URL nú
+           doorverwijst. Bootstrap zet `.badge` op `white-space: nowrap`, en een
+           /products/…-pad schoof daarmee de From-kolom voorbij zijn max-width
+           (de reden dat de URL in 2026-08-27 juist naar de tooltip verhuisde).
+           Nu hij weer inline staat: laten afbreken binnen de cel, en links
+           uitlijnen — `.badge` centreert, wat bij twee regels URL scheef leest. */
+        .badge-current {
+            white-space: normal; word-break: break-all; text-align: left;
+            font-family: monospace; font-weight: 500;
+        }
 
         .preview-table { min-width: 1500px; }
         .preview-table thead th {
@@ -726,14 +736,18 @@
                                    + `<span class="small-muted ms-1">${forms}</span>`;
                     }
                 } else if (effSkip) {
-                    // The current target used to be spelled out inline; it now
-                    // rides in the badge's tooltip so a long /products/… path
-                    // can't stretch the column. Same for the two chips below.
-                    const tip = row.existing_target
-                        ? ` title="currently redirects to → ${escapeHtml(row.existing_target)}"`
-                        : '';
-                    const mark = row.existing_target ? ' ⓘ' : '';
-                    skipBadge = `<br><span class="badge bg-danger"${tip}>${escapeHtml(effSkip)}${mark}</span>`;
+                    // Staat er al een regel op deze oude URL, dan IS de huidige
+                    // bestemming het antwoord op "waarom staat deze rij op
+                    // skip" — die staat dus in de badge zelf en niet meer in
+                    // zijn tooltip (Joep, 2026-09-03). De reden verhuist naar
+                    // de tooltip, zodat hij niet verdwijnt. `existing_target`
+                    // wordt alleen gezet als er echt een regel bestaat, dus
+                    // elke andere skip-reden (self-redirect, …) houdt zijn
+                    // eigen tekst.
+                    skipBadge = row.existing_target
+                        ? `<br><span class="badge bg-danger badge-current" title="${escapeHtml(effSkip)}">`
+                          + `current: ${escapeHtml(row.existing_target)}</span>`
+                        : `<br><span class="badge bg-danger">${escapeHtml(effSkip)}</span>`;
                 } else if (willReplace) {
                     const tip = row.existing_target
                         ? ` title="replaces → ${escapeHtml(row.existing_target)}"`
