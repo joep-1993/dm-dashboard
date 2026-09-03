@@ -9,7 +9,11 @@ Checks:
                                  "Kies categorie" noScript header
   2. No-script facet-links     — sampled category/facet combos where the facet
                                  has seoPriority=true render a noScript header
-                                 carrying the facet name
+                                 carrying the facet name. Slot 1 is een VASTE
+                                 combo (PINNED_FACET_COMBO) die strenger toetst:
+                                 staat de vervolg-URL type_productlijn~18049952
+                                 echt als link in de noscript van de
+                                 populaire_serie~4379309-pagina?
   3. Basement links            — sampled category pages have a basement-link
                                  group AND at least one link inside it, in
                                  either the new pill layout or the legacy
@@ -30,7 +34,8 @@ A slot only fails once every attempt has failed — so a site-wide breakage stil
 fails (every replacement fails too), while one-off bad pages no longer do.
 Superseded attempts are kept in each detail's `superseded` list and counted in
 summary.retries, and Slack marks any check that only went green after a
-resample. Checks 5-6 run over fixed URL lists, so there is nothing to resample.
+resample. Checks 5-6 run over fixed URL lists, so there is nothing to resample;
+hetzelfde geldt voor de gepinde combo in check 2.
 """
 import csv
 import json
@@ -91,6 +96,37 @@ SITEMAP_ITEM_CLASS = "sitemap__item--"
 # volgende site-build zouden check 1 en 2 tegelijk rood zijn gegaan.
 # Ook tolerant voor extra attributen, witruimte en HTML-escaping van de tekst.
 NOSCRIPT_TITLE_CLASS_PREFIX = "noScript__title--"
+
+# Check 2 heeft één VASTE combo naast de twee gesamplede. De steekproef trekt
+# willekeurige seoPriority-facetten, dus een bekende probleemcombo kwam alleen
+# per toeval langs; deze pagina wordt elke run getoetst en werkt als canary.
+#
+# Schoenen (430884) gefilterd op populaire_serie~4379309 (Nike Air Force 1).
+# Op die pagina hoort het Type-facet (type_productlijn, facet 3821 — DEPENDENT,
+# dus zonder CategoryFacets-rij) zijn facet-links in de noscript te zetten. Dat
+# is precies de klasse die de bug "dependent facetten krijgen nooit een
+# SEO-facetlink" trof, dus als deze link verdwijnt is de regressie terug.
+#
+# We toetsen hier op de HREF van de vervolg-URL, niet op de facetnaamkop: de kop
+# "Type" zegt niets over of de vervolg-URL ook echt gerenderd is.
+PINNED_FACET_COMBO = {
+    "cat_id": "430884",
+    "cat_name": "Schoenen — populaire_serie~4379309",
+    "cat_url": f"{SITE_BASE}/products/schoenen/schoenen_430884/c/populaire_serie~4379309",
+    "facet_id": 3821,
+    "facet_name": "Type",
+    "expect_href": (
+        "/products/schoenen/schoenen_430884/c/"
+        "populaire_serie~4379309~~type_productlijn~18049952"
+    ),
+    "pinned": True,
+}
+
+# Alleen de inhoud van <noscript>-blokken. Document-breed matchen mag hier NIET:
+# de GraphQL-payload verderop in dezelfde HTML noemt valueId 18049952 ook, dus
+# een kapotte noscript zou dan gewoon groen blijven (gemeten 2026-09-03: 2 hits
+# op de pagina, waarvan 1 in de noscript en 1 in de JSON).
+_NOSCRIPT_BLOCK_RE = re.compile(r"<noscript[^>]*>(.*?)</noscript>", re.IGNORECASE | re.DOTALL)
 
 
 def _noscript_title_re(text: str):
@@ -452,6 +488,20 @@ def _fetch(url: str) -> Tuple[Optional[str], int]:
 # ---------------------------------------------------------------------------
 def _has_noscript_title(html: str, text: str) -> bool:
     return bool(_noscript_title_re(text).search(html or ""))
+
+
+def _has_noscript_link(html: str, path: str) -> bool:
+    """True when a <noscript> block carries an <a href> pointing at exactly
+    `path` (host-absolute or relative, trailing slash optional). Scoped to the
+    noscript blocks on purpose — see _NOSCRIPT_BLOCK_RE."""
+    body = "".join(m.group(1) for m in _NOSCRIPT_BLOCK_RE.finditer(html or ""))
+    if not body:
+        return False
+    pat = re.compile(
+        r'href=["\'](?:https?://[^"\'/]*)?' + re.escape(path) + r'/?["\']',
+        re.IGNORECASE,
+    )
+    return bool(pat.search(body))
 
 
 def _check_sitemaps(urls: List[str]) -> Tuple[bool, List[Dict]]:
@@ -921,20 +971,34 @@ def run_all_checks(seed: Optional[int] = None) -> Dict:
         results["details"][key] = details
 
     # --- Check 2 (noScript facet-links) ---
-    # Three slots drawn from one shared combo stream, so a retry consumes the
-    # NEXT unused combo — replacements never collide with another slot's URL.
+    # Slot 1 is de vaste combo (PINNED_FACET_COMBO), slot 2-3 komen uit één
+    # gedeelde combo-stream, zodat een retry de VOLGENDE ongebruikte combo pakt
+    # — vervangers botsen nooit met de URL van een ander slot.
     combo_stream = _iter_priority_facet_combos()
 
     def _eval_facet(combo: Dict) -> Tuple[bool, Dict]:
         html, http_status = _fetch(combo["cat_url"])
         if not html:
             return False, {**combo, "status": "fetch_error", "http_status": http_status}
-        present = _has_noscript_title(html, combo["facet_name"])
+        expect_href = combo.get("expect_href")
+        if expect_href:
+            present = _has_noscript_link(html, expect_href)
+        else:
+            present = _has_noscript_title(html, combo["facet_name"])
         return present, {**combo, "present": present, "http_status": http_status}
 
     facet_failed = False
     facet_details: List[Dict] = []
-    for _slot_i in range(3):
+
+    # Vaste slot: geen resample. Een gepinde combo heeft per definitie geen
+    # gelijkwaardige vervanger, dus een rode uitslag hier IS het signaal.
+    pinned_ok, pinned_detail = _eval_facet(PINNED_FACET_COMBO)
+    facet_details.append({**pinned_detail, "attempt": 1, "superseded": []})
+    if not pinned_ok:
+        facet_failed = True
+
+    sampled = 0
+    for _slot_i in range(2):
         attempts: List[Dict] = []
         used: Optional[Dict] = None
         for attempt in range(RETRY_MAX_ATTEMPTS):
@@ -945,21 +1009,24 @@ def run_all_checks(seed: Optional[int] = None) -> Dict:
             detail = {**detail, "attempt": attempt + 1}
             attempts.append(detail)
             if ok:
-                logger.info(
-                    f"[SEO_RULINGS] facet-links slot {_slot_i + 1}: passed on "
-                    f"attempt {attempt + 1}"
-                ) if attempt else None
+                if attempt:
+                    logger.info(
+                        f"[SEO_RULINGS] facet-links slot {_slot_i + 2}: passed on "
+                        f"attempt {attempt + 1}"
+                    )
                 used = detail
                 break
         if used is None and attempts:
             used = attempts[-1]
         if used is None:
-            # Stream exhausted before this slot got any candidate at all.
-            if not facet_details:
+            # Stream exhausted before this slot got any candidate at all. De
+            # gepinde rij telt hier niet mee: die komt niet uit de steekproef.
+            if sampled == 0:
                 facet_failed = True
                 facet_details.append({"status": "no_priority_facets_found"})
             break
         facet_details.append({**used, "superseded": attempts[:-1]})
+        sampled += 1
         if used.get("present") is not True:
             facet_failed = True
     results["checks"]["no_script_facet_links"] = "failed" if facet_failed else "passed"

@@ -477,11 +477,13 @@
             // Check 2 — No-script facet-links. Category + Facet merged into
             // one "Category/Facet" column (400px) so it aligns with the
             // Category columns in the other two tables; the facet name is
-            // shown muted after a slash.
+            // shown muted after a slash. De vaste combo krijgt een "vast"-pill
+            // erachter — die rij wordt niet geresampled en toetst op één
+            // specifieke vervolg-URL in plaats van op de facetnaamkop.
             detailsBody.appendChild(buildSection(
                 CHECK_LABELS.no_script_facet_links,
                 buildTable(details.no_script_facet_links || [], [
-                    { label: "Category/Facet", width: "400px", get: r => `${escapeHtml(r.cat_name || "—")} <span class="text-muted">/ ${escapeHtml(r.facet_name || "—")}</span>` },
+                    { label: "Category/Facet", width: "400px", get: r => `${escapeHtml(r.cat_name || "—")} <span class="text-muted">/ ${escapeHtml(r.facet_name || "—")}</span>${pinnedPill(r)}` },
                     { label: "Cat ID",         width: "100px", get: r => r.cat_id || "—", align: "center" },
                     { label: "Status",         width: "100px", get: r => withAttempt(r, presenceCell(r.present, r.status)), align: "center" },
                     { label: "URL",            width: "600px", get: r => linkCell(r.cat_url) },
@@ -646,6 +648,19 @@
                 .join("\n");
             const tip = escapeHtml(`passed on attempt ${n}. Replaced:\n${prev}`);
             return `${inner}<sup class="text-warning ms-1" style="cursor:help" title="${tip}">#${n}</sup>`;
+        }
+
+        // Markeert de vaste (gepinde) rij van check 2 en zet de verwachte
+        // noscript-link in de tooltip — zonder die link is een "missing" op
+        // die rij niet te duiden.
+        function pinnedPill(r) {
+            if (!r || !r.pinned) return "";
+            const tip = escapeHtml(
+                r.expect_href
+                    ? `Vaste check (wordt niet geresampled).\nVerwacht deze link in de noscript:\n${r.expect_href}`
+                    : "Vaste check (wordt niet geresampled)."
+            );
+            return ` <span class="pill ms-1" style="cursor:help" title="${tip}">vast</span>`;
         }
 
         function presenceCell(present, status) {
