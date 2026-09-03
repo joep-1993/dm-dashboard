@@ -90,11 +90,21 @@ FACET_ENTITIES = (
     "Facet Value Label",
     "Category Facet",
     "Category Facet Setting",
+    # Added 2026-09-03. It was the largest thing falling outside this tuple:
+    # 2.497 of the 3.789 dropped events over 30 days. A productlijn-facet has no
+    # CategoryFacet row at all — its main categories come from exactly these
+    # value dependencies — so leaving it out made that whole family invisible to
+    # the watch. See _extract() for why it resolves to the CHILD facet.
+    "Facet Value Dependency",
 )
 
 # Which entity names describe the FACET itself rather than one of its values. Used
 # by the overview to separate "a new facet appeared" from "a value was added".
-FACET_LEVEL = ("Facet", "Facet Label", "Category Facet", "Category Facet Setting")
+FACET_LEVEL = ("Facet", "Facet Label", "Category Facet", "Category Facet Setting",
+               # A dependency binds one facet to a value of ANOTHER facet, which
+               # changes where the child facet appears — a fact about the facet,
+               # not about one of its own values.
+               "Facet Value Dependency")
 
 # The product-line family: one facet per brand, created automatically by ListsApi
 # and attached to nearly every main category. Two of them ("Productlijnen: UGG",
@@ -582,6 +592,19 @@ def _extract(ev):
     elif name in ("Category Facet", "Category Facet Setting"):
         facet_id = _chg("FacetId")
         cat_id = _chg("CategoryId")
+    elif name == "Facet Value Dependency":
+        # This one carries no `FacetId`. Its payload is
+        # {ChildFacetId, ParentFacetId, ParentFacetValueId, CreatedAt, Notes} and
+        # `entityId` is the dependency ROW's id — not a facet and not a value, so
+        # it must not be read as either.
+        #
+        # The change belongs to the CHILD facet: the dependency decides where that
+        # facet shows up, and for a productlijn-facet it is the only thing that
+        # does. Deliberately NO value_id: `ParentFacetValueId` is a value of the
+        # PARENT facet, and pass 2 feeds every (value_id, facet_id) pair it sees
+        # into pa.facet_watch_value_facet — pairing the parent's value with the
+        # child's facet would poison that map for every later lookup.
+        facet_id = _chg("ChildFacetId")
     return facet_id, value_id, cat_id
 
 
