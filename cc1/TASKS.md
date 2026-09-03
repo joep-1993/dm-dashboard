@@ -3,6 +3,22 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-03 (3) — Redirect tool: de skip-badge zegt waarheen de URL nú verwijst
+
+Uit `suggestions.txt`. Commit `216d757`.
+
+- [x] De rode badge onder een overgeslagen From-URL las `source has existing rule ⓘ`, met de
+      bestaande bestemming in de tooltip. Badge en tooltip wisselen van inhoud: `current: <url>`
+      staat er nu, de reden hangt eronder. De reden is voor élke overgeslagen rij dezelfde zin; de
+      bestemming staat nergens anders op die rij.
+- [x] Alleen waar er echt een regel staat — `existing_target` wordt in `redirect_tool_service`
+      enkel gezet als de oude URL al doorverwijst, dus `self-redirect` en andere skip-redenen
+      houden hun eigen tekst.
+- [x] `.badge-current` laat de URL binnen de cel afbreken. Bootstrap zet `.badge` op
+      `white-space: nowrap`, en dat is precies waarom die URL op 27-08 juist naar de tooltip
+      verhuisde: een `/products/…`-pad duwde de From-kolom voorbij zijn `max-width: 380px`. De
+      regel in UI_BLUEPRINT §Labels/badges is met die nuance bijgewerkt in plaats van omgegooid.
+
 ### 2026-09-03 (2) — Auto-Redirects: de Push Redirects-balk uitgekleed en de tabel op één lettertype
 
 Wensenlijst van Joep uit `suggestions.txt`, zeven punten op de Push Redirects-kaart. Commit `865ddb0`.
@@ -68,8 +84,9 @@ in dat document onder "STATUS 2026-09-03".
 Open:
 
 - [ ] **De ask aan IT herzien** (checklist-artifact, doc §8). De twee gevallen die het bewijs droegen
-      linken nu allebei, maar niemand weet wat er tussen 25-08 en 03-09 veranderde en er is geen
-      release gemeld. Niet intrekken zonder dat antwoord.
+      linken nu allebei, en **Joep bevestigt dat de bug gefikst is** — dát was de reden om er een
+      vaste check op te zetten. Wat er precies veranderde en door wie staat nog open; gevraagd,
+      nog geen antwoord. Zonder dat antwoord blijft de canary de enige bewaking.
 - [ ] **Modelnaam 5514 (Laptops) is niet getoetst**: in die categorie staat élk facet op
       `isSeoFacet=false` en bevat het noscript alleen "Kies categorie". Zoek een categorie waar de
       parent (Productlijn 2306) zelf wél gelinkt wordt.

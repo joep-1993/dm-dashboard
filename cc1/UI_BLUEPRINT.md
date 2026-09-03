@@ -1118,6 +1118,19 @@ achter zit). `cursor: help` erbij, zodat de tooltip vindbaar is. Niets wordt onv
 is alleen niet langer breed. Let op: `title` is een attribuut, dus door `escapeHtml()` heen —
 die escapet ook `"` en `'`, anders breekt een URL met een quote de tag open.
 
+**Nuance op die regel (Joep, 2026-09-03): tenzij die URL het enige nieuws in de rij is.** De
+skip-badge in dezelfde preview las `source has existing rule ⓘ` met de bestaande bestemming in zijn
+tooltip. Verkeerde kant op: de *reden* is voor elke overgeslagen rij letterlijk dezelfde zin, en de
+bestemming staat nergens anders op die rij — dus de badge zegt nu `current: <url>` en de reden
+verhuist naar de `title`. **Vuistregel: in de badge staat wat per rij verschilt, in de tooltip wat
+constant is.** De rewire-chip hierboven blijft dus kort, want díe URL staat al in de To-kolom.
+
+Spel je een URL uit, dan moet de badge kunnen afbreken: **`.badge` draagt van Bootstrap
+`white-space: nowrap`**, dus zonder eigen klasse schiet hij alsnog dwars door de kolombreedte heen —
+precies de val van 27-08. Wat werkt is een `.badge-<naam>` met `white-space: normal; word-break:
+break-all; text-align: left` (dat laatste omdat `.badge` centreert, en een URL over twee regels
+gecentreerd scheef leest).
+
 **Naast een gevulde badge blijft een nieuwe badge gevuld — het onderscheid komt van de tint.**
 Zelfde regel als de Model/Status-kolommen hierboven, maar dan de andere kant op: de outline-vorm
 is de voorkeur voor een *nieuwe* labelkolom, niet iets om er halverwege een rij in te zetten.

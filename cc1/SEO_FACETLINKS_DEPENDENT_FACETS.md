@@ -47,6 +47,9 @@ Twee dingen om niet te verwarren:
   heeft überhaupt geen SEO-facetten, dus er valt geen dependent-gedrag te zien. Wie dit sluitend wil
   hebben, zoekt een categorie waar de parent (Productlijn 2306) zelf wél gelinkt wordt.
 
+**Joep bevestigt de fix** (03-09-2026): "de bug is idd gefikst" — vandaar de vaste check in SEO
+Rulings. De nameting hieronder is dus geen toevalstreffer op één pagina.
+
 **Wat dit betekent voor de ask aan IT** (§8, de checklist-artifact): de twee gevallen die het bewijs
 droegen linken nu allebei. Voordat je de vraag intrekt: het is niet bekend *wat* er tussen 25-08 en
 03-09 veranderd is, en niemand heeft een release gemeld. Vraag 3 uit de checklist ("bestaat er een
