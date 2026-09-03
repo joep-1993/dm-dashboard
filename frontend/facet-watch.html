@@ -58,6 +58,23 @@
            zichtbaar buiten de groen→rood-prioriteitsladder valt. */
         .badge-unknown  { background-color: #f1edfa; color: #5e4a90; box-shadow: inset 0 0 0 1px #cfc4e6; }
 
+        /* ---- Outlined variant, alleen voor de WAARDE-toestand (Joep, 2026-09-03) ----
+           Dezelfde vier kleuren, maar als rand: in een paneel van 300 waarden staan
+           deze labels in elke rij, en vier gevulde vlakken per rij nemen de tabel
+           over. De facet-badges in de rij eromheen blijven gevuld — dat is precies
+           het verschil dat je wil zien: gevuld = deze RIJ is nieuw/aangehangen,
+           outlined = deze WAARDE veranderde.
+
+           De rand komt uit `box-shadow: inset`, net als bij .badge-unknown, zodat het
+           label niet 2px groter wordt dan zijn gevulde tegenhanger. De tekstkleur is
+           NIET de randkleur: #ffc107 haalt als tekst op wit 1,7:1 en #fd7e14 2,9:1.
+           Genomen zijn de donkere varianten die elders in de app al die rol hebben —
+           #8a5a00 (info-note), #b45309 (DRY RUN-badges), #c03b3b (btn-outline-red). */
+        .badge-new-out      { background-color: transparent; color: #146c43; box-shadow: inset 0 0 0 1px #198754; }
+        .badge-attached-out { background-color: transparent; color: #8a5a00; box-shadow: inset 0 0 0 1px #ffc107; }
+        .badge-auto-out     { background-color: transparent; color: #b45309; box-shadow: inset 0 0 0 1px #fd7e14; }
+        .badge-del-out      { background-color: transparent; color: #c03b3b; box-shadow: inset 0 0 0 1px #d64545; }
+
         /* Was monospace; now only a smaller size, so the column matches its
            neighbours (see the font-family rule above). */
         .ts { font-size: 0.82rem; }
@@ -343,7 +360,14 @@
                 <!-- ---------------- Facetten ---------------- -->
                 <div class="card mb-4">
                     <div class="card-header">
-                        <h5 class="mb-0">Laatst aangemaakte / gewijzigde facetten</h5>
+                        <h5 class="mb-0">Laatst aangemaakte / gewijzigde facetten
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px; margin-left: 4px;">
+                                <title>Klik een facet om zijn waarden uit te klappen — met wat er in dit venster aan veranderde, of ze seoPriority hebben en hoeveel bestaande URL's erop staan.</title>
+                                <circle cx="8" cy="8" r="8" fill="#5e4a90"/>
+                                <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
+                                <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
+                            </svg>
+                        </h5>
                     </div>
                     <div class="card-body">
                         <!-- De categoriefilter is hier weg: die zat op de rij-klik in "Per main
@@ -358,11 +382,13 @@
                             <button class="btn btn-sm btn-outline-purple ms-auto" onclick="clearKindFilter()"
                                     id="clearKindBtn" style="display: none;">Toon alles</button>
                         </div>
-                        <div class="note mb-2">Klik een facet om zijn <em>waarden</em> uit te klappen —
-                            met wat er in dit venster aan veranderde, of ze <code>seoPriority</code> hebben
-                            en hoeveel bestaande URL's erop staan.</div>
                         <div class="tool-table-wrap">
-                            <table class="table table-sm table-hover tool-table tbl-nowrap">
+                            <!-- GEEN .table-hover (Joep, 2026-09-03). `style.css` tint een
+                                 hover-rij met --flat-accent-soft, en in deze tabel botste dat
+                                 met de tint van de uitgeklapte rij: bij het bewegen naar het
+                                 paneel eronder liep er een tweede kleur over de tabel. De
+                                 caret en `cursor: pointer` dragen de klikbaarheid. -->
+                            <table class="table table-sm tool-table tbl-nowrap">
                                 <thead class="table-light">
                                     <tr>
                                         <th class="sortable" onclick="sortFc('last_change')">Laatste wijziging</th>
@@ -958,15 +984,17 @@ Het label-event draagt geen locale, dus die wordt bepaald door de huidige slugs 
         'Facet Value Dependency': 'afhankelijkheid',
     };
 
+    // Outlined, zie de `-out`-klassen in de <style>: deze labels staan in elke rij
+    // van een paneel dat 300 rijen lang kan zijn.
     function fvStateBadges(v) {
         const b = [];
-        if (v.is_new) b.push('<span class="badge badge-new">nieuw</span>');
-        if (v.deleted) b.push('<span class="badge badge-del">verwijderd</span>');
+        if (v.is_new) b.push('<span class="badge badge-new-out">nieuw</span>');
+        if (v.deleted) b.push('<span class="badge badge-del-out">verwijderd</span>');
         else if (v.missing_live) b.push('<span class="badge badge-unknown"'
             + ' title="De Taxonomy API kent dit id niet meer, maar er staat geen'
             + ' DELETE in de log — verwijderd buiten dit venster, of buiten de log.">weg</span>');
-        else if (v.events && !v.is_new) b.push('<span class="badge badge-attached">gewijzigd</span>');
-        if (v.invalid_reason) b.push(`<span class="badge badge-auto" title="${esc(v.invalid_reason)}">ongeldig</span>`);
+        else if (v.events && !v.is_new) b.push('<span class="badge badge-attached-out">gewijzigd</span>');
+        if (v.invalid_reason) b.push(`<span class="badge badge-auto-out" title="${esc(v.invalid_reason)}">ongeldig</span>`);
         return b.join(' ');
     }
 
