@@ -3410,6 +3410,49 @@ async def seo_prio_categories(force: bool = False):
     return seo_prio_service.get_categories(force=force)
 
 
+@app.get("/api/seo-prio/tax-categories")
+async def seo_prio_tax_categories(force: bool = False):
+    """Categoriekiezer voor de Category-facets-kaart, op TAXONOMIE-ids.
+
+    Een andere lijst dan /categories: die draait op de Redshift-namen waarop een
+    run filtert, deze op de taxonomie-ids waarmee je facetten opvraagt.
+    """
+    try:
+        return seo_prio_service.list_tax_categories(force=force)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/seo-prio/category-facets/{cat_id}")
+def seo_prio_category_facets(cat_id: str):
+    """Welke facetten staan SEO-aan voor deze categorie (read-only)."""
+    try:
+        return seo_prio_service.category_facets(cat_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"taxonomy API: {e}")
+
+
+@app.get("/api/seo-prio/facet-values/{facet_id}")
+def seo_prio_facet_values(facet_id: str, only_on: bool = True):
+    """De facetwaarden van één facet; standaard alleen die met seoPriority=true.
+
+    Blocking en niet async: dit pagineert door tot 12.000 waarden bij de
+    taxonomie-API langs, dus het hoort in de threadpool en niet op de event loop.
+    """
+    try:
+        return seo_prio_service.facet_values(facet_id, only_on=only_on)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"taxonomy API: {e}")
+
+
 @app.get("/api/seo-prio/status/{run_id}")
 async def seo_prio_status(run_id: str):
     status = seo_prio_service.get_run_status(run_id)

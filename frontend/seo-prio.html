@@ -9,9 +9,102 @@
     <style>
         .threshold-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem 1rem; }
         .threshold-grid label { font-size: 0.85rem; color: #555; }
+        /* ------------------------------------------------------------------ *
+         * Zoekbare dropdown — dezelfde categoriekiezer als in Healthscore
+         * ------------------------------------------------------------------ *
+         * Overgenomen uit frontend/healthscore.html §"Zoekbare dropdown" (Joep,
+         * 2026-09-04: de cat-selectie hier moest dezelfde vorm krijgen), inclusief
+         * de maten. Wijzig je hier iets, wijzig het daar ook — de twee pagina's
+         * tonen dezelfde keuze en moeten dus niet uit elkaar lopen.
+         *
+         * De KNOP draagt `form-select form-select-sm`, dus rand, radius, hoogte,
+         * focusring en het pijltje komen uit style.css. Die maat is ook de maat
+         * van de .date-box ernaast (font 0,85rem, padding 0,2rem), dus de rij
+         * lijnt onderaan uit zonder dat er hier hoogtes bij hoeven. */
+        .dd { position: relative; }
+        .dd-toggle { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .dd-toggle.is-empty { color: #9aa0a6; }
+        .dd-panel { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0;
+                    min-width: 100%; max-width: 34rem; background: #fff;
+                    border: 1px solid var(--flat-border); border-radius: var(--flat-radius);
+                    box-shadow: 0 8px 24px rgba(45, 42, 58, 0.16); padding: 0.45rem; }
+        .dd-count { font-size: 0.74rem; color: var(--flat-muted); padding: 5px 6px 3px; }
+        .dd-list { max-height: 244px; overflow-y: auto; }
+        .dd-opt { display: flex; align-items: baseline; gap: 10px; padding: 4px 8px;
+                  border-radius: 6px; cursor: pointer; font-size: 0.87rem; }
+        /* Hover en de toetsenbordcursor zijn dezelfde tint: het is één "hier sta je
+           nu"-staat, of je hem met de muis of met de pijltjes aanwijst. */
+        .dd-opt:hover, .dd-opt.is-active { background: var(--flat-accent-soft); }
+        .dd-opt.is-picked { background: #f1edfa; box-shadow: inset 3px 0 0 #5e4a90; font-weight: 600; }
+        .dd-opt > .dd-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .dd-opt .dd-meta { color: var(--flat-muted); font-size: 0.78rem; margin-left: auto;
+                           white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .muted-sm { font-size: 0.8rem; color: var(--flat-muted); }
+
+        /* ---- Category facets (read-only inspector) ---- */
+        /* Eén regel per facet, klikbaar; de facetwaarden komen eronder in een
+           tweede rij die pas gevuld wordt als je hem opent. */
+        /* Zelfde omhulsel als .gsd-table-wrap in GSD Campaigns: rand + radius, zodat
+           de tabel binnen de kaartsectie staat i.p.v. edge-to-edge eronder. */
+        .facet-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; }
+        /* Eén lettertype en één maat in de hele tabel (Joep, 2026-09-04): de Facet
+           ID-kolom stond op `font-monospace small` en dat las als een tweede letter
+           in dezelfde tabel. Cijfers krijgen wél tabular figures — zelfde letter,
+           alleen vaste cijferbreedte, zodat ze onder elkaar uitlijnen. */
+        #facetTable { font-size: 0.85rem; }
+        #facetTable .tnum { font-variant-numeric: tabular-nums; }
+        #facetTable thead tr { background: #f0f0f0; border-bottom: 2px solid #dee2e6; }
+        #facetTable thead th { padding: 8px 12px; white-space: nowrap; text-align: center;
+                               user-select: none; }
+        #facetTable tbody td { padding: 6px 12px; vertical-align: middle; text-align: center; }
+        #facetTable tbody tr.facet-row { cursor: pointer; }
+        #facetTable tbody tr.facet-row:hover { background: var(--flat-accent-soft); }
+        #facetTable tbody tr.facet-row.is-open { background: #f3f0fa; }
+        #facetTable td.facet-name { text-align: left; }
+        .facet-slug { color: var(--flat-muted); font-size: 0.76rem; }
+        .facet-caret { display: inline-block; width: 0.9rem; color: #9aa0a6;
+                       transition: transform 0.12s ease; }
+        tr.is-open .facet-caret { transform: rotate(90deg); color: #5e4a90; }
+        /* De waardenlijst: pillen i.p.v. een tweede tabel. Een facet kan honderden
+           aan-waarden hebben en dan is een kolom met één woord per regel meters
+           lang; gewikkelde pillen passen in één blok dat je in één blik overziet. */
+        /* Hoogte begrensd en zelf scrollend: een facet als Collectie heeft 1.729
+           aan-waarden en die duwen zonder plafond de rest van de tabel van het
+           scherm af — dan is de lijst van facetten niet meer te gebruiken. */
+        .val-wrap { display: flex; flex-wrap: wrap; gap: 4px 6px; padding: 0.15rem 0 0.35rem;
+                    max-height: 15rem; overflow-y: auto; }
+        .val-pill { border: 1px solid var(--flat-border-strong); border-radius: 999px;
+                    padding: 1px 8px 2px; font-size: 0.78rem; background: #fff;
+                    white-space: nowrap; }
+        /* Een pil die naar de live /c/-pagina linkt houdt de vorm van de pil: geen
+           blauw, geen onderstreping, wel een duidelijke hover. Anders leest een blok
+           van 400 waarden als een blauwe muur. */
+        a.val-pill { color: inherit; text-decoration: none; }
+        a.val-pill:hover { border-color: #5e4a90; background: var(--flat-accent-soft);
+                           color: #5e4a90; }
+        .facet-detail > td { background: #fbfbfc; text-align: left !important; }
+        /* Outlined labels, want een gevulde badge overleeft de hertintte
+           Bootstrap-kleuren niet (UI_BLUEPRINT §Labels/badges). Padding boven
+           kleiner dan onder om dezelfde scheve em-doos te compenseren. */
+        .lbl { background: transparent; font-weight: 700; border: 1px solid currentColor;
+               text-transform: uppercase; letter-spacing: .03em;
+               font-size: 0.7rem; padding: 0.15em 0.55em 0.25em; border-radius: 0.375rem;
+               display: inline-block; }
+        .lbl-purple { color: #5e4a90; }
+        .lbl-blue   { color: #1f99c4; }
+        .lbl-amber  { color: #b26a00; }
+        .lbl-red    { color: #a4271b; }
+        .lbl-grey   { color: #5c6470; }
         .runs-table { font-size: 0.85rem; }
         .runs-table td, .runs-table th { vertical-align: middle; }
-        .status-badge { font-size: 0.75rem; padding: 0.2rem 0.5rem; }
+        /* Bootstrap zet `line-height: 1` op .badge en die em-doos zit niet
+           symmetrisch om cap-hoogte→basislijn, dus bij gelijke padding zakt de
+           tekst ~1px (UI_BLUEPRINT §Labels/badges — `inline-flex` of
+           `align-items:center` helpt niet, die centreren dezelfde scheve doos).
+           Fix = minder padding boven dan onder met de som gelijk, zodat de pil
+           niet van hoogte verandert. Gemeten op 8x, zie het commentaar bij de
+           meting in cc1/LEARNINGS.md. */
+        .status-badge { font-size: 0.75rem; padding: 0.165rem 0.5rem 0.235rem; }
         .progress-thin { height: 8px; }
         /* DMA+-style results table */
         #resultsTable { font-size: 0.82rem; }
@@ -113,7 +206,7 @@
                         <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
                         <a href="/static/seo-prio.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> SEO Priority</a>
                         <a href="/static/seo-rulings.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10"/><path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/><path d="m21 11-8-8"/><path d="M4 22h12"/></svg> SEO Rulings</a>
-                        <a href="/static/seo-stats.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> SEO stats</a>
+                        <a href="/static/seo-stats.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> SEO Stats</a>
                         <a href="/static/url-validator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg> URL Validator</a>
                     </div>
                 </div>
@@ -132,7 +225,7 @@
                         <h5 class="mb-0">Configure run <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title>Pulls 2 years of /c/ visits + revenue from Redshift, fans them out per facet, looks up current seoPriority in taxv2, and proposes ON/OFF toggles.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg></h5>
                     </div>
                     <div class="card-body">
-                        <div class="row g-3">
+                        <div class="row g-3 align-items-end">
                             <!-- Eén .date-box i.p.v. twee kolommen (UI_BLUEPRINT,
                                  2026-08-13). col-md-3 blijft: de box is smaller dan
                                  twee losse velden, dus de rij wordt ruimer. -->
@@ -144,26 +237,52 @@
                                     <input type="date" id="endDate" aria-label="End date">
                                 </div>
                             </div>
-                            <!-- Category scope. Type-ahead via a native <datalist>:
-                                 free text + suggestions, no JS library. Deepest is
-                                 filtered by the chosen maincat. -->
-                            <div class="col-md-3">
-                                <label class="form-label" for="maincatInput">Maincat
-                                    <span class="text-muted small">(optional)</span>
-                                </label>
-                                <input class="form-control" id="maincatInput" list="maincatList"
-                                       placeholder="all maincats" autocomplete="off"
-                                       oninput="onMaincatInput()">
-                                <datalist id="maincatList"></datalist>
+                            <!-- Category scope, in de vorm van Healthscore's
+                                 categorieselectie (Joep, 2026-09-04): een cascade van
+                                 twee zoekbare dropdowns i.p.v. twee vrije tekstvelden
+                                 met een <datalist>. Beide velden zijn hier een FILTER
+                                 en geen doel, dus elke lijst opent met een expliciete
+                                 "All …"-regel — dat houdt het oude contract (leeg =
+                                 alles) zichtbaar in de knop zelf.
+                                 De breedtes 3/4/5 zijn die van Healthscore. -->
+                            <!-- ps-md-4 en niet een bredere gutter op de rij: de
+                                 datumbox is bijna zo breed als zijn kolom, dus die twee
+                                 velden raken elkaar bijna (Joep, 2026-09-04). Padding
+                                 IN de kolom houdt de 3/4/5-optelling op 12, een marge
+                                 zou de laatste kolom laten omvallen. -->
+                            <div class="col-md-4 ps-md-4">
+                                <label class="form-label mb-1" for="ddMainToggle">Maincat</label>
+                                <div class="dd" id="ddMain">
+                                    <button type="button" class="form-select form-select-sm dd-toggle is-empty"
+                                            id="ddMainToggle" aria-haspopup="listbox" aria-expanded="false" disabled>
+                                        <span class="dd-value">loading&hellip;</span>
+                                    </button>
+                                    <div class="dd-panel" hidden>
+                                        <input type="search" class="form-control form-control-sm dd-search"
+                                               placeholder="Search a maincat&hellip;" autocomplete="off"
+                                               aria-label="Search a maincat"
+                                               title="Several words: all of them must occur, order does not matter. ↑/↓ walks the list, Enter picks, Esc closes.">
+                                        <div class="dd-count"></div>
+                                        <div class="dd-list" role="listbox" aria-label="Maincat"></div>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="col-md-3">
-                                <label class="form-label" for="deepestInput">Deepest cat
-                                    <span class="text-muted small">(optional)</span>
-                                </label>
-                                <input class="form-control" id="deepestInput" list="deepestList"
-                                       placeholder="all deepest cats" autocomplete="off"
-                                       oninput="onDeepestInput()">
-                                <datalist id="deepestList"></datalist>
+                            <div class="col-md-5">
+                                <label class="form-label mb-1" for="ddCatToggle">Deepest cat</label>
+                                <div class="dd" id="ddCat">
+                                    <button type="button" class="form-select form-select-sm dd-toggle is-empty"
+                                            id="ddCatToggle" aria-haspopup="listbox" aria-expanded="false" disabled>
+                                        <span class="dd-value">loading&hellip;</span>
+                                    </button>
+                                    <div class="dd-panel" hidden>
+                                        <input type="search" class="form-control form-control-sm dd-search"
+                                               placeholder="Search a deepest cat&hellip;" autocomplete="off"
+                                               aria-label="Search a deepest cat"
+                                               title="Searches the category name and its maincat. Several words: all of them must occur, order does not matter. ↑/↓ walks the list, Enter picks, Esc closes.">
+                                        <div class="dd-count"></div>
+                                        <div class="dd-list" role="listbox" aria-label="Deepest cat"></div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div id="catHint" class="form-text mt-1"></div>
@@ -202,7 +321,10 @@
                         </div>
 
                         <div class="d-flex justify-content-end gap-2 mt-3">
-                            <button class="btn btn-outline-orange" onclick="resetThresholds()">Reset defaults</button>
+                            <!-- Paarse outline en niet oranje: oranje is op deze pagina
+                                 de kleur van de actie die de run start (UI_BLUEPRINT
+                                 §Buttons), en Reset zet alleen de velden terug. -->
+                            <button class="btn btn-outline-purple" onclick="resetThresholds()">Reset defaults</button>
                             <button class="btn btn-success" id="startBtn" onclick="startRun()">Start run</button>
                             <button class="btn btn-danger d-none" id="stopBtn" onclick="stopRun()">Stop</button>
                         </div>
@@ -345,11 +467,11 @@
                             <thead>
                                 <tr style="background:#f0f0f0; border-bottom: 2px solid #dee2e6;">
                                     <th class="col-check" style="padding: 8px 12px;"><input class="form-check-input" type="checkbox" id="runSelectAll" title="Select all runs"></th>
-                                    <th style="padding: 8px 12px;">Run</th>
-                                    <th style="padding: 8px 12px;">Started</th>
+                                    <th style="padding: 8px 12px;">Date</th>
                                     <th style="padding: 8px 12px;">Status</th>
                                     <th style="padding: 8px 12px;">Rows</th>
                                     <th style="padding: 8px 12px;">Date range</th>
+                                    <th style="padding: 8px 12px;">Category</th>
                                     <th style="padding: 8px 12px;">Actions</th>
                                 </tr>
                             </thead>
@@ -368,6 +490,87 @@
                                 <button type="button" class="btn btn-sm btn-outline-red" id="runRemoveBtn" disabled>Remove</button>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- ============ Category facets (read-only) ============
+                     Losse module (Joep, 2026-09-04): kies een categorie, haal hem
+                     op, en zie welke facetten daar SEO-aan staan; klik een facet
+                     open voor de facetwaarden die aan staan. Leest alleen de
+                     taxonomie — geen run, geen Redshift, geen schrijfactie. -->
+                <div class="card mb-4">
+                    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <h5 class="mb-0">Category facets <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title id="facetInfoTitle">Reads the taxonomy (GET /api/Categories/{id}) and lists the facets whose effective seoPriority is ON for the picked category, inheritance included. Click a facet for the facet values that are ON. The site itself renders the noscript facet links from isSeoFacet in the search index, which can lag a fresh taxonomy change.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg></h5>
+                        <span class="muted-sm" id="facetCatMeta"></span>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3 align-items-end">
+                            <div class="col-md-4">
+                                <label class="form-label mb-1" for="ddFacMainToggle">Maincat</label>
+                                <div class="dd" id="ddFacMain">
+                                    <button type="button" class="form-select form-select-sm dd-toggle is-empty"
+                                            id="ddFacMainToggle" aria-haspopup="listbox" aria-expanded="false" disabled>
+                                        <span class="dd-value">loading&hellip;</span>
+                                    </button>
+                                    <div class="dd-panel" hidden>
+                                        <input type="search" class="form-control form-control-sm dd-search"
+                                               placeholder="Search a maincat&hellip;" autocomplete="off"
+                                               aria-label="Search a maincat"
+                                               title="Several words: all of them must occur, order does not matter. ↑/↓ walks the list, Enter picks, Esc closes.">
+                                        <div class="dd-count"></div>
+                                        <div class="dd-list" role="listbox" aria-label="Maincat"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-5">
+                                <label class="form-label mb-1" for="ddFacCatToggle">Category</label>
+                                <div class="dd" id="ddFacCat">
+                                    <button type="button" class="form-select form-select-sm dd-toggle is-empty"
+                                            id="ddFacCatToggle" aria-haspopup="listbox" aria-expanded="false" disabled>
+                                        <span class="dd-value">loading&hellip;</span>
+                                    </button>
+                                    <div class="dd-panel" hidden>
+                                        <input type="search" class="form-control form-control-sm dd-search"
+                                               placeholder="Search on name or id&hellip;" autocomplete="off"
+                                               aria-label="Search a category"
+                                               title="Searches the category name, its maincat and the id. Several words: all of them must occur, order does not matter. ↑/↓ walks the list, Enter picks, Esc closes.">
+                                        <div class="dd-count"></div>
+                                        <div class="dd-list" role="listbox" aria-label="Category"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3 d-flex justify-content-end">
+                                <!-- Leest alleen: paarse outline, niet de oranje CTA
+                                     (UI_BLUEPRINT §Buttons). -->
+                                <button class="btn btn-outline-purple" id="facetFetchBtn" disabled
+                                        title="Pick a category first">Fetch</button>
+                            </div>
+                        </div>
+                        <div class="d-flex flex-wrap align-items-center gap-3 mt-2">
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="checkbox" id="facetShowAll">
+                                <label class="form-check-label" for="facetShowAll">
+                                    Show facets that are not ON
+                                </label>
+                            </div>
+                            <!-- Standaard uit: de taxonomie hangt dependent facetten aan
+                                 een merkwaarde, en die rijden mee naar elke categorie waar
+                                 dat merkfacet ligt — "Productlijnen: Nintendo" onder
+                                 Sneakers (Joep, 2026-09-04). De zoekindex weet welke
+                                 facetten hier écht producten hebben. -->
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="checkbox" id="facetShowIrrelevant">
+                                <label class="form-check-label" for="facetShowIrrelevant">
+                                    Show facets without results here
+                                </label>
+                            </div>
+                            <span id="facetHint" class="form-text m-0"></span>
+                        </div>
+                        <!-- De tabel staat IN de card-body en niet als losse rand-tot-rand
+                             blok onder de kop (Joep, 2026-09-04), in de vorm die
+                             "Campaigns created" in GSD Campaigns gebruikt: een omrande,
+                             afgeronde .table-responsive-doos binnen de body. -->
+                        <div id="facetResult"></div>
                     </div>
                 </div>
 
@@ -406,14 +609,177 @@ function resetThresholds() {
     document.getElementById('offRevenuePct').value = t.off_max_revenue_pct;
 }
 
-// ---- Category scope (maincat + deepest cat, both type-ahead) --------------
+// Escapes for both attribute and text context; every render on this page goes
+// through it. (Lived in the old datalist block — it is used far beyond it.)
+function escapeAttr(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ---- Searchable dropdown — one component, used by every category picker --
+// Copied from frontend/healthscore.html §"Zoekbare dropdown" (Joep, 2026-09-04):
+// the category selection here had to take that shape. No <select>: it cannot
+// carry a search field, and thousands of options cannot be scanned. The button
+// IS a `form-select`, so it does not read as a custom widget. Keyboard: typing
+// filters, ↑/↓ moves the cursor, Enter picks (the top hit when you have not
+// moved), Esc closes.
+//
+// One addition over Healthscore's copy: `selectKey()`, a programmatic pick that
+// does not steal focus and does not fire the onPick callback. Healthscore's
+// picker is a run TARGET that must be chosen by hand; two of the four pickers
+// here are filters that open on a default ("All maincats"), and that default has
+// to be set from code.
+const DD_RENDER_CAP = 400;
+const DDS = [];
+function closeAllDropdowns(exceptRoot) {
+    DDS.forEach(d => { if (d.root !== exceptRoot) d.close(); });
+}
+
+function makeDropdown(id, onPick, opts = {}) {
+    const root   = document.getElementById(id);
+    const toggle = root.querySelector('.dd-toggle');
+    const valEl  = root.querySelector('.dd-value');
+    const panel  = root.querySelector('.dd-panel');
+    const search = root.querySelector('.dd-search');
+    const listEl = root.querySelector('.dd-list');
+    const cntEl  = root.querySelector('.dd-count');
+    let items = [], value = null, shown = [], active = -1, placeholder = '';
+    // De regel "x of y · first n shown" staat alleen boven een lijst waar hij iets
+    // zegt. Op de categorielijsten (3.500+ opties, cap 400) las hij als een limiet
+    // die je niet kunt bereiken, terwijl je een categorie tóch typend zoekt —
+    // eruit op verzoek van Joep (2026-09-04).
+    const showCount = opts.count !== false;
+    if (!showCount) cntEl.hidden = true;
+
+    const hay = it => (it.name + ' ' + (it.meta || '') + ' ' + (it.id != null ? it.id : '')).toLowerCase();
+    // Several words = AND over separate substrings, case-insensitive — one search
+    // rule for the whole dashboard.
+    function filtered() {
+        const terms = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+        return terms.length ? items.filter(it => terms.every(t => hay(it).includes(t))) : items;
+    }
+    function paintValue() {
+        const empty = !value;
+        valEl.textContent = empty ? placeholder
+            : value.name + (value.id != null ? ` (${value.id})` : '');
+        toggle.classList.toggle('is-empty', empty);
+    }
+    function paintList() {
+        const hits = filtered();
+        shown = hits.slice(0, DD_RENDER_CAP);
+        if (showCount) {
+            cntEl.textContent = items.length
+                ? `${fmtNum(hits.length)} of ${fmtNum(items.length)}`
+                  + (hits.length > shown.length ? ` · first ${shown.length} shown` : '')
+                : '';
+        }
+        if (!shown.length) {
+            // Zero because of a filter says that, not "no data".
+            listEl.innerHTML = `<div class="p-2 muted-sm">Nothing matches `
+                             + `"${escapeAttr(search.value.trim())}".</div>`;
+            return;
+        }
+        listEl.innerHTML = shown.map((it, i) => {
+            const on = value && value.key === it.key;
+            return `<div class="dd-opt${on ? ' is-picked' : ''}${i === active ? ' is-active' : ''}"`
+                 + ` data-i="${i}" role="option" aria-selected="${!!on}">`
+                 + `<span class="dd-name">${escapeAttr(it.name)}</span>`
+                 + (it.meta ? `<span class="dd-meta">${escapeAttr(it.meta)}</span>` : '')
+                 + `</div>`;
+        }).join('');
+        listEl.querySelectorAll('.dd-opt[data-i]').forEach(el => {
+            el.onclick = () => pick(shown[+el.dataset.i]);
+        });
+    }
+    function setActive(i) {
+        const opts = listEl.querySelectorAll('.dd-opt[data-i]');
+        if (!opts.length) return;
+        active = Math.max(0, Math.min(i, opts.length - 1));
+        opts.forEach((el, k) => el.classList.toggle('is-active', k === active));
+        opts[active].scrollIntoView({block: 'nearest'});
+    }
+    function open() {
+        if (toggle.disabled) return;
+        closeAllDropdowns(root);
+        root.classList.add('is-open');
+        panel.hidden = false;
+        toggle.setAttribute('aria-expanded', 'true');
+        search.value = '';
+        active = -1;
+        paintList();
+        search.focus();
+        const on = listEl.querySelector('.dd-opt.is-picked');
+        if (on) on.scrollIntoView({block: 'nearest'});
+    }
+    function close() {
+        root.classList.remove('is-open');
+        panel.hidden = true;
+        toggle.setAttribute('aria-expanded', 'false');
+    }
+    function pick(it) {
+        value = it || null;
+        paintValue();
+        close();
+        toggle.focus();
+        if (onPick) onPick(value);
+    }
+
+    toggle.onclick = () => (root.classList.contains('is-open') ? close() : open());
+    search.oninput = () => { active = -1; paintList(); };
+    search.onkeydown = e => {
+        if (e.key === 'ArrowDown')      { e.preventDefault(); setActive(active + 1); }
+        else if (e.key === 'ArrowUp')   { e.preventDefault(); setActive(active - 1); }
+        else if (e.key === 'Enter')     { e.preventDefault();
+                                          const it = shown[active >= 0 ? active : 0];
+                                          if (it) pick(it); }
+        else if (e.key === 'Escape')    { e.preventDefault(); close(); toggle.focus(); }
+    };
+    DDS.push({root, close});
+
+    return {
+        // A value that is no longer in the list drops out: switching maincat must
+        // not leave a category from another maincat standing.
+        setItems(list) {
+            items = list || [];
+            if (value && !items.some(it => it.key === value.key)) value = null;
+            paintValue();
+            if (root.classList.contains('is-open')) paintList();
+        },
+        setPlaceholder(t) { placeholder = t; paintValue(); },
+        setDisabled(flag) { toggle.disabled = !!flag; if (flag) close(); },
+        value: () => value,
+        // Programmatic pick by key. No focus change and no onPick — the caller
+        // knows what it just set and does its own follow-up.
+        selectKey(key) {
+            value = items.find(it => it.key === key) || null;
+            paintValue();
+            if (root.classList.contains('is-open')) paintList();
+        },
+        clear() { value = null; paintValue(); },
+        close,
+    };
+}
+
+// Clicking outside a dropdown closes it — one listener for all of them.
+document.addEventListener('click', e => {
+    if (!e.target.closest('.dd')) closeAllDropdowns(null);
+});
+
+// ---- Category scope (maincat + deepest cat, cascading dropdowns) ----------
 // Fed from /api/seo-prio/categories, which reads the SAME two Redshift columns
 // the run filters on (dv.main_cat_name / dv.deepest_subcat_name) — taxonomy API
 // labels don't always agree with Redshift's, and a mismatch here would silently
-// return zero rows. The endpoint answers instantly and reports loading=true
-// while its ~23s DISTINCT runs in the background, so this polls.
+// return zero rows. That is also why this picker carries NAMES and no ids: the
+// run filter is a string match on those two columns. (The Category facets card
+// below has its own picker, on taxonomy ids — different source, same component.)
+// The endpoint answers instantly and reports loading=true while its ~23s
+// DISTINCT runs in the background, so this polls.
 let _catPairs = [];          // [[maincat, deepest], ...]
 let _catPollTimer = null;
+let ddMain = null, ddCat = null;
+// The "All …" row. Both fields are optional filters, so every list has one and
+// a picked ALL means "no filter" in the payload.
+const ALL_KEY = '*';
 
 function catHint(msg, cls = 'text-muted') {
     const el = document.getElementById('catHint');
@@ -427,92 +793,95 @@ async function loadCategories() {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const data = await r.json();
         if (data.loading) {
-            // Both fields stay usable while the list is on its way: the backend
-            // only reports `loading` when it has nothing cached at all, and the
-            // scan behind it can run for minutes. Disabling them used to make
-            // the whole run form look broken for that entire time. Typing works
-            // — you just get no suggestions yet, and startRun() skips the
-            // known-name check while the pair list is empty.
-            catHint('Still loading category names from Redshift — you can type a name already, ' +
-                    'suggestions will appear when the list lands.');
+            // The dropdowns stay on "loading…" while the list is on its way. The
+            // backend only reports `loading` when it has nothing cached at all,
+            // and the scan behind it can run for minutes — so this polls, and a
+            // run started meanwhile simply covers every category.
+            catHint('Still loading category names from Redshift — the run covers every ' +
+                    'category until the list lands.');
             if (!_catPollTimer) _catPollTimer = setInterval(loadCategories, 4000);
             return;
         }
         if (_catPollTimer) { clearInterval(_catPollTimer); _catPollTimer = null; }
         _catPairs = data.pairs || [];
-        fillDatalist('maincatList', data.maincats || []);
-        refreshDeepestOptions();
+        rebuildCatPickers();
         catHint(_catPairs.length
-            ? 'Leave both empty to run over every category.'
+            ? 'Leave both on "All" to run over every category.'
             : 'No category names available — the run will cover every category.');
     } catch (e) {
         if (_catPollTimer) { clearInterval(_catPollTimer); _catPollTimer = null; }
+        rebuildCatPickers();
         catHint('Could not load category names (' + e.message +
-                '). You can still type a name, or leave both empty for all.', 'text-danger');
+                '). The run can still go ahead — it then covers every category.', 'text-danger');
     }
 }
 
-function fillDatalist(id, values) {
-    document.getElementById(id).innerHTML =
-        values.map(v => `<option value="${escapeAttr(v)}"></option>`).join('');
+function rebuildCatPickers() {
+    const perMain = {};
+    _catPairs.forEach(p => { perMain[p[0]] = (perMain[p[0]] || 0) + 1; });
+    const mains = Object.keys(perMain).sort((a, b) => a.localeCompare(b, 'nl'));
+    const items = mains.map(n => ({key: 'm' + n, name: n, meta: `${fmtNum(perMain[n])} cats`}));
+    items.unshift({key: ALL_KEY, name: 'All maincats',
+                   meta: mains.length ? `${fmtNum(mains.length)} maincats` : ''});
+    ddMain.setItems(items);
+    ddMain.setPlaceholder('All maincats');
+    ddMain.setDisabled(false);
+    ddMain.selectKey(ALL_KEY);
+    refreshDeepestItems();
 }
 
-function escapeAttr(s) {
-    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
-        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function refreshDeepestItems() {
+    const m = ddMain.value();
+    const main = m && m.key !== ALL_KEY ? m.name : null;
+    const pairs = main ? _catPairs.filter(p => p[0] === main) : _catPairs;
+    // The key carries the maincat, because a deepest name is not unique across
+    // maincats — and with "All maincats" the maincat rides along as meta, the way
+    // Healthscore shows it.
+    const seen = new Set(), items = [];
+    pairs.forEach(([mn, dn]) => {
+        const key = 'c' + mn + '||' + dn;
+        if (seen.has(key)) return;
+        seen.add(key);
+        items.push({key, name: dn, meta: main ? '' : mn, main: mn});
+    });
+    items.sort((a, b) => a.name.localeCompare(b.name, 'nl') || a.main.localeCompare(b.main, 'nl'));
+    const allName = main ? `All deepest cats in ${main}` : 'All deepest cats';
+    items.unshift({key: ALL_KEY, name: allName,
+                   meta: items.length ? `${fmtNum(items.length)} cats` : ''});
+    const keep = ddCat.value();
+    ddCat.setItems(items);
+    ddCat.setPlaceholder(allName);
+    ddCat.setDisabled(items.length <= 1);
+    // Re-pick ALL when nothing survived the rebuild, and also when ALL was the
+    // value: its label changes with the maincat, so the old object is stale.
+    if (!keep || keep.key === ALL_KEY) ddCat.selectKey(ALL_KEY);
 }
 
-// Deepest suggestions are scoped to the typed maincat when it matches one
-// exactly; otherwise every deepest cat is offered, so the two inputs stay
-// independent if you only know the deepest name.
-function refreshDeepestOptions() {
-    const main = document.getElementById('maincatInput').value.trim();
-    const scoped = main
-        ? _catPairs.filter(p => p[0] === main).map(p => p[1])
-        : _catPairs.map(p => p[1]);
-    fillDatalist('deepestList', [...new Set(scoped)].sort());
+// Picking a deepest cat while the maincat still says "all" fills the maincat in:
+// the run sends names, and a deepest name that exists under two maincats would
+// otherwise widen the run without saying so.
+function onDeepestPicked(v) {
+    if (!v || v.key === ALL_KEY || !v.main) return;
+    const m = ddMain.value();
+    if (m && m.key !== ALL_KEY) return;
+    ddMain.selectKey('m' + v.main);
+    refreshDeepestItems();       // re-scopes the list; the picked value survives
 }
 
-function onMaincatInput() {
-    const main = document.getElementById('maincatInput').value.trim();
-    const deepEl = document.getElementById('deepestInput');
-    // Changing maincat invalidates a deepest cat that isn't under it.
-    if (main && deepEl.value.trim() &&
-        !_catPairs.some(p => p[0] === main && p[1] === deepEl.value.trim())) {
-        deepEl.value = '';
-    }
-    refreshDeepestOptions();
-    deepEl.placeholder = main ? `all deepest cats in ${main}` : 'all deepest cats';
-}
-
-// Typing a deepest cat that belongs to exactly one maincat fills the maincat in.
-function onDeepestInput() {
-    const deep = document.getElementById('deepestInput').value.trim();
-    if (!deep) return;
-    const mains = [...new Set(_catPairs.filter(p => p[1] === deep).map(p => p[0]))];
-    if (mains.length === 1) {
-        document.getElementById('maincatInput').value = mains[0];
-        refreshDeepestOptions();
-    }
+// What the run filters on: a picked "All …" row is no filter at all.
+function catScope() {
+    const m = ddMain.value(), c = ddCat.value();
+    return {
+        maincat: m && m.key !== ALL_KEY ? m.name : null,
+        deepest: c && c.key !== ALL_KEY ? c.name : null,
+    };
 }
 
 async function startRun() {
-    const maincat = document.getElementById('maincatInput').value.trim();
-    const deepest = document.getElementById('deepestInput').value.trim();
-    // A typo here means a 0-row run several minutes later, so check it up front
-    // while we still have the real list in hand.
-    if (_catPairs.length) {
-        if (maincat && !_catPairs.some(p => p[0] === maincat)) {
-            alert(`"${maincat}" is not a known maincat. Pick one from the suggestions, or clear the field to run over all.`);
-            return;
-        }
-        if (deepest && !_catPairs.some(p => p[1] === deepest && (!maincat || p[0] === maincat))) {
-            alert(maincat
-                ? `"${deepest}" is not a deepest cat under "${maincat}".`
-                : `"${deepest}" is not a known deepest cat.`);
-            return;
-        }
-    }
+    // No name check up front any more: the dropdowns only offer names that came
+    // from the run's own two Redshift columns, so a typo can no longer reach the
+    // payload and turn into a 0-row run minutes later.
+    const {maincat, deepest} = catScope();
     const payload = {
         start_date: toYYYYMMDD(document.getElementById('startDate').value),
         end_date: toYYYYMMDD(document.getElementById('endDate').value),
@@ -630,7 +999,7 @@ function skeletonRows(cols, n = 10) {
 
 async function loadRuns() {
     const body = document.getElementById('runsBody');
-    body.innerHTML = skeletonRows(6, Math.min(Math.max(body.rows.length || 5, 3), 10));
+    body.innerHTML = skeletonRows(7, Math.min(Math.max(body.rows.length || 5, 3), 10));
     const r = await fetch('/api/seo-prio/runs');
     const data = await r.json();
     body.innerHTML = '';
@@ -645,22 +1014,27 @@ async function loadRuns() {
         const badgeClass = statusBadgeClass(run.status);
         const dateRange = (params.start_date && params.end_date)
             ? `${fmtDate(params.start_date)} → ${fmtDate(params.end_date)}` : '';
-        // Show the category scope, or a scoped run is indistinguishable from a
-        // full one in the history (and its low row count looks like a failure).
+        // The run's own scope, in its own column (Joep, 2026-09-04): a scoped run
+        // is otherwise indistinguishable from a full one, and then its low row
+        // count reads as a failure. "All categories" is spelled out rather than
+        // left blank — an empty cell reads as missing data, not as "everything".
         const scope = [params.maincat, params.deepest_cat].filter(Boolean).join(' / ');
         const scopeHtml = scope
-            ? `<div class="text-muted" style="font-size:0.75rem;">${escapeAttr(scope)}</div>` : '';
+            ? escapeAttr(scope)
+            : '<span class="text-muted">All categories</span>';
+        // The run id is no longer a column of its own: the View button opens the
+        // same run, and the id is on the results card once it does.
         tr.innerHTML = `
             <td class="col-check"><input class="form-check-input run-select" type="checkbox"
                     data-run="${escapeAttr(run.run_id)}" data-done="${run.status === 'completed' ? 1 : 0}"${runSelected.has(run.run_id) ? ' checked' : ''}></td>
-            <td class="font-monospace small"><a href="#" onclick="event.preventDefault(); resumeWatch('${run.run_id}')" class="text-decoration-none">${run.run_id}</a></td>
-            <td>${run.started_at ? new Date(run.started_at).toLocaleString() : ''}</td>
+            <td class="small" title="${escapeAttr(run.run_id)}">${run.started_at ? new Date(run.started_at).toLocaleString() : ''}</td>
             <td><span class="badge ${badgeClass} status-badge">${run.status}</span></td>
             <td>${(run.row_count || 0).toLocaleString()}</td>
-            <td class="small">${dateRange}${scopeHtml}</td>
+            <td class="small">${dateRange}</td>
+            <td class="small text-start">${scopeHtml}</td>
             <td>
                 ${run.status === 'completed'
-                    ? `<button class="btn btn-sm btn-outline-purple" onclick="resumeWatch('${run.run_id}')">Results</button>`
+                    ? `<button class="btn btn-sm btn-outline-purple" onclick="resumeWatch('${run.run_id}')">View</button>`
                     : ''}
             </td>`;
         body.appendChild(tr);
@@ -1132,9 +1506,323 @@ async function loadResults(runId, opts = {}) {
     }
 }
 
+// ---- Category facets (read-only inspector) --------------------------------
+// Aparte module: kies een categorie, haal hem op, zie welke facetten daar
+// SEO-aan staan, en klap een facet open voor de facetwaarden die aan staan.
+//
+// Deze kaart heeft zijn EIGEN kiezer, op taxonomie-ids (/tax-categories). Dat is
+// niet dezelfde lijst als de kiezer van de run hierboven: die draait op de twee
+// Redshift-naamkolommen waarop een run filtert, en een naam is geen sleutel in de
+// taxonomie. Zelfde component, andere bron — vandaar twee keer.
+let _taxCats = [];                  // [{id, name, parent}]
+let ddFacMain = null, ddFacCat = null;
+let _facetRows = [];                // facetten van de laatst opgehaalde categorie
+let _facetCat = null;
+const _facetVals = new Map();       // facet_id -> {state:'loading'|'ok'|'err', ...}
+const _facetOpen = new Set();       // welke facetrijen open staan
+
+function facetHint(msg, cls = 'text-muted') {
+    const el = document.getElementById('facetHint');
+    el.className = 'form-text m-0 ' + cls;
+    el.textContent = msg;
+}
+
+// Hoeveel categorieën de kiezer draagt, hoort achter de "i" naast de kaarttitel en
+// niet als losse regel onder de velden (Joep, 2026-09-04). Fouten blijven wél
+// zichtbaar: die zou niemand in een tooltip vinden.
+let _facetInfoBase = null;
+function facetInfoCount(n) {
+    const t = document.getElementById('facetInfoTitle');
+    if (!t) return;
+    if (_facetInfoBase === null) _facetInfoBase = t.textContent.trim();
+    t.textContent = _facetInfoBase
+        + (n != null ? ` The picker holds ${fmtNum(n)} categories from the taxonomy map.` : '');
+}
+
+async function loadTaxCategories() {
+    try {
+        const r = await fetch('/api/seo-prio/tax-categories');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        _taxCats = data.rows || [];
+        rebuildFacetPickers();
+        facetInfoCount(_taxCats.length);
+        facetHint('');
+    } catch (e) {
+        [ddFacMain, ddFacCat].forEach(dd => {
+            dd.setItems([]); dd.setPlaceholder('not loaded'); dd.setDisabled(true);
+        });
+        facetHint('Could not load the category list (' + e.message + ').', 'text-danger');
+    }
+    updateFacetFetchBtn();
+}
+
+function rebuildFacetPickers() {
+    const perMain = {};
+    _taxCats.forEach(c => { const k = c.parent || ''; perMain[k] = (perMain[k] || 0) + 1; });
+    const mains = Object.keys(perMain).filter(Boolean).sort((a, b) => a.localeCompare(b, 'nl'));
+    const items = mains.map(n => ({key: 'm' + n, name: n, meta: `${fmtNum(perMain[n])} cats`}));
+    // Hier is de maincat een FILTER op de categorielijst en geen doel: je haalt
+    // altijd één categorie op. Met "All maincats" staan alle 3.500 in de tweede
+    // dropdown, en die is doorzoekbaar op naam én id.
+    items.unshift({key: ALL_KEY, name: 'All maincats', meta: `${fmtNum(_taxCats.length)} cats`});
+    ddFacMain.setItems(items);
+    ddFacMain.setPlaceholder('All maincats');
+    ddFacMain.setDisabled(false);
+    ddFacMain.selectKey(ALL_KEY);
+    refreshFacetCatItems();
+}
+
+function refreshFacetCatItems() {
+    const m = ddFacMain.value();
+    const main = m && m.key !== ALL_KEY ? m.name : null;
+    const rows = main ? _taxCats.filter(c => (c.parent || '') === main) : _taxCats;
+    ddFacCat.setItems(rows.map(c => ({
+        key: 'c' + c.id, id: c.id, name: c.name,
+        // Met "All maincats" hoort de maincat erbij: twee categorieën kunnen
+        // dezelfde naam hebben in twee maincats.
+        meta: main ? '' : (c.parent || ''),
+    })));
+    ddFacCat.setPlaceholder(rows.length ? 'Pick a category' : 'no category in this maincat');
+    ddFacCat.setDisabled(!rows.length);
+    updateFacetFetchBtn();
+}
+
+// De knop zegt waarop hij draait, en zonder keuze staat hij uit met de reden in
+// de title — eerlijker dan een alert() ná de klik (UI_BLUEPRINT).
+function updateFacetFetchBtn() {
+    const b = document.getElementById('facetFetchBtn');
+    const c = ddFacCat && ddFacCat.value();
+    b.disabled = !c;
+    // Alleen "Fetch" (Joep, 2026-09-04): de gekozen categorie staat al in de
+    // dropdown ernaast, en een knop die met de naam meegroeit verspringt bij elke
+    // keuze. Waar hij op draait blijft in de title staan.
+    b.title = c ? `Reads the taxonomy for ${c.name} (${c.id}); writes nothing`
+                : 'Pick a category first';
+}
+
+async function fetchCategoryFacets() {
+    const c = ddFacCat.value();
+    if (!c) return;
+    const box = document.getElementById('facetResult');
+    _facetOpen.clear();
+    _facetVals.clear();
+    // Skeleton op de plek waar de tabel komt, niet een spinner ergens anders.
+    box.innerHTML = `<div class="facet-table-wrap mt-3">`
+                  + `<table class="table table-sm table-hover mb-0" id="facetTable">`
+                  + `<tbody>${skeletonRows(8, 8)}</tbody></table></div>`;
+    document.getElementById('facetCatMeta').textContent = 'loading…';
+    try {
+        const r = await fetch(`/api/seo-prio/category-facets/${c.id}`);
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || ('HTTP ' + r.status));
+        _facetRows = data.facets || [];
+        _facetCat = data.category || {id: c.id, name: c.name};
+        // De teller gaat over de facetten die de zoekindex voor deze categorie kent:
+        // dat is de lijst die je ziet. De taxonomie-totalen staan achter de "i".
+        document.getElementById('facetCatMeta').textContent =
+            `${_facetCat.name || c.name} (${_facetCat.id}) · `
+            + (data.search_ok
+                ? `${fmtNum(data.on_relevant_count)} of ${fmtNum(data.relevant_count)} facets with results are ON`
+                : `${fmtNum(data.on_count)} of ${fmtNum(data.facet_count)} facets ON`)
+            + (data.product_total != null ? ` · ${fmtNum(data.product_total)} products` : '');
+        renderFacets();
+    } catch (e) {
+        _facetRows = []; _facetCat = null;
+        document.getElementById('facetCatMeta').textContent = '';
+        box.innerHTML = `<div class="mt-3 text-danger small">Could not read the taxonomy: `
+                      + `${escapeAttr(e.message)}</div>`;
+    }
+}
+
+function prioLbl(f) {
+    if (f.on) return '<span class="badge lbl lbl-purple">ON</span>';
+    if (f.seo_priority === false) return '<span class="badge lbl lbl-grey">OFF</span>';
+    return '<span class="text-muted">—</span>';
+}
+
+// Wat de SITE doet, tegenover wat de taxonomie zegt. De noscript-facetlinks komen
+// uit `isSeoFacet` in de zoekindex, dus een facet dat in de taxonomie aan staat maar
+// hier `false` is, linkt (nog) niet — dat verschil is de reden dat deze kolom er staat.
+function seoFacetCell(f) {
+    if (f.in_search === false)
+        return '<span class="text-muted" title="This facet is not in the search index for this category, so there is nothing to link">—</span>';
+    if (f.is_seo_facet === true)
+        return '<span class="badge lbl lbl-blue" title="isSeoFacet=true — the page links the values of this facet">linked</span>';
+    if (f.is_seo_facet === false)
+        return f.on
+            ? '<span class="badge lbl lbl-amber" title="seoPriority is ON in the taxonomy but isSeoFacet=false in the search index: the page does not link these values">not linked</span>'
+            : '<span class="text-muted">—</span>';
+    // Onbekend heeft hier twee oorzaken: de zoek-API antwoordde niet, of het is een
+    // dependent facet en dan meldt de index zijn isSeoFacet alleen op een pagina waar
+    // zijn eigen parent-waarde gekozen is (Kleurtint blauw verschijnt pas bij blauw).
+    return '<span class="text-muted" title="Not determined: a dependent facet only reports isSeoFacet on a page where its own parent value is selected. Check that page itself if it matters.">?</span>';
+}
+
+// Vlaggen die "aan" alsnog waardeloos maken. Ze staan er alleen als ze WAAR zijn:
+// een rij met vijf keer "nee" leest als een probleem dat er niet is.
+function facetFlags(f) {
+    const out = [];
+    if (!f.is_enabled) out.push('<span class="badge lbl lbl-red" title="isEnabled=false in taxv2 — the facet is dead everywhere, seoPriority has no effect">disabled</span>');
+    if (f.no_index_no_follow) out.push('<span class="badge lbl lbl-red" title="noIndexNoFollow=true on the facet — its value pages are noindex/nofollow">noindex</span>');
+    if (f.is_hidden) out.push('<span class="badge lbl lbl-amber" title="isHidden=true for this category — the facet is not shown in the filter column">hidden</span>');
+    if (f.in_search === false) out.push('<span class="badge lbl lbl-grey" title="The search index does not carry this facet for this category — no products behind it here. Dependent facets ride along from the parent facet\'s other categories.">no results</span>');
+    if (f.inheritance === 'Dependent') {
+        out.push(`<span class="badge lbl lbl-blue" title="Dependent facet: it only appears once a value of parent facet ${f.parent_facet_id} is selected, so its links live on those pages only (${fmtNum(f.parent_value_count)} parent values)">dependent</span>`);
+    }
+    return out.join(' ') || '<span class="text-muted">—</span>';
+}
+
+function renderFacets() {
+    const box = document.getElementById('facetResult');
+    const showAll = document.getElementById('facetShowAll').checked;
+    const showIrr = document.getElementById('facetShowIrrelevant').checked;
+    // Twee onafhankelijke filters: staat het facet aan, en heeft het hier producten.
+    // `in_search === false` is alleen bekend als de zoek-API antwoordde; bij null
+    // filtert dit niets weg.
+    const rows = _facetRows.filter(f => (showAll || f.on) && (showIrr || f.in_search !== false));
+    const hiddenIrr = showIrr ? 0
+        : _facetRows.filter(f => f.in_search === false && (showAll || f.on)).length;
+    if (!_facetRows.length) {
+        box.innerHTML = '<div class="mt-3 muted-sm">This category carries no facets at all.</div>';
+        return;
+    }
+    if (!rows.length) {
+        box.innerHTML = '<div class="mt-3 muted-sm">'
+            + (showAll ? 'No facet with results in this category.'
+                       : 'No facet with results is SEO-ON for this category.')
+            + (hiddenIrr ? ` ${fmtNum(hiddenIrr)} facet(s) without results here are hidden — `
+                           + 'tick "Show facets without results here" to see them.'
+                         : ' Tick "Show facets that are not ON" to see the rest.')
+            + '</div>';
+        return;
+    }
+    const body = rows.map(f => {
+        const open = _facetOpen.has(f.facet_id);
+        const vals = _facetVals.get(f.facet_id);
+        const onCount = vals && vals.state === 'ok'
+            ? `<span class="tnum">${fmtNum(vals.on_count)} <span class="text-muted">/ ${fmtNum(vals.total_values)}</span></span>`
+            : (vals && vals.state === 'loading' ? '<span class="text-muted">…</span>'
+                                                : '<span class="text-muted">click</span>');
+        return `
+            <tr class="facet-row${open ? ' is-open' : ''}" data-f="${f.facet_id}">
+                <td class="facet-name">
+                    <span class="facet-caret">▸</span>
+                    ${escapeAttr(f.name)}
+                    ${f.slug ? `<div class="facet-slug">${escapeAttr(f.slug)}</div>` : ''}
+                </td>
+                <td class="tnum">${f.facet_id}</td>
+                <td>${prioLbl(f)}</td>
+                <td>${seoFacetCell(f)}</td>
+                <td>${f.inheritance || ''}</td>
+                <td>${onCount}</td>
+                <td class="tnum">${f.seo_display_limit == null ? '<span class="text-muted">—</span>' : fmtNum(f.seo_display_limit)}</td>
+                <td>${facetFlags(f)}</td>
+            </tr>`
+          + (open ? `<tr class="facet-detail"><td colspan="8">${facetValuesHtml(f)}</td></tr>` : '');
+    }).join('');
+    box.innerHTML = `
+      <div class="facet-table-wrap mt-3">
+        <table class="table table-sm table-hover mb-0" id="facetTable">
+            <thead>
+                <tr>
+                    <th style="text-align:left;">Facet</th>
+                    <th>Facet ID</th>
+                    <th title="What the taxonomy says for this category, inheritance included">seoPriority</th>
+                    <th title="isSeoFacet in the search index — the flag the page actually links from">In index</th>
+                    <th>Level</th>
+                    <th title="Facet values with seoPriority=true, out of every value on the facet. Loaded when you open the row.">Values ON</th>
+                    <th title="seoDisplayLimit on the facet: how many values the page links at most, however many are ON">Limit</th>
+                    <th>Flags</th>
+                </tr>
+            </thead>
+            <tbody>${body}</tbody>
+        </table>
+      </div>
+      <div class="muted-sm mt-2">${fmtNum(rows.length)} facet(s) shown · click a row for the facet
+      values that are ON.${hiddenIrr ? ` ${fmtNum(hiddenIrr)} facet(s) without results in this
+      category are hidden.` : ''} seoPriority is what the taxonomy says; the page links from
+      isSeoFacet in the search index, which can lag a fresh change.</div>`;
+    box.querySelectorAll('tr.facet-row').forEach(tr => {
+        tr.onclick = () => toggleFacet(+tr.dataset.f);
+    });
+}
+
+function facetValuesHtml(f) {
+    const v = _facetVals.get(f.facet_id);
+    if (!v || v.state === 'loading') {
+        return '<div class="val-wrap">'
+             + '<span class="skel-bar" style="width:6rem"></span>'.repeat(8) + '</div>';
+    }
+    if (v.state === 'err') {
+        return `<div class="text-danger small">Could not read the values: ${escapeAttr(v.error)}</div>`;
+    }
+    if (!v.values.length) {
+        return '<div class="muted-sm">The facet is ON for this category, but not one of its '
+             + fmtNum(v.total_values) + ' values has seoPriority — so there is nothing to link.</div>';
+    }
+    const CAP = 400;
+    const shown = v.values.slice(0, CAP);
+    // Elke waarde linkt naar zijn eigen /c/-pagina op beslist.nl:
+    // /products/<root>/<categorie>/c/<facet-slug>~<value-id>, precies de URL die de
+    // noscript-facetlinks ook gebruiken (geen slash erachter). Kan alleen als we het
+    // pad én de facet-slug hebben; anders blijft het een span.
+    const prefix = _facetCat && _facetCat.url_prefix;
+    const pills = shown.map(x => {
+        const label = escapeAttr(x.name || ('#' + x.id));
+        const tip = `value id ${x.id}${x.sequence != null ? ' · sequence ' + x.sequence : ''}`;
+        if (!prefix || !f.slug) return `<span class="val-pill" title="${tip}">${label}</span>`;
+        const href = `https://www.beslist.nl${prefix}/c/${f.slug}~${x.id}`;
+        return `<a class="val-pill" href="${escapeAttr(href)}" target="_blank" rel="noopener"`
+             + ` title="${tip} — opens ${escapeAttr(href)}">${label}</a>`;
+    }).join('');
+    // seoDisplayLimit knipt de lijst op de pagina af; dat hier zeggen scheelt de
+    // conclusie "er staan 837 waarden aan" terwijl er 60 linken.
+    const lim = f.seo_display_limit;
+    const limNote = (lim != null && v.on_count > lim)
+        ? ` · the page links at most ${fmtNum(lim)} of them (seoDisplayLimit)` : '';
+    return `<div class="muted-sm mb-1">${fmtNum(v.on_count)} of ${fmtNum(v.total_values)} `
+         + `values have seoPriority=true${limNote}`
+         + (v.truncated ? ' · list truncated at the scan cap' : '') + '</div>'
+         + `<div class="val-wrap">${pills}</div>`
+         + (v.values.length > CAP
+             ? `<div class="muted-sm mt-1">+ ${fmtNum(v.values.length - CAP)} more not drawn</div>`
+             : '');
+}
+
+async function toggleFacet(fid) {
+    if (_facetOpen.has(fid)) { _facetOpen.delete(fid); renderFacets(); return; }
+    _facetOpen.add(fid);
+    if (_facetVals.has(fid)) { renderFacets(); return; }
+    // Waarden komen pas op verzoek: Merk heeft ~12.000 waarden en de API kan niet
+    // op seoPriority filteren, dus dit is pagineren. Per facet één keer.
+    _facetVals.set(fid, {state: 'loading'});
+    renderFacets();
+    try {
+        const r = await fetch(`/api/seo-prio/facet-values/${fid}?only_on=true`);
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || ('HTTP ' + r.status));
+        _facetVals.set(fid, {state: 'ok', ...data});
+    } catch (e) {
+        _facetVals.set(fid, {state: 'err', error: e.message});
+    }
+    renderFacets();
+}
+
+// The pickers exist before their data lands: they show "loading…" until
+// loadCategories() fills them (or reports it could not).
+ddMain = makeDropdown('ddMain', () => refreshDeepestItems());
+ddCat  = makeDropdown('ddCat', v => onDeepestPicked(v), {count: false});
+ddFacMain = makeDropdown('ddFacMain', () => refreshFacetCatItems());
+ddFacCat  = makeDropdown('ddFacCat', () => updateFacetFetchBtn(), {count: false});
+document.getElementById('facetFetchBtn').onclick = fetchCategoryFacets;
+document.getElementById('facetShowAll').onchange = () => { if (_facetRows.length) renderFacets(); };
+document.getElementById('facetShowIrrelevant').onchange = () => { if (_facetRows.length) renderFacets(); };
+
 loadDefaults();
 loadRuns();
 loadCategories();
+loadTaxCategories();
 </script>
     <footer class="text-center py-4">
         <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>

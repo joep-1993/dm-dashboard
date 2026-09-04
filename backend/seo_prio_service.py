@@ -18,6 +18,7 @@ import json
 import os
 import re
 import threading
+import time
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -27,6 +28,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import requests
 
+from backend import beslist_rate_limit as rate_limit
 from backend import taxv2_client as taxv2
 from backend.database import (
     get_db_connection, return_db_connection,
@@ -734,6 +736,420 @@ def get_categories(force: bool = False) -> Dict:
         # cache is served straight away and refreshed behind the user's back.
         "loading": bool(inflight and not pairs),
     }
+
+
+# ───────────────── Category facets inspector (read-only) ─────────────────
+# Los van de run: kies één categorie en zie welke facetten daar SEO-aan staan,
+# en per facet welke facetwaarden aan staan. Geen Redshift, geen thresholds,
+# geen schrijfactie — puur de taxonomie voorlezen.
+#
+# Drie dingen die de vorm van deze code bepalen:
+#   1. Facetten van een categorie komen uit `GET /api/Categories/{id}` en NIET uit
+#      `/api/CategoryFacets`: dat laatste laat facetten met
+#      inheritanceStatus=Dependent stil weg (zie backend/taxv2_client.py — 25 tegen
+#      243 facetten op categorie 9003374). Die call geeft ook de EFFECTIEVE
+#      seoPriority mét inheritanceStatus, wat precies de vraag "staat dit facet
+#      hier aan?" beantwoordt; CategoryFacetSettings geeft alleen de rauwe rij.
+#   2. De categoriekiezer draait op TAXONOMIE-ids en niet op de Redshift-namen van
+#      de run (`get_categories()`): een naam is geen sleutel in de taxonomie en de
+#      twee bronnen zijn het niet altijd eens.
+#   3. Facetwaarden worden pas opgehaald als je een facet openklapt. Merk heeft
+#      ~12.000 waarden en de API kan niet op seoPriority filteren, dus dat is
+#      pagineren en zelf zeven — te duur om voor elk facet vooraf te doen.
+
+_TAX_CAT_TABLE = "pa.hs2_cat_maincat"     # gedeeld met Healthscore (zie healthscore_runs)
+# !Overig is de restbak en geen categorie om facetten van te bekijken, dus hij staat
+# in geen van de twee dropdowns (Joep, 2026-09-04). Op ID en niet op naam: een
+# naamfilter breekt zodra iemand hem hernoemt, en filteren op de "!"-prefix zou een
+# toekomstige maincat met datzelfde teken meenemen. Healthscore filtert hem op
+# dezelfde id. In deze tabel is het één rij (cat 11111 = maincat 11111, geen kinderen),
+# dus dit filter verbergt geen echte categorieën.
+_HIDDEN_CAT_ID = 11111                    # !Overig
+_TAX_CATS: Dict[str, object] = {"rows": None, "at": 0.0}
+_TAX_CATS_TTL = 900                       # 15 min; de tabel verandert zelden
+
+
+def list_tax_categories(force: bool = False) -> Dict:
+    """{'rows': [{id, name, parent}], 'maincats': [{id, name}]} op taxonomie-ids.
+
+    Uit `pa.hs2_cat_maincat`, de gesynchroniseerde taxonomie-map die Healthscore
+    ook voor zijn kiezer gebruikt (~3.570 categorieën). Bewust dezelfde tabel:
+    twee kiezers die verschillende categorielijsten tonen is erger dan een
+    afhankelijkheid tussen twee tools.
+    """
+    now = time.time()
+    if not force and _TAX_CATS["rows"] and now - float(_TAX_CATS["at"]) < _TAX_CATS_TTL:
+        return dict(_TAX_CATS["rows"])          # type: ignore[arg-type]
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"""SELECT cat AS id, cat_name AS name, maincat_name AS parent
+                          FROM {_TAX_CAT_TABLE}
+                         WHERE cat IS NOT NULL AND cat_name IS NOT NULL
+                           AND cat <> {_HIDDEN_CAT_ID}
+                         ORDER BY 2""")
+        rows = [{"id": r["id"], "name": r["name"], "parent": r["parent"]}
+                for r in cur.fetchall()]
+        cur.execute(f"""SELECT DISTINCT maincat AS id, maincat_name AS name
+                          FROM {_TAX_CAT_TABLE}
+                         WHERE maincat IS NOT NULL AND maincat_name IS NOT NULL
+                           AND maincat <> {_HIDDEN_CAT_ID}
+                         ORDER BY 2""")
+        maincats = [{"id": r["id"], "name": r["name"]} for r in cur.fetchall()]
+        cur.close()
+    finally:
+        return_db_connection(conn)
+
+    out = {"rows": rows, "maincats": maincats}
+    _TAX_CATS["rows"], _TAX_CATS["at"] = out, now
+    return dict(out)
+
+
+def _nl_label(labels) -> Dict[str, str]:
+    """De nl-NL-label van een categorie of facet, met een bruikbare terugval.
+
+    `urlSlug` en `name` zitten NIET op het object zelf maar per locale in
+    `labels[]` — de val die in _get_cat_facets() de hele mapping leeg maakte.
+    """
+    labels = labels or []
+    nl = next((l for l in labels if l.get("locale") == "nl-NL"), None)
+    if not nl:
+        nl = next((l for l in labels if l.get("urlSlug") or l.get("name")), {})
+    return {"name": (nl.get("name") or "").strip(),
+            "slug": (nl.get("urlSlug") or "").strip().lower()}
+
+
+# De zoek-API zegt welke facetten er voor DEZE categorie werkelijk zijn — en dat is
+# een veel kortere lijst dan de taxonomie. Parfums: 9 facetten in de index tegen 46
+# in de taxonomie. Het verschil zijn vooral dependent facetten die aan een merkwaarde
+# hangen die hier niet voorkomt ("Productlijnen: Nintendo" onder Sneakers, Joep
+# 2026-09-04). Zonder deze kruiscontrole staat die ruis in het overzicht.
+#
+# Dezelfde call geeft `isSeoFacet`: de vlag die de SITE leest voor de noscript-
+# facetlinks. Die kan afwijken van seoPriority in de taxonomie (Parfums: Collectie
+# staat op seoPriority=true en isSeoFacet=false), en juist dat verschil wil je zien.
+_SEARCH_API = "https://productsearch-v2.api.beslist.nl/search/products"
+
+
+def _search_facets(cat_slug: str) -> Dict:
+    """Wat de zoekindex van deze categorie kent, zonder filter.
+
+    {'ok', 'total', 'facets': {facet_id: {'is_seo_facet', 'url_name', 'value_ids',
+    'seed'}}}. `limit=0` want we willen de facetlijst, geen producten.
+
+    De facet-WAARDEN in dit antwoord zijn afgekapt (merk 100, maat 60, kleur 24, de
+    rest 8), dus `value_ids` is een bovenlaag en geen volledige lijst — vandaar
+    `_search_pool()` voor het geval een intersectie leeg blijft. `seed` is één geldige
+    waarde-id van dat facet, precies wat zo'n vervolgcall nodig heeft.
+    """
+    out: Dict = {"ok": False, "total": None, "facets": {}}
+    if not cat_slug:
+        return out
+    try:
+        rate_limit.productsearch_bucket.acquire()
+        r = requests.get(_SEARCH_API, params={
+            "category": cat_slug, "countryLanguage": "nl-nl",
+            "isBot": "false", "limit": 0}, timeout=30)
+        if r.status_code != 200:
+            print(f"[SEO_PRIO] search API {r.status_code} for {cat_slug!r}")
+            return out
+        data = r.json()
+        out["facets"] = _index_search_facets(data)
+        out["total"] = data.get("total")
+        out["ok"] = True
+    except Exception as e:
+        print(f"[SEO_PRIO] search API failed for {cat_slug!r}: {e}")
+    return out
+
+
+def _index_search_facets(data: Dict) -> Dict[str, Dict]:
+    idx: Dict[str, Dict] = {}
+    for f in data.get("facets") or []:
+        fid = f.get("id")
+        if fid is None:
+            continue
+        vals = [v.get("id") for v in (f.get("values") or []) if v.get("id") is not None]
+        idx[str(fid)] = {
+            "is_seo_facet": bool(f.get("isSeoFacet")),
+            "url_name": f.get("urlName") or "",
+            "value_ids": set(vals),
+            "seed": vals[0] if vals else None,
+        }
+    return idx
+
+
+def _search_pool(cat_slug: str, url_name: str, seed) -> Dict[str, Dict]:
+    """Facetten van deze categorie MET één waarde van `url_name` geselecteerd.
+
+    Twee dingen die alleen zo boven water komen:
+      * de VOLLEDIGE waardenlijst van dat facet (ongefilterd is hij afgekapt);
+      * de dependent facetten die pas verschijnen als hun parent-waarde gekozen is —
+        inclusief hun `isSeoFacet`.
+    """
+    if not (cat_slug and url_name and seed is not None):
+        return {}
+    try:
+        rate_limit.productsearch_bucket.acquire()
+        r = requests.get(_SEARCH_API, params={
+            "category": cat_slug, f"filters[{url_name}][0]": seed,
+            "countryLanguage": "nl-nl", "isBot": "false", "limit": 0}, timeout=30)
+        if r.status_code != 200:
+            return {}
+        return _index_search_facets(r.json())
+    except Exception as e:
+        print(f"[SEO_PRIO] search pool failed for {cat_slug!r}/{url_name!r}: {e}")
+        return {}
+
+
+def _dependent_presence(cat_slug: str, base: Dict[str, Dict], parent_fid,
+                        parent_value_ids, pools: Dict[str, Dict]):
+    """Is een dependent facet hier relevant? True / False / None (onbekend).
+
+    Een dependent facet staat NIET in een ongefilterd antwoord: het verschijnt pas als
+    een waarde van zijn parent-facet gekozen is. "Komt het facet in de index voor?"
+    is er dus de verkeerde vraag; de juiste is of een van zijn PARENT-waarden hier
+    voorkomt. Dat scheidt "Kleurtint blauw" onder Sneakers (blauw bestaat daar) van
+    "Productlijnen: Nintendo" onder Sneakers (dat merk niet) — 87 van de 88
+    productlijn-facetten op Sneakers hangen aan een merk dat er niet is.
+    """
+    if parent_fid is None or not parent_value_ids:
+        return None
+    p = base.get(str(parent_fid))
+    if not p:
+        # Het parent-facet zelf zit hier niet in de index. Is dat parent op zijn beurt
+        # dependent, dan weten we het niet; anders kan het kind er ook niet zijn.
+        return None
+    ids = set(parent_value_ids)
+    if ids & p["value_ids"]:
+        return True
+    # Leeg kan ook betekenen dat de parent-waarde buiten de afgekapte lijst viel: één
+    # vervolgcall per parent-facet geeft de volledige lijst.
+    key = str(parent_fid)
+    if key not in pools:
+        pools[key] = _search_pool(cat_slug, p["url_name"], p["seed"])
+    pool = pools[key].get(key)
+    if not pool:
+        return None
+    return bool(ids & pool["value_ids"])
+
+
+_ROOT_SLUGS: Dict[str, str] = {}       # parentId -> urlSlug van de root
+
+
+def _root_slug(parent_id, own_slug: str) -> str:
+    """De slug van de hoogste voorouder, voor het `/products/<root>/<cat>/`-pad.
+
+    Een Beslist-categorie-URL heeft precies twee padsegmenten: de ROOT-slug en de
+    slug van de categorie zelf (`parse_url()` hierboven rekent daar ook op). De
+    tussenliggende niveaus komen er niet in voor, dus alleen de top is nodig.
+
+    De klim kost 1-2 extra calls van 40-100 KB (0,15s) en die worden per
+    parent-id gecached. Valt de klim om, dan is er nog de vorm van de slug zelf:
+    die is `<root>_<id>[_<id>]`, dus de staart van `_<cijfers>` eraf geeft de
+    root (geverifieerd op 12 willekeurige categorieën, 12/12 gelijk aan de klim).
+    """
+    cur, last = parent_id, None
+    for _ in range(6):
+        if cur is None:
+            break
+        key = str(cur)
+        if key in _ROOT_SLUGS:
+            last = _ROOT_SLUGS[key]
+            break
+        try:
+            d = taxv2.get_json(f"/api/Categories/{key}", timeout=60)
+        except Exception as e:
+            print(f"[SEO_PRIO] root-slug climb stopped at {key}: {e}")
+            break
+        slug = _nl_label(d.get("labels"))["slug"]
+        if slug:
+            last = slug
+        cur = d.get("parentId")
+        if cur is None and last:
+            _ROOT_SLUGS[key] = last
+    if last:
+        return last
+    return re.sub(r"(_\d+)+$", "", own_slug or "")
+
+
+def category_facets(cat_id) -> Dict:
+    """Alle facetten van één categorie met hun effectieve seoPriority.
+
+    `on` in de rijen is `seoPriority is True`: dat is wat de taxonomie voor DEZE
+    categorie zegt, inclusief overerving. Let op dat de site zelf `isSeoFacet`
+    uit de zoekindex leest — die kan achterlopen op een verse taxonomie-wijziging.
+    """
+    cid = str(cat_id).strip()
+    if not cid.isdigit():
+        raise ValueError("category id must be numeric")
+
+    r = taxv2.get(f"/api/Categories/{cid}", timeout=90)
+    if r.status_code == 404:
+        raise LookupError(f"category {cid} not found in taxv2")
+    r.raise_for_status()
+    data = r.json()
+
+    cat = _nl_label(data.get("labels"))
+    search = _search_facets(cat["slug"])
+    # Gefilterde vervolgcalls, één per parent-facet, gedeeld over alle dependent
+    # facetten die eraan hangen (Sneakers: 88 productlijn-facetten, één call voor merk).
+    pools: Dict[str, Dict] = {}
+    facets = []
+    for f in data.get("facets") or []:
+        fid = f.get("facetId")
+        if fid is None:
+            continue
+        lab = _nl_label(f.get("labels"))
+        dep = f.get("dependentMetadata") or None
+        hit = search["facets"].get(str(fid))
+        parent_fid = (dep or {}).get("parentFacetId")
+        parent_vals = (dep or {}).get("parentFacetValueIds") or []
+        if not search["ok"]:
+            # Zonder antwoord van de zoek-API weten we niets: dan liever alles laten
+            # zien dan stil de helft weglaten.
+            present = None
+        elif hit is not None:
+            present = True
+        elif parent_fid is not None:
+            present = _dependent_presence(cat["slug"], search["facets"],
+                                          parent_fid, parent_vals, pools)
+        else:
+            present = False
+        # is_seo_facet van een dependent facet komt pas terug in een gefilterde call;
+        # `pools` heeft die al gedaan voor de relevantietoets, dus lees hem daaruit.
+        idx_hit = hit
+        if idx_hit is None and parent_fid is not None:
+            idx_hit = (pools.get(str(parent_fid)) or {}).get(str(fid))
+        facets.append({
+            "facet_id": fid,
+            # `in_search` = heeft dit facet hier producten achter zich. Voor een
+            # dependent facet is dat "komt een van zijn parent-waarden hier voor".
+            "in_search": present,
+            "is_seo_facet": idx_hit["is_seo_facet"] if idx_hit else None,
+            "name": lab["name"] or lab["slug"] or str(fid),
+            "slug": lab["slug"],
+            "seo_priority": f.get("seoPriority"),
+            "on": f.get("seoPriority") is True,
+            "inheritance": f.get("inheritanceStatus"),
+            "is_enabled": f.get("isEnabled") is not False,
+            "is_hidden": bool(f.get("isHidden")),
+            "no_index_no_follow": bool(f.get("noIndexNoFollow")),
+            "seo_display_limit": f.get("seoDisplayLimit"),
+            "display_order": f.get("displayOrder"),
+            "is_top_facet": bool(f.get("isTopFacet")),
+            # Een dependent facet linkt alleen op de pagina's waar de
+            # parent-waarde gekozen is — zonder dat erbij leest "aan" te ruim.
+            "parent_facet_id": (dep or {}).get("parentFacetId"),
+            "parent_value_count": len((dep or {}).get("parentFacetValueIds") or []),
+        })
+
+    # Tweede pas voor de facetten die in de UI vooraan staan: van een dependent
+    # facet dat AAN staat wil je ook weten of de site zijn waarden werkelijk linkt,
+    # en die `isSeoFacet` komt alleen uit een gefilterde call. Alleen voor die
+    # handvol rijen, en per parent-facet één keer.
+    if search["ok"]:
+        for f in facets:
+            if not (f["on"] and f["in_search"] is not False
+                    and f["is_seo_facet"] is None and f["parent_facet_id"] is not None):
+                continue
+            key = str(f["parent_facet_id"])
+            if key not in pools:
+                p = search["facets"].get(key)
+                pools[key] = _search_pool(cat["slug"], p["url_name"], p["seed"]) if p else {}
+            hit2 = pools[key].get(str(f["facet_id"]))
+            if hit2:
+                f["is_seo_facet"] = hit2["is_seo_facet"]
+
+    # Relevant-en-aan eerst, dan de rest van de relevante, dan wat de index niet
+    # kent — precies de volgorde waarin de UI ze standaard wel/niet laat zien.
+    facets.sort(key=lambda x: (x["in_search"] is False, not x["on"],
+                               (x["name"] or "").lower()))
+    on_count = sum(1 for f in facets if f["on"])
+    relevant = [f for f in facets if f["in_search"] is not False]
+    on_relevant = sum(1 for f in relevant if f["on"])
+    # Padprefix voor een live facet-URL: /products/<root>/<eigen slug>. De
+    # facetwaarde-links in de UI hangen hier `/c/<facet-slug>~<value-id>` achter
+    # (geen slash erachter, zie de canonicalisatieregel voor /c/-URLs).
+    root = _root_slug(data.get("parentId"), cat["slug"])
+    prefix = f"/products/{root}/{cat['slug']}" if root and cat["slug"] else None
+    return {
+        "category": {"id": int(cid), "name": cat["name"], "slug": cat["slug"],
+                     "parent_id": data.get("parentId"),
+                     "url_prefix": prefix,
+                     "is_enabled": data.get("isEnabled") is not False},
+        "facets": facets,
+        "facet_count": len(facets),
+        "on_count": on_count,
+        "relevant_count": len(relevant),
+        "on_relevant_count": on_relevant,
+        "search_ok": search["ok"],
+        "product_total": search["total"],
+    }
+
+
+_VAL_PAGE = 1000            # de API doet er ~0,25s over per 1.000
+_VAL_MAX = 60000            # harde bovengrens, zodat één rare facet niets ophangt
+_FACET_VALS: Dict[str, Dict] = {}
+_FACET_VALS_TTL = 600
+
+
+def facet_values(facet_id, only_on: bool = True) -> Dict:
+    """Facetwaarden van één facet, standaard alleen die met seoPriority=true.
+
+    De API kan niet op seoPriority filteren (`/api/Facets/{id}/values` neemt
+    alleen searchTerm/skip/take), dus dit pagineert en zeeft zelf. Resultaat gaat
+    10 minuten in een cache: doorklikken op dezelfde categorie zou anders elke
+    keer opnieuw 12.000 waarden ophalen.
+    """
+    fid = str(facet_id).strip()
+    if not fid.isdigit():
+        raise ValueError("facet id must be numeric")
+
+    key = f"{fid}|{int(bool(only_on))}"
+    hit = _FACET_VALS.get(key)
+    if hit and time.time() - hit["at"] < _FACET_VALS_TTL:
+        return {k: v for k, v in hit.items() if k != "at"}
+
+    values, total, skip, truncated = [], None, 0, False
+    while True:
+        r = taxv2.get(f"/api/Facets/{fid}/values",
+                      params={"skip": skip, "take": _VAL_PAGE}, timeout=60)
+        if r.status_code == 404:
+            raise LookupError(f"facet {fid} not found in taxv2")
+        r.raise_for_status()
+        page = r.json()
+        items = page.get("items") if isinstance(page, dict) else page
+        items = items or []
+        if total is None:
+            total = page.get("total") if isinstance(page, dict) else None
+        for v in items:
+            if only_on and v.get("seoPriority") is not True:
+                continue
+            labels = v.get("labels") or []
+            g = next((l for l in labels if l.get("locale") == "global"), None) or (labels[0] if labels else {})
+            values.append({
+                "id": v.get("id"),
+                # nameInColumn is de naam die in de facetkolom staat; nameOnDetail
+                # is de langere variant en is de terugval.
+                "name": (g.get("nameInColumn") or g.get("nameOnDetail") or "").strip(),
+                "sequence": v.get("sequence"),
+                "seo_priority": v.get("seoPriority"),
+                "invalid_reason": v.get("invalidReason"),
+            })
+        skip += len(items)
+        if len(items) < _VAL_PAGE or (total is not None and skip >= total):
+            break
+        if skip >= _VAL_MAX:
+            truncated = True
+            break
+
+    values.sort(key=lambda x: ((x["name"] or "").lower(), x["sequence"] or 0))
+    out = {"facet_id": int(fid), "total_values": total if total is not None else skip,
+           "scanned": skip, "on_count": len(values) if only_on else None,
+           "values": values, "truncated": truncated, "only_on": bool(only_on)}
+    _FACET_VALS[key] = {**out, "at": time.time()}
+    return out
 
 
 def _decide(row: Dict, t: Dict, cur_raw: Optional[bool]) -> Tuple[str, str, str]:
