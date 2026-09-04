@@ -3,6 +3,52 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-04 (1) — SEO Priority: kiezer als Healthscore, facet-inspector, Run History; plus de NL/BE-vraag
+
+Commits `ad4971e` (rename) en `d3ba3de` (de pagina). Lessen in LEARNINGS (3) en UI_BLUEPRINT (2).
+
+- [x] **"SEO stats" → "SEO Stats"** — 105 plekken in 36 bestanden, bijna allemaal het nav-item dat op
+      elke toolpagina staat, plus titel/navbar/dashboardtegel en de docstring van
+      `seo_stats_service`. `seo-stats.html`, hrefs en klassenamen blijven: dit is een label, geen
+      route. UI_BLUEPRINT is in deze docs-commit meegegaan (13 keer); TASKS en LEARNINGS niet, want
+      dat is een logboek met datums.
+- [x] **Categoriekiezer in de vorm van Healthscore.** Twee `<datalist>`-velden zijn de zoekbare
+      dropdowns geworden; component + CSS overgenomen uit `healthscore.html` met een verwijzing over
+      en weer. Nu vastgelegd in UI_BLUEPRINT §"Zoekbare dropdown", inclusief het verschil tussen een
+      filter en een run-doel. De naamcheck in `startRun()` kon weg.
+- [x] **Nieuwe kaart "Category facets"** met drie endpoints: `/tax-categories` (kiezer op
+      taxonomie-ids uit `pa.hs2_cat_maincat`, dezelfde tabel als Healthscore), `/category-facets/{id}`
+      en `/facet-values/{id}`. Facetten uit `GET /api/Categories/{id}` (niet uit `/CategoryFacets`,
+      dat laat Dependent stil weg), gekruist met de zoekindex zodat alleen facetten mét resultaten in
+      het overzicht staan. Sneakers: 122 → 45 met resultaten, 27 aan; van de 87 `Productlijnen: X`
+      blijven de 18 echte schoenenmerken over. Kolom "In index" toont `isSeoFacet`, en dus het
+      verschil met seoPriority. Facetwaarden pas bij openklappen (10 min cache), elk met een link
+      naar zijn eigen `/c/`-pagina.
+- [x] **Run History**: Run en Started weg, eerste kolom Date met datum+tijd, kolom Category
+      (`Tuinartikelen / Insectenhotel`, of alleen de maincat, of *All categories*), Results → View,
+      skeleton van 6 naar 7 cellen.
+- [x] **De `completed`-badge stond 1,125px te laag** — vierde gemeten context voor de
+      badge-padding-regel, nu in rem en op een gevulde badge. Zie UI_BLUEPRINT §Labels/badges.
+- [x] **`!Overig` uit alle dropdowns** — op id 11111 gefilterd in `list_tax_categories()`, niet op
+      naam. In `pa.hs2_cat_maincat` is het één rij zonder kinderen, dus er verdwijnt geen echte
+      categorie (3.569 → 3.568, 32 → 31 maincats).
+- [x] **Vijf UI-nafjes**: `ps-md-4` tussen datumbox en Maincat (padding in de kolom, want een marge
+      laat de derde kolom omvallen), tellerregel uit bij de categorielijsten, Reset defaults paars
+      outlined i.p.v. oranje, de categorieteller achter de i-tooltip, Fetch-knop smal en zonder
+      categorienaam, en de tabel binnen de `card-body` in de vorm van Campaigns created.
+- [x] **Kan seoPriority per land?** Nee — nagemeten in de live spec én op `isSeoFacet` (nl-nl vs
+      be-nl identiek). Aanvraagtekst voor IT staat in
+      `Downloads\claude\aanvraag_seopriority_country_variabele.md`. Zie LEARNINGS.
+
+Open, klein:
+
+- [ ] **De facetwaarden komen uit de taxonomie, niet uit de index.** De zoek-API geeft per waarde ook
+      `count` en `crawlable`, en dát zou "aan maar zonder producten" zichtbaar maken. Kost een
+      gefilterde call per facet (de volledige pool), dus alleen doen als de vraag opkomt.
+- [ ] **`isSeoFacet` van een dependent facet blijft `?`** als de pool-call zijn parent-waarde niet
+      raakte (de tien `Kleurtint *` op Sneakers). Exact maken kost één call per dependent facet.
+- [ ] De aanvraag voor de land-variabele is geschreven maar nog niet verstuurd — actie Joep.
+
 ### 2026-09-03 (11) — Facet Watch: doorklikken naar de facetwaarden, plus vijf UI-wensen
 
 Commits `7c60bee` (feature) en `a5a96e3` (labels + hover). Lessen in LEARNINGS en UI_BLUEPRINT,

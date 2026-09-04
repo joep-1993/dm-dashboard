@@ -49,7 +49,7 @@ hexes inline, use the token or the class that references it:
 
   **De "data-dense" uitzondering `col-lg-11` is opgeheven** (Joep, 2026-08-14: "in Bothits
   en SEO Stats dezelfde standaard paginabreedte aanhouden als in Kopteksten"). Die was op
-  2026-07-30 ingevoerd voor vijf pagina's — SEO stats, Healthscore, SEO titles, DMA
+  2026-07-30 ingevoerd voor vijf pagina's — SEO Stats, Healthscore, SEO titles, DMA
   Exclusions en Bot Hits — en gaf 1186px tegen 1076px. Precies die vijf zijn omgezet; een
   meting over alle 35 pagina's bevestigde dat er geen zesde was. Het argument voor de
   uitzondering (zes tegels op één rij, tabellen met acht kolommen) weegt niet op tegen wat
@@ -68,10 +68,10 @@ hexes inline, use the token or the class that references it:
   **Eén pagina wijkt met opzet af:** `dashboard.html`, de startpagina. Dat is geen tool maar
   een overzicht, en de tegelgrid gebruikt de volle `container` (1320px) met `row g-4`. Die
   hoort niet in de 1076px-kolom.
-    SEO stats and Healthscore ran on a *bare* container (~1140px /
+    SEO Stats and Healthscore ran on a *bare* container (~1140px /
     ~1320px) until this date, which is why they read visibly wider than the rest of
     the app; `col-lg-11` brings them into a sanctioned width without squeezing
-    them. At `col-md-10`, SEO stats' 8 summary tiles wrap 7+1 and its 10 metric
+    them. At `col-md-10`, SEO Stats' 8 summary tiles wrap 7+1 and its 10 metric
     pills spill onto two rows.
   - Never `container-fluid` or a bare container.
   - The px figures move with the viewport because `.container` itself does (1140px
@@ -297,7 +297,7 @@ other tool uses the grey default. New tools follow the grey default.
     rows. That requires any state the header depends on to be assigned *before* the
     fetch (MC ID Finder's `lastMode` had to move up).
   - **A grey overlay + spinner is not a substitute — it hides the drawing effect.**
-    SEO stats' Performance-standup card kept a page-local `.loading-overlay`
+    SEO Stats' Performance-standup card kept a page-local `.loading-overlay`
     (removed 2026-07-30) on the argument that it also greyed the stat tiles, which
     skeleton rows can't. That argument is wrong: **tiles take a skeleton too** —
     keep the label (it is known before the fetch) and shimmer only the value, e.g.
@@ -365,7 +365,7 @@ select (10 / 25 / 50 / 100 / Show all), prev/next chevron buttons, and an
 `--color-button` in style.css, which is why the arrows render **orange**. Use the
 chevron SVGs from the template (not `<` / `>` text).
 
-## Charts — the SEO stats look is the reference
+## Charts — the SEO Stats look is the reference
 
 `seo-stats.html` and `shop-campaigns.html` now render the same chart. Copy that
 chrome rather than re-deriving it (Chart.js, `.chart-wrap { position: relative;
@@ -417,8 +417,8 @@ stats; a 7px `.tile-dot` next to the label where tiles are too narrow for one),
 gets `.metric-tile` + `.metric-on`/`.metric-off`, and its border and dot say
 whether the series is drawn — the value and label are NEVER dimmed, the number is
 the tile's whole point. Do not also ship a row of `.metric-toggle` pills for the
-same metrics; keep pills only for series that have no tile (SEO stats' two
-aggregates). In SEO stats the sparkline area is deliberately not clickable.
+same metrics; keep pills only for series that have no tile (SEO Stats' two
+aggregates). In SEO Stats the sparkline area is deliberately not clickable.
 
 **Loading state = a skeleton in the shape of a chart, not a spinner** — same
 reasoning as the skeleton table rows. Absolutely positioned inside `.chart-wrap`,
@@ -528,7 +528,7 @@ measure the old set too: Bot Hits' url_type turned out to *improve* (CVD 2,7 →
 while the grey ↔ lichtblauw pair at 12,0 normal was pre-existing and is unfixable by
 any choice of series hue — only reworking the Overig band touches it.
 
-**Colours: run the validator, never eyeball ΔE.** The palette is SEO stats'
+**Colours: run the validator, never eyeball ΔE.** The palette is SEO Stats'
 (`seo-stats.html` — the Kleursysteem base row with the bordeaux/navy departures).
 A page that needs fewer than ten series picks a SUBSET, and *which* one it drops is
 a real decision: dropping accent-500 removes both of that palette's worst pairs.
@@ -600,7 +600,7 @@ wide as the others instead of centred under them. Do **not** put the label above
 value in a small grey uppercase line — that was Bot Hits' own `.tile` variant and it
 buried the number, which is the tile's whole point.
 
-Note the collision: **SEO stats also has a `.stat-card`, but that is the chart's
+Note the collision: **SEO Stats also has a `.stat-card`, but that is the chart's
 legend-and-toggle tile** (sparkline, `.metric-on`/`.metric-off` border) — same class
 name, different job. A page that needs both must rename one.
 
@@ -627,7 +627,7 @@ Twee dingen bij het toevoegen van een tegel:
   rij bepaalt (`conflictInfo()` → `effectiveSkipReason()`), niet uit `preflight.stats`. Twee
   definities naast elkaar geven een tegel die iets anders telt dan de tabel toont.
 
-### Donut / part-to-whole — the SEO stats ring
+### Donut / part-to-whole — the SEO Stats ring
 
 `dashDonutVisits` / `dashDonutRevenue` / `dashDonutUrlType` in `seo-stats.html` are
 the reference. The anatomy:
@@ -855,7 +855,7 @@ van 2026-08-14; de kleur is niet langer `--color-section` maar het vlakke paneel
 
 and a stylesheet `!important` **beats an inline declaration**. So every `card-header`
 renders in the standard light panel colour no matter what `style="background:#5e4a90;
-color:#fff"` says next to it — including SEO stats', which looked purple in the markup for
+color:#fff"` says next to it — including SEO Stats', which looked purple in the markup for
 weeks and grey on screen the whole time. Hetzelfde geldt voor een klasse die het probeert:
 Healthscore's `.card-header.hs-head { background: #5e4a90 }` verliest van het `!important`
 hierboven. Consequences:
@@ -1070,7 +1070,7 @@ reasoning as `.alert-done-yellow` for end-of-run banners, and as "don't use grey
 as a label colour".
 The class is declared **once** in `css/style.css`; never re-declare it per page
 (it was duplicated verbatim in seo-stats / healthscore / shop-campaigns before
-being consolidated). In use in SEO stats, Healthscore, Shop-campaigns, Thema Ads.
+being consolidated). In use in SEO Stats, Healthscore, Shop-campaigns, Thema Ads.
 
 **`.info-note` carries no margin of its own**, so the spacing utility in the
 example above is not decoration — leave it off and the banner sits flush against
@@ -1142,6 +1142,15 @@ labels" (Healthscore, 2026-08-19): `.lbl` op `font-size: 0.7rem` met symmetrisch
 varianten. Let op dat kleinkapitaal hier niets makkelijker maakt dan het lijkt: er zijn
 geen staartletters, dus de basislijn is de onderkant van de ink — maar de scheve em-doos
 van `line-height: 1` zit er nog net zo in.
+
+Vierde gemeten context, nu in **rem** en op een GEVULDE badge (SEO Priority, Run History,
+2026-09-04): `.status-badge` op `font-size: 0.75rem` met symmetrische `0.2rem 0.5rem` zet de
+tekst **+1,125px** te laag. Ladder: .200/.200 → +1,125 · .180/.220 → +0,500 ·
+**.165/.235 → 0,000** · .150/.250 → −0,500 · .130/.270 → −1,125px, en de pilhoogte blijft
+18,4px in alle varianten. Dus `padding: 0.165rem 0.5rem 0.235rem`. Twee dingen die dit
+bevestigt: de fout is er net zo goed op een gevulde badge met WITTE tekst op groen (de
+meting zoekt daar de ink als bijna-witte pixels binnen de band), en de reeks loopt weer
+1-op-1 met het padding-verschil — 0,035rem verschuiving per zijde is ~1,1px totaal.
 
 De correctie is ~0,06rem bij 0,85rem tekst en ~0,10em op de kleinere kop-badge; de
 reeks .50/.49/.485/.475/.47 mat +1,000 / +0,750 / +0,625 / +0,250 / 0,000px, dus het
@@ -1504,7 +1513,7 @@ carries through automatically:
 
   Still-native (no flatpickr): SEO Priority, Performance Standup. R-Finder en DMA Bidding
   hadden de kale OS-kalender en hebben sinds 2026-08-14 de paarse.
-- **A date range loads on change — there is no Load button.** SEO stats and
+- **A date range loads on change — there is no Load button.** SEO Stats and
   Shop-campaigns both put the range INSIDE the chart card (it scopes the page, but
   that is where you look at it) with Refresh on the card's title row, and load on
   change. Four things go with that:
@@ -1640,6 +1649,57 @@ bouw op hun default en zijn nooit anders gezet — die tool voert altijd een 301
   het histogram), een teller niet. Ruil dat alleen weg als het aantal niet de reden is dat je kiest.
   De maat van 265px voor zo'n lange optietekst in §"Een label hernoemen krimpt de control ernaast"
   gold voor precies die select; die staat er niet meer.
+
+### Zoekbare dropdown — de categoriekiezer
+
+Staat nu op **twee** pagina's (`healthscore.html` en `seo-prio.html`, sinds 2026-09-04) en is
+daarmee een afspraak in plaats van een pagina-keuze. Gebruik hem zodra een `<select>` niet meer
+werkt: die kan geen zoekveld dragen, en 3.500 opties scan je niet.
+
+```html
+<div class="dd" id="ddCat">
+  <button type="button" class="form-select form-select-sm dd-toggle is-empty"
+          id="ddCatToggle" aria-haspopup="listbox" aria-expanded="false" disabled>
+    <span class="dd-value">loading&hellip;</span>
+  </button>
+  <div class="dd-panel" hidden>
+    <input type="search" class="form-control form-control-sm dd-search" …>
+    <div class="dd-count"></div>
+    <div class="dd-list" role="listbox"></div>
+  </div>
+</div>
+```
+
+Wat vastligt:
+
+- **De knop is een echte `form-select form-select-sm`.** Rand, radius, hoogte, focusring en het
+  pijltje komen daardoor uit `style.css`, dus hij staat naast een native `<select>` zonder
+  zichtbaar verschil en een themawijziging neemt hem mee. Alleen `text-align: left` moet er los
+  op: een `<button>` centreert zijn tekst, een `<select>` niet. Die maat past ook naast een
+  `.date-box` (font 0,85rem) — de niet-`-sm` variant is een kop groter dan de datumbox ernaast.
+- **Toetsenbord**: typen filtert, ↑/↓ verplaatst de cursor, Enter kiest (zonder ↑/↓ de bovenste
+  treffer), Esc sluit. Hover en de toetsenbordcursor krijgen DEZELFDE tint
+  (`--flat-accent-soft`): het is één "hier sta je nu"-staat.
+- **De zoekregel is AND op losse substrings**, hoofdletterongevoelig, over naam + meta + id —
+  dezelfde regel als het zoekveld boven een tabel.
+- **De tellerregel (`.dd-count`) staat er alleen waar hij iets zegt.** Op 32 maincats leest
+  "1 of 32" prima; op een categorielijst van 3.500 met een rendercap van 400 las
+  "3.850 of 3.850 · first 400 shown" als een limiet die je niet kunt bereiken, terwijl je een
+  categorie tóch typend zoekt (Joep, 2026-09-04). Vandaar een optie `{count: false}` per kiezer.
+- **Filter of doel is het verschil dat de rest bepaalt.** Is de keuze een RUN-DOEL (Healthscore),
+  dan begin je leeg met een placeholder en staat de actieknop uit tot er iets gekozen is, met de
+  reden in zijn `title`. Is het een FILTER (SEO Priority), dan opent de lijst met een expliciete
+  `All …`-regel die je ook terug kunt kiezen, en die staat vóóraf geselecteerd — dan zegt de knop
+  zelf wat de run dekt in plaats van dat een leeg veld het impliceert. Dat tweede geval vraagt één
+  methode extra op het component: een programmatische `selectKey()` die géén focus steelt en de
+  `onPick`-callback niet afvuurt.
+- **Een waarde die na een rebuild niet meer in de lijst zit, valt weg** (`setItems` doet dat zelf):
+  wisselen van maincat mag geen categorie uit een andere maincat laten staan. Let op dat de
+  `All …`-regel dezelfde key houdt terwijl zijn LABEL met de maincat meebeweegt — die moet je dus
+  opnieuw selecteren, anders toont de knop het oude label.
+- **Cascade**: de maincat perkt de tweede lijst in (32 → ~100 in plaats van 3.500). Bij "All
+  maincats" hoort de maincat als `.dd-meta` in de rijen, want twee categorieën kunnen dezelfde
+  naam hebben in twee maincats — en dan zit de maincat ook in de key, niet alleen in het label.
 
 ### Zoekveld boven een tabel
 

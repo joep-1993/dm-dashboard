@@ -1,6 +1,79 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## "Welke facetten zijn hier relevant?" vraag je aan de zoekindex, niet aan de taxonomie (2026-09-04, SEO Priority → Category facets)
+
+De nieuwe facet-inspector liet eerst zien wat `GET /api/Categories/{id}` teruggeeft, en dat is te
+ruim om iets mee te doen. **Sneakers heeft 122 facetten, waarvan 88 productlijn-facetten** — en die
+horen daar niet: een `Productlijnen: X`-facet is dependent van een MERK-waarde, dus het rijdt mee
+naar elke categorie waar dat merkfacet ligt. Joep zag `Productlijnen: Nintendo` onder Sneakers.
+
+De zoekindex weet het wel. Eén ongefilterde call
+
+```
+GET productsearch-v2/search/products?category=<slug>&countryLanguage=nl-nl&isBot=false&limit=0
+```
+
+geeft de facetten die deze categorie werkelijk heeft (Sneakers 17, Parfums 9) mét `isSeoFacet`.
+Maar de naïeve toets "staat het facet in dat antwoord?" is fout, en op een manier die je pas ziet
+als je hem toepast:
+
+* **Een dependent facet staat er per definitie NIET in.** Het verschijnt pas als een waarde van zijn
+  parent gekozen is. Op de naïeve toets verdwenen `Collectie` op Parfums en tien `Kleurtint *`-facetten
+  op Sneakers uit het overzicht — allemaal facetten die AAN staan en die op hun eigen pagina's
+  gewoon linken. De juiste vraag is of **een van zijn `parentFacetValueIds` hier voorkomt**: blauw
+  bestaat in Sneakers, Nintendo niet. Dat scheidt de 18 echte schoenenmerken (UGG, HOKA, ECCO, Gucci…)
+  van de 87 rest.
+* **De waardenlijsten in een ongefilterd antwoord zijn afgekapt, maar niet op 8.** Gemeten op Sneakers:
+  merk 100, `populaire_serie` 100, maat 60, `o_schoenen` 60, kleur 24, personages 19, de rest 8 — het
+  ziet uit als de `seoDisplayLimit` van het facet, niet als één vaste grens (de oudere notitie
+  "top-8" is dus te grof). Een lege intersectie kan daarom "buiten de afkapping" betekenen. Dat kost
+  één gefilterde vervolgcall per PARENT-facet (`filters[<urlName>][0]=<een geldige waarde>`), die de
+  volledige pool geeft — één call voor merk in plaats van 87 voor de kinderen.
+* **Diezelfde vervolgcall is ook de enige plek waar `isSeoFacet` van een dependent facet uit komt.**
+  Voor `Kleurtint blauw` blijft het alsnog onbekend, want de pool-call selecteert de eerste waarde van
+  het parent-facet en dat is een andere kleur. Dat is geen bug om weg te werken maar een grens om te
+  benoemen: de UI zet er `?` met die uitleg in de tooltip.
+
+Netto voor Sneakers: 122 facetten → **45 met resultaten, 27 daarvan aan**, en de ruis is weg zonder dat
+er iets verdwijnt wat wél linkt. Kosten: 0,5-2,1 s per categorie. Zie
+[[SEO_FACETLINKS_DEPENDENT_FACETS.md]] voor het linkgedrag zelf.
+
+## seoPriority heeft geen land-dimensie, en `isSeoFacet` ook niet (2026-09-04)
+
+Vraag van Joep: kunnen we categorie×facet-seoPriority voor BE anders zetten dan voor NL? Nee, en het
+antwoord zit op twee plekken:
+
+* `CategoryFacetSettingDto` en `UpsertCategoryFacetSettingRequest` gaan puur op (`categoryId`,
+  `facetId`); `GET /api/CategoryFacetSettings` accepteert alleen `?categoryId=`. In de **live** spec
+  (`/swagger/v1/swagger.json`, 54 paths) komt het woord `country` **0×** voor. `locale` bestaat wél,
+  maar alleen op labels en contexts — namen, slugs en teksten, geen vlaggen.
+* De vlag die de site leest is ook niet land-specifiek: `isSeoFacet` is identiek voor
+  `countryLanguage=nl-nl` en `be-nl` op `parfum_aftershave_422758` (9 facetten, in beide dezelfde 5 op
+  true) terwijl `total` verschilt (207 NL vs 137 BE).
+
+Twee dingen om te onthouden: het is **`be-nl`** (country-language), `nl-be` geeft HTTP 400; en de
+lokale swagger-kopie in `scripts/` is stale — hij mist o.a. `seoDisplayLimit`, dus haal de spec live
+op voordat je concludeert dat een veld niet bestaat. Aanvraagtekst voor IT staat in
+`Downloads\claude\aanvraag_seopriority_country_variabele.md`.
+
+## Een live /c/-URL bouwen: root-slug + eigen slug, en 200 bewijst niets (2026-09-04)
+
+De facetwaarden in de inspector linken naar hun eigen pagina, en die URL heeft precies twee
+padsegmenten: `/products/<root-slug>/<eigen slug>/c/<facet-slug>~<value-id>` (geen slash erachter).
+De tussenliggende niveaus komen er niet in voor — `parse_url()` in `seo_prio_service` rekent daar al op.
+
+De root-slug op twee manieren te krijgen, beide goedkoop:
+* **Klimmen** via `parentId`: `GET /api/Categories/{maincat}` is 39-102 kB in 0,12-0,15 s, dus 1-2
+  calls. Cachen per parent-id.
+* **Uit de slug zelf**: die is `<root>_<id>[_<id>]`, dus `re.sub(r"(_\d+)+$", "", slug)`. Geverifieerd
+  tegen de klim op 12 willekeurige categorieën: 12/12 gelijk. Nu de fallback als de klim omvalt.
+
+**En let op bij het testen: de site geeft 200 op een facetwaarde die niet bestaat.**
+`…/c/inhoud_parfum_ml~999999999` levert een pagina van 399 kB, net als een geldige waarde. Een
+statuscheck is dus geen validatie van je URL — dat sluit aan op de bekende val dat `total` liegt op
+een onbekende facetwaarde.
+
 ## De goedkoopste call bepaalt de vorm van je drill-down (2026-09-03, Facet Watch → facetwaarden)
 
 Een facetrij moest doorklikbaar worden naar zijn waarden. De eerste opzet — "haal de waarden van dit
