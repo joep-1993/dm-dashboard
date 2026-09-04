@@ -1,5 +1,5 @@
 """
-SEO stats — read-only dashboard data for the "SEO stats" tool.
+SEO Stats — read-only dashboard data for the "SEO Stats" tool.
 
 Serves a live web UI:
   - per-day visits + revenue for SEO / DMA organic / GSAAS  (chart + table)

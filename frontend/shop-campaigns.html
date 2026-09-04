@@ -292,7 +292,7 @@
                         <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
                         <a href="/static/seo-prio.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> SEO Priority</a>
                         <a href="/static/seo-rulings.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10"/><path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/><path d="m21 11-8-8"/><path d="M4 22h12"/></svg> SEO Rulings</a>
-                        <a href="/static/seo-stats.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> SEO stats</a>
+                        <a href="/static/seo-stats.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> SEO Stats</a>
                         <a href="/static/url-validator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg> URL Validator</a>
                     </div>
                 </div>
@@ -392,7 +392,7 @@
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center" style="background:#5e4a90; color:#fff;">
                 <h5 class="mb-0">Per-day overview</h5>
-                <!-- Canonical .btn-outline-purple, same as SEO stats. The inline
+                <!-- Canonical .btn-outline-purple, same as SEO Stats. The inline
                      styles it replaces were a hand-rolled copy of exactly that class
                      (purple outline, fills purple on hover) — see
                      cc1/UI_BLUEPRINT.md "never inline the hexes". -->
@@ -493,7 +493,7 @@
 
         // metric key -> {label, unit group, color}
         //
-        // COLOURS: SEO stats' palette (seo-stats.html), which is the Beslist
+        // COLOURS: SEO Stats' palette (seo-stats.html), which is the Beslist
         // "Kleursysteem" base row with Joep's bordeaux/navy departures. This page
         // needs 9 of its 10, so one is dropped — see below for which, and why.
         //
@@ -518,7 +518,7 @@
         // cta-500 (orange) is the better half: it turns a CVD FAIL into a WARN and
         // leaves the accent↔green pair, which the source palette carries anyway.
         //
-        //                        SEO stats (10)   here (9)
+        //                        SEO Stats (10)   here (9)
         //   adjacent CVD          WARN  6.1       WARN  7.7  (roze ↔ lichtblauw)
         //   adjacent normal       PASS 16.4       PASS 24.6
         //   all-pairs CVD         FAIL  4.9       WARN  7.7
@@ -528,7 +528,7 @@
         // Every check is equal to or better than the palette it comes from. The
         // lightness/chroma FAILs are bordeaux, navy and deep turquoise being dark
         // and low-chroma by choice; inherited, not introduced. Mitigation for what
-        // remains is the same as SEO stats': the tiles and the tooltip both name
+        // remains is the same as SEO Stats': the tiles and the tooltip both name
         // every series, so identity never rests on hue alone.
         // Re-run the validator before changing any of this; do not eyeball ΔE.
         const METRICS = {
@@ -1085,7 +1085,7 @@
                 },
             };
             // Axis captions are off while a side carries ONE axis — the unit rides
-            // on the tick label, as in SEO stats. This page can put two axes on the
+            // on the tick label, as in SEO Stats. This page can put two axes on the
             // same side (Count + Impressions left; €, % and € CPC right), and there
             // the tick alone no longer says which gutter is which, so the caption
             // comes back for that side only.
