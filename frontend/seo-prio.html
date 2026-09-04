@@ -7,6 +7,17 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
+        /* De .date-box en de twee dropdowns staan in één rij en moeten dezelfde
+           hoogte hebben (Joep, 2026-09-04). Gemeten: de box was 32,38px (inputveld
+           23,58 + 2×0,2rem padding + rand) tegen 31,00px voor een `form-select-sm`.
+           De box krijgt daarom de hoogte van een sm-control, met dezelfde formule
+           die Bootstrap zelf gebruikt (1,5 × font-size + padding + rand) zodat hij
+           meebeweegt als die maat verandert, en zijn verticale padding gaat naar 0
+           — anders is de inhoud (23,58px) hoger dan de contentbox en loopt hij er
+           een halve pixel uit. Centreren doet `.date-box` zelf al met
+           `align-items: center`. */
+        .date-box { height: calc(1.5 * 0.875rem + 0.5rem + 2px);
+                    padding-top: 0; padding-bottom: 0; }
         .threshold-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem 1rem; }
         .threshold-grid label { font-size: 0.85rem; color: #555; }
         /* ------------------------------------------------------------------ *
@@ -90,6 +101,7 @@
                text-transform: uppercase; letter-spacing: .03em;
                font-size: 0.7rem; padding: 0.15em 0.55em 0.25em; border-radius: 0.375rem;
                display: inline-block; }
+        .lbl-green  { color: #198754; }
         .lbl-purple { color: #5e4a90; }
         .lbl-blue   { color: #1f99c4; }
         .lbl-amber  { color: #b26a00; }
@@ -230,7 +242,11 @@
                                  2026-08-13). col-md-3 blijft: de box is smaller dan
                                  twee losse velden, dus de rij wordt ruimer. -->
                             <div class="col-md-3">
-                                <label class="form-label">Date range</label>
+                                <!-- mb-1 zoals de twee labels ernaast: met
+                                     `align-items-end` lijnen de velden onderaan uit, maar
+                                     de labels blijven staan waar hun eigen marge ze zet
+                                     en dan staat dit er 4px boven. -->
+                                <label class="form-label mb-1">Date range</label>
                                 <div class="date-box">
                                     <input type="date" id="startDate" aria-label="Start date">
                                     <span class="sep">–</span>
@@ -456,43 +472,6 @@
                     </div>
                 </div>
 
-                <!-- Run History -->
-                <div class="card mb-4">
-                    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">Run History</h5>
-                        <button class="btn btn-sm btn-outline-purple" onclick="loadRuns()">↻ Refresh</button>
-                    </div>
-                    <div class="card-body p-0">
-                        <table class="table table-sm table-bordered mb-0 runs-table">
-                            <thead>
-                                <tr style="background:#f0f0f0; border-bottom: 2px solid #dee2e6;">
-                                    <th class="col-check" style="padding: 8px 12px;"><input class="form-check-input" type="checkbox" id="runSelectAll" title="Select all runs"></th>
-                                    <th style="padding: 8px 12px;">Date</th>
-                                    <th style="padding: 8px 12px;">Status</th>
-                                    <th style="padding: 8px 12px;">Rows</th>
-                                    <th style="padding: 8px 12px;">Date range</th>
-                                    <th style="padding: 8px 12px;">Category</th>
-                                    <th style="padding: 8px 12px;">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="runsBody">
-                                <tr><td colspan="7" class="text-center text-muted py-3">Loading…</td></tr>
-                            </tbody>
-                        </table>
-                        <!-- Bulk-select bar under the table, same shape as Auto-Redirects:
-                             one Export and one Remove for the ticked runs instead of that
-                             button pair on every row. -->
-                        <div class="d-flex align-items-center gap-2 px-3 py-2" style="border-top: 1px solid var(--flat-border);">
-                            <span id="runSelCount" class="sel-count">0 selected</span>
-                            <div class="ms-auto d-flex gap-2">
-                                <button type="button" class="btn btn-sm btn-outline-purple" id="runExportBtn" disabled
-                                        title="Download the selected runs. One run gives you its own file; several are merged into one workbook with a leading `run` column.">Export</button>
-                                <button type="button" class="btn btn-sm btn-outline-red" id="runRemoveBtn" disabled>Remove</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- ============ Category facets (read-only) ============
                      Losse module (Joep, 2026-09-04): kies een categorie, haal hem
                      op, en zie welke facetten daar SEO-aan staan; klik een facet
@@ -571,6 +550,43 @@
                              "Campaigns created" in GSD Campaigns gebruikt: een omrande,
                              afgeronde .table-responsive-doos binnen de body. -->
                         <div id="facetResult"></div>
+                    </div>
+                </div>
+
+                <!-- Run History -->
+                <div class="card mb-4">
+                    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Run History</h5>
+                        <button class="btn btn-sm btn-outline-purple" onclick="loadRuns()">↻ Refresh</button>
+                    </div>
+                    <div class="card-body p-0">
+                        <table class="table table-sm table-bordered mb-0 runs-table">
+                            <thead>
+                                <tr style="background:#f0f0f0; border-bottom: 2px solid #dee2e6;">
+                                    <th class="col-check" style="padding: 8px 12px;"><input class="form-check-input" type="checkbox" id="runSelectAll" title="Select all runs"></th>
+                                    <th style="padding: 8px 12px;">Date</th>
+                                    <th style="padding: 8px 12px;">Status</th>
+                                    <th style="padding: 8px 12px;">Rows</th>
+                                    <th style="padding: 8px 12px;">Date range</th>
+                                    <th style="padding: 8px 12px;">Category</th>
+                                    <th style="padding: 8px 12px;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="runsBody">
+                                <tr><td colspan="7" class="text-center text-muted py-3">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                        <!-- Bulk-select bar under the table, same shape as Auto-Redirects:
+                             one Export and one Remove for the ticked runs instead of that
+                             button pair on every row. -->
+                        <div class="d-flex align-items-center gap-2 px-3 py-2" style="border-top: 1px solid var(--flat-border);">
+                            <span id="runSelCount" class="sel-count">0 selected</span>
+                            <div class="ms-auto d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-purple" id="runExportBtn" disabled
+                                        title="Download the selected runs. One run gives you its own file; several are merged into one workbook with a leading `run` column.">Export</button>
+                                <button type="button" class="btn btn-sm btn-outline-red" id="runRemoveBtn" disabled>Remove</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -1635,24 +1651,30 @@ async function fetchCategoryFacets() {
     }
 }
 
+// Groen = aan, rood = uit (Joep, 2026-09-04). `null` blijft een streepje: dat is
+// "geen rij / erf van de ouder" en niet hetzelfde als een expliciete OFF — die komt
+// in de praktijk trouwens bijna niet voor.
 function prioLbl(f) {
-    if (f.on) return '<span class="badge lbl lbl-purple">ON</span>';
-    if (f.seo_priority === false) return '<span class="badge lbl lbl-grey">OFF</span>';
+    if (f.on) return '<span class="badge lbl lbl-green">ON</span>';
+    if (f.seo_priority === false) return '<span class="badge lbl lbl-red">OFF</span>';
     return '<span class="text-muted">—</span>';
 }
 
 // Wat de SITE doet, tegenover wat de taxonomie zegt. De noscript-facetlinks komen
 // uit `isSeoFacet` in de zoekindex, dus een facet dat in de taxonomie aan staat maar
 // hier `false` is, linkt (nog) niet — dat verschil is de reden dat deze kolom er staat.
+// Tekstueel, geen gekleurd label (Joep, 2026-09-04): deze kolom is context bij de
+// seoPriority ernaast, en twee chips naast elkaar vechten om dezelfde aandacht. Wat
+// echt fout is (aan maar niet gelinkt) staat als vlag in de Flags-kolom.
 function seoFacetCell(f) {
     if (f.in_search === false)
         return '<span class="text-muted" title="This facet is not in the search index for this category, so there is nothing to link">—</span>';
     if (f.is_seo_facet === true)
-        return '<span class="badge lbl lbl-blue" title="isSeoFacet=true — the page links the values of this facet">linked</span>';
+        return '<span title="isSeoFacet=true — the page links the values of this facet">linked</span>';
     if (f.is_seo_facet === false)
         return f.on
-            ? '<span class="badge lbl lbl-amber" title="seoPriority is ON in the taxonomy but isSeoFacet=false in the search index: the page does not link these values">not linked</span>'
-            : '<span class="text-muted">—</span>';
+            ? '<span title="seoPriority is ON in the taxonomy but isSeoFacet=false in the search index: the page does not link these values">not linked</span>'
+            : '<span class="text-muted">not linked</span>';
     // Onbekend heeft hier twee oorzaken: de zoek-API antwoordde niet, of het is een
     // dependent facet en dan meldt de index zijn isSeoFacet alleen op een pagina waar
     // zijn eigen parent-waarde gekozen is (Kleurtint blauw verschijnt pas bij blauw).
@@ -1666,6 +1688,8 @@ function facetFlags(f) {
     if (!f.is_enabled) out.push('<span class="badge lbl lbl-red" title="isEnabled=false in taxv2 — the facet is dead everywhere, seoPriority has no effect">disabled</span>');
     if (f.no_index_no_follow) out.push('<span class="badge lbl lbl-red" title="noIndexNoFollow=true on the facet — its value pages are noindex/nofollow">noindex</span>');
     if (f.is_hidden) out.push('<span class="badge lbl lbl-amber" title="isHidden=true for this category — the facet is not shown in the filter column">hidden</span>');
+    if (f.on && f.in_search !== false && f.is_seo_facet === false)
+        out.push('<span class="badge lbl lbl-amber" title="seoPriority is ON in the taxonomy but isSeoFacet=false in the search index: the page does not link these values">not linked</span>');
     if (f.in_search === false) out.push('<span class="badge lbl lbl-grey" title="The search index does not carry this facet for this category — no products behind it here. Dependent facets ride along from the parent facet\'s other categories.">no results</span>');
     if (f.inheritance === 'Dependent') {
         out.push(`<span class="badge lbl lbl-blue" title="Dependent facet: it only appears once a value of parent facet ${f.parent_facet_id} is selected, so its links live on those pages only (${fmtNum(f.parent_value_count)} parent values)">dependent</span>`);
@@ -1768,11 +1792,27 @@ function facetValuesHtml(f) {
     // noscript-facetlinks ook gebruiken (geen slash erachter). Kan alleen als we het
     // pad én de facet-slug hebben; anders blijft het een span.
     const prefix = _facetCat && _facetCat.url_prefix;
+    // Een dependent facet MOET zijn parent-waarde vooraan in de URL dragen, gescheiden
+    // door `~~`: /c/kleur~430783~~kleurtint_goud~23793994. Zonder die parent is het
+    // geen suboptimale URL maar een ONGELDIGE — de zoek-API antwoordt dan met HTTP 400
+    // "The given facet is not valid." en de pagina toont niet wat je denkt.
+    const dependent = f.inheritance === 'Dependent';
+    const chain = dependent ? (f.parent_link ? `${f.parent_link}~~` : null) : '';
     const pills = shown.map(x => {
         const label = escapeAttr(x.name || ('#' + x.id));
         const tip = `value id ${x.id}${x.sequence != null ? ' · sequence ' + x.sequence : ''}`;
-        if (!prefix || !f.slug) return `<span class="val-pill" title="${tip}">${label}</span>`;
-        const href = `https://www.beslist.nl${prefix}/c/${f.slug}~${x.id}`;
+        // Geen link als we het pad niet eenduidig kunnen bouwen. Bij een dependent
+        // facet met meerdere parent-waarden is dat geen onwil: welke parent bij DEZE
+        // waarde hoort staat nergens in de API, alleen welke parents het facet als
+        // geheel aanzetten.
+        if (!prefix || !f.slug || chain === null) {
+            const why = chain === null
+                ? ` — no link: this dependent facet has ${fmtNum(f.parent_matches || f.parent_value_count)}`
+                  + ` possible parent values here, and the URL needs the one that belongs to this value`
+                : '';
+            return `<span class="val-pill" title="${tip}${why}">${label}</span>`;
+        }
+        const href = `https://www.beslist.nl${prefix}/c/${chain}${f.slug}~${x.id}`;
         return `<a class="val-pill" href="${escapeAttr(href)}" target="_blank" rel="noopener"`
              + ` title="${tip} — opens ${escapeAttr(href)}">${label}</a>`;
     }).join('');

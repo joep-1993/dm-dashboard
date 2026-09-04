@@ -904,7 +904,7 @@ def _search_pool(cat_slug: str, url_name: str, seed) -> Dict[str, Dict]:
 
 def _dependent_presence(cat_slug: str, base: Dict[str, Dict], parent_fid,
                         parent_value_ids, pools: Dict[str, Dict]):
-    """Is een dependent facet hier relevant? True / False / None (onbekend).
+    """(relevant, gematchte parent-waarden) — relevant is True / False / None.
 
     Een dependent facet staat NIET in een ongefilterd antwoord: het verschijnt pas als
     een waarde van zijn parent-facet gekozen is. "Komt het facet in de index voor?"
@@ -914,15 +914,16 @@ def _dependent_presence(cat_slug: str, base: Dict[str, Dict], parent_fid,
     productlijn-facetten op Sneakers hangen aan een merk dat er niet is.
     """
     if parent_fid is None or not parent_value_ids:
-        return None
+        return None, []
     p = base.get(str(parent_fid))
     if not p:
         # Het parent-facet zelf zit hier niet in de index. Is dat parent op zijn beurt
         # dependent, dan weten we het niet; anders kan het kind er ook niet zijn.
-        return None
+        return None, []
     ids = set(parent_value_ids)
-    if ids & p["value_ids"]:
-        return True
+    hit = ids & p["value_ids"]
+    if hit:
+        return True, sorted(hit)
     # Leeg kan ook betekenen dat de parent-waarde buiten de afgekapte lijst viel: één
     # vervolgcall per parent-facet geeft de volledige lijst.
     key = str(parent_fid)
@@ -930,8 +931,9 @@ def _dependent_presence(cat_slug: str, base: Dict[str, Dict], parent_fid,
         pools[key] = _search_pool(cat_slug, p["url_name"], p["seed"])
     pool = pools[key].get(key)
     if not pool:
-        return None
-    return bool(ids & pool["value_ids"])
+        return None, []
+    hit = ids & pool["value_ids"]
+    return bool(hit), sorted(hit)
 
 
 _ROOT_SLUGS: Dict[str, str] = {}       # parentId -> urlSlug van de root
@@ -1005,6 +1007,7 @@ def category_facets(cat_id) -> Dict:
         hit = search["facets"].get(str(fid))
         parent_fid = (dep or {}).get("parentFacetId")
         parent_vals = (dep or {}).get("parentFacetValueIds") or []
+        matched_parents: List = []
         if not search["ok"]:
             # Zonder antwoord van de zoek-API weten we niets: dan liever alles laten
             # zien dan stil de helft weglaten.
@@ -1012,10 +1015,21 @@ def category_facets(cat_id) -> Dict:
         elif hit is not None:
             present = True
         elif parent_fid is not None:
-            present = _dependent_presence(cat["slug"], search["facets"],
-                                          parent_fid, parent_vals, pools)
+            present, matched_parents = _dependent_presence(
+                cat["slug"], search["facets"], parent_fid, parent_vals, pools)
         else:
             present = False
+
+        # Een /c/-URL van een dependent facet MOET zijn parent-waarde vooraan dragen:
+        # `filters[kleurtint_goud]` alleen geeft HTTP 400 "The given facet is not
+        # valid.", met `kleur~430783` erbij 200. Dus bouwen we het pad-fragment van de
+        # parent mee — maar alleen als er precies één parent-waarde hier voorkomt.
+        # Bij meerdere (Collectie hangt aan 197 merken) weten we niet WELKE bij een
+        # gegeven kindwaarde hoort: de API kent die koppeling niet per waarde, alleen
+        # per facet. Dan liever geen link dan een link naar een lege pagina.
+        p_slug = (search["facets"].get(str(parent_fid)) or {}).get("url_name") if parent_fid else None
+        parent_link = (f"{p_slug}~{matched_parents[0]}"
+                       if p_slug and len(matched_parents) == 1 else None)
         # is_seo_facet van een dependent facet komt pas terug in een gefilterde call;
         # `pools` heeft die al gedaan voor de relevantietoets, dus lees hem daaruit.
         idx_hit = hit
@@ -1042,6 +1056,10 @@ def category_facets(cat_id) -> Dict:
             # parent-waarde gekozen is — zonder dat erbij leest "aan" te ruim.
             "parent_facet_id": (dep or {}).get("parentFacetId"),
             "parent_value_count": len((dep or {}).get("parentFacetValueIds") or []),
+            # Pad-fragment voor de link, bv. "kleur~430783", of None als het niet
+            # eenduidig is; `parent_matches` zegt hoeveel kandidaten er waren.
+            "parent_link": parent_link,
+            "parent_matches": len(matched_parents),
         })
 
     # Tweede pas voor de facetten die in de UI vooraan staan: van een dependent
