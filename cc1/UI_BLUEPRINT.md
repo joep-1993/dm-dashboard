@@ -1216,6 +1216,20 @@ is de voorkeur voor een *nieuwe* labelkolom, niet iets om er halverwege een rij 
 pas vanaf ongeveer `#CC5500` (4,32:1) en dan nog krap. Reken het na voor je een nieuwe
 `badge-*`-tint invoert.
 
+**Aan/uit in een tabelkolom: groen en rood, en `null` is géén van de twee** (SEO Priority, Category
+facets, 2026-09-04). `ON` staat outlined groen (`#198754`), een expliciete `OFF` outlined rood
+(`#a4271b`), en een lege/geërfde waarde is een muted streepje. Dat derde geval is geen detail: in de
+taxonomie komt `seoPriority = false` vrijwel niet voor (0 van 967 gemeten combo's), dus wat je in de
+praktijk ziet is `true` of `null` — een `null` als "OFF" kleuren zou een keuze suggereren die niemand
+gemaakt heeft.
+
+**Twee chips in twee naast elkaar staande kolommen vechten om dezelfde aandacht.** Dezelfde kaart had
+naast seoPriority een kolom voor `isSeoFacet` uit de zoekindex, óók als gekleurd label, en dan leest
+de rij als twee statussen van gelijk gewicht. De tweede is **tekstueel** geworden (`linked` /
+`not linked` / `—` / `?`) met de uitleg in de `title`, en het geval dat écht fout is — aan in de
+taxonomie, niet gelinkt door de index — is een amber vlag in de Flags-kolom, waar de andere
+waarschuwingen al staan. Vuistregel: één chip per rij per soort probleem; context eromheen is tekst.
+
 **Outlined labels: de randkleur is niet de tekstkleur** (Facet Watch, 2026-09-03). Staat een label
 in ELKE rij van een lange tabel, dan nemen gevulde vlakken het beeld over en wil je de outlined
 variant. Maar dezelfde hex die als rand prima leest, faalt als tekst op wit: `#ffc107` haalt 1,7:1
@@ -1677,6 +1691,22 @@ Wat vastligt:
   zichtbaar verschil en een themawijziging neemt hem mee. Alleen `text-align: left` moet er los
   op: een `<button>` centreert zijn tekst, een `<select>` niet. Die maat past ook naast een
   `.date-box` (font 0,85rem) — de niet-`-sm` variant is een kop groter dan de datumbox ernaast.
+- **Naast een `.date-box` moet die box mee.** Gemeten (SEO Priority, 2026-09-04): `.date-box` is
+  **32,38px** (invoerveld 23,58 + 2×0,2rem padding + rand) en een `form-select-sm` **31,00px**. In
+  een rij met `align-items-end` delen ze de onderrand, dus die 1,38px staat er als een lip
+  bovenuit. Trek de BOX gelijk en niet de dropdown — die is met opzet een echte `form-select-sm` —
+  met Bootstraps eigen formule zodat het meebeweegt, en zet zijn verticale padding op 0 (anders is
+  de inhoud hoger dan de contentbox en loopt hij er een halve pixel uit; centreren doet `.date-box`
+  zelf met `align-items: center`):
+
+  ```css
+  .date-box { height: calc(1.5 * 0.875rem + 0.5rem + 2px); padding-top: 0; padding-bottom: 0; }
+  ```
+
+  Pagina-lokaal gehouden: `.date-box` staat op ~15 pagina's en die maak je niet ongevraagd 1,4px
+  smaller. **En in zo'n rij dragen ALLE labels `mb-1`**, ook die van de datumbox: met
+  `align-items-end` lijnen de velden onderaan uit terwijl een label blijft staan waar zijn eigen
+  marge het zet, en dan staat één label 4px boven de andere.
 - **Toetsenbord**: typen filtert, ↑/↓ verplaatst de cursor, Enter kiest (zonder ↑/↓ de bovenste
   treffer), Esc sluit. Hover en de toetsenbordcursor krijgen DEZELFDE tint
   (`--flat-accent-soft`): het is één "hier sta je nu"-staat.

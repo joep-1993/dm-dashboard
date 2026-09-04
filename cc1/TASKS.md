@@ -3,6 +3,37 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-04 (2) — SEO Priority: de dependent-facetlinks waren ongeldig, plus vijf UI-wensen
+
+Commit `00089ee`, vervolg op (1). Lessen in LEARNINGS (2) en UI_BLUEPRINT (2).
+
+- [x] **Facetwaarde-links van een dependent facet dragen nu hun parent-waarde**:
+      `/c/kleur~430783~~kleurtint_goud~23793994` in plaats van `/c/kleurtint_goud~23793994`. De kale
+      variant is niet suboptimaal maar ongeldig — de zoek-API geeft HTTP 400 "The given facet is not
+      valid.". De parent komt uit `dependentMetadata.parentFacetValueIds` ∩ de waarden die in deze
+      categorie voorkomen, dus per categorie de juiste id; die intersectie deed
+      `_dependent_presence()` al voor de relevantietoets, dus er komt geen call bij.
+- [x] **ON groen, OFF rood** in de seoPriority-kolom; `null` blijft een streepje.
+- [x] **Kolom "In index" tekstueel** (`linked` / `not linked` / `—` / `?`); de amber "not linked" is
+      naar de Flags-kolom verhuisd, waar de andere waarschuwingen staan.
+- [x] **`.date-box` lijnt uit met de dropdowns** — 32,38 tegen 31,00px, opgelost op de box met
+      Bootstraps sm-formule; en alle labels in die rij dragen `mb-1` (het label "Date range" stond
+      4px hoger).
+- [x] **Category facets staat nu boven Run History.** Bij het knippen schoof één `</div>` niet mee en
+      belandde Run History IN de facetkaart. Een telling `<div>` vs `</div>` gaf 82/82 en zag dat
+      niet; een diepte-controle wel, en die zit nu in de lintstap van deze pagina.
+
+Open, klein (naast de drie punten uit (1)):
+
+- [ ] **Geen link bij een dependent facet met meerdere parent-waarden** (`Kinderafdeling` 2, `Type`
+      50 van 254). Welke parent bij een SPECIFIEKE kindwaarde hoort staat nergens in de API —
+      `/api/Facets/{id}/value-dependencies` is facet-niveau (Collectie → 197 rijen, geen
+      `childFacetValueId`). Exact maken kost één zoekcall per parent-waarde; nu een span met de reden
+      in de tooltip.
+- [ ] **`.date-box` naast een `form-select-sm` staat dashboardbreed 1,4px te hoog.** De fix zit
+      pagina-lokaal in `seo-prio.html`; naar `style.css` verhuizen raakt ~15 pagina's, dus dat is
+      een aparte keuze.
+
 ### 2026-09-04 (1) — SEO Priority: kiezer als Healthscore, facet-inspector, Run History; plus de NL/BE-vraag
 
 Commits `ad4971e` (rename) en `d3ba3de` (de pagina). Lessen in LEARNINGS (3) en UI_BLUEPRINT (2).

@@ -1,6 +1,62 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een /c/-URL van een dependent facet ZONDER zijn parent is ongeldig, niet suboptimaal (2026-09-04)
+
+De facetwaarde-links in de nieuwe inspector stonden op `/c/kleurtint_goud~23793994`. Joep zei dat het
+`/c/kleur~430783~~kleurtint_goud~23793994` moest zijn, en dat bleek geen stijlvoorkeur:
+
+```
+filters[kleurtint_goud][0]=23793994                       → HTTP 400
+   {"errors":[{"value":"kleurtint_goud","errorInfo":"The given facet is not valid.","errorCode":200}]}
+filters[kleur][0]=430783 + filters[kleurtint_goud][0]=…   → HTTP 200, total 2
+```
+
+Een dependent facet **bestaat** pas als een waarde van zijn parent gekozen is, dus zonder die parent
+is het voor de API een onbekend facet. De parent hoort vooraan in het pad, gescheiden door `~~`. De
+live pagina geeft op de kale variant nog wel 200 (626 kB) — dus ook hier bewijst een statuscheck
+niets, alleen de API-kant laat het verschil zien.
+
+**Welke parent-waarde? Die staat niet per kindwaarde in de API.** Dat kostte de meeste tijd:
+
+* `dependentMetadata.parentFacetValueIds` (uit `GET /api/Categories/{id}`) geeft de parent-waarden die
+  het facet **als geheel** aanzetten. Snijden met de waarden die in deze categorie voorkomen geeft
+  precies één treffer voor alle tien `Kleurtint *`-facetten — daar is de URL dus exact te bouwen, en
+  per categorie met de juiste kleur-id.
+* `GET /api/Facets/{id}/value-dependencies` klinkt alsof het de koppeling per waarde geeft, maar is
+  óók facet-niveau: Kleurtint goud → 1 rij (`parentFacetValueId` 430783), Collectie → **197 rijen**,
+  allemaal merken. Er zit geen `childFacetValueId` in.
+* Dus voor een facet met meerdere parents (`Kinderafdeling` 2, `Type` 50 van 254) is er geen goedkope
+  manier om te weten welke merk-/kleurwaarde bij "Bleu de Chanel" hoort. Dat achterhalen kost één
+  zoekcall per parent-waarde (de gefilterde call geeft het kindfacet mét precies díe waarden).
+
+Conclusie die we hebben genomen: linken bij één kandidaat, geen link bij meerdere, met de reden in de
+tooltip. Een link naar een pagina waar de waarde niet bestaat is erger dan geen link. Zie ook
+[[SEO_FACETLINKS_DEPENDENT_FACETS.md]].
+
+## Een telling van `<div>` tegen `</div>` ziet mis-nesting niet (2026-09-04)
+
+Twee kaarten omdraaien in `seo-prio.html` ging mis: bij het knippen schoof één `</div>` niet mee,
+waardoor Run History *binnen* de Category-facets-kaart terechtkwam. De controle die ik erop zette —
+82 keer `<div` tegen 82 keer `</div>` — kwam netjes uit, want de ontbrekende sluiting werd aan het
+eind van de container gecompenseerd. Wat het wél zag was het beeld: de twee kaarten plakten aan
+elkaar zonder de `mb-4`-tussenruimte.
+
+Wat je in plaats daarvan moet doen is de **diepte** lopen:
+
+```python
+depth = 0; cards = []
+for m in re.finditer(r'<div\b[^>]*>|</div>', body):
+    if m.group(0).startswith('</'): depth -= 1
+    else:
+        if 'card mb-4' in (re.search(r'class="([^"]*)"', m.group(0)) or ...): cards.append(depth)
+        depth += 1
+# einddiepte moet 0 zijn EN alle kaarten moeten op dezelfde diepte openen
+```
+
+Zes kaarten op diepte 3 en einddiepte 0 = zusjes. Die check staat nu in de lintstap van deze pagina;
+hij kost niks en vangt precies de fout die een telling doorlaat.
+
 ## "Welke facetten zijn hier relevant?" vraag je aan de zoekindex, niet aan de taxonomie (2026-09-04, SEO Priority → Category facets)
 
 De nieuwe facet-inspector liet eerst zien wat `GET /api/Categories/{id}` teruggeeft, en dat is te
