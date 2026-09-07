@@ -879,6 +879,13 @@ def _index_search_facets(data: Dict) -> Dict[str, Dict]:
     return idx
 
 
+# Plafond op de derde pas (zie `category_facets`): één zoekcall per dependent facet dat
+# AAN staat. Sneakers heeft er acht, en dat is het soort aantal waarvoor dit bedoeld is;
+# het plafond is er voor een categorie waar iemand honderd kindfacetten aanzet, zodat het
+# paneel niet stil in tientallen seconden verandert.
+_MAX_OWN_SEED_POOLS = 25
+
+
 def _search_pool(cat_slug: str, url_name: str, seed) -> Dict[str, Dict]:
     """Facetten van deze categorie MET één waarde van `url_name` geselecteerd.
 
@@ -1059,6 +1066,9 @@ def category_facets(cat_id) -> Dict:
             # Pad-fragment voor de link, bv. "kleur~430783", of None als het niet
             # eenduidig is; `parent_matches` zegt hoeveel kandidaten er waren.
             "parent_link": parent_link,
+            # Los van `parent_link` omdat de tweede pas hieronder hem als SEED nodig
+            # heeft; uit de linkstring terugparsen zou dezelfde waarde twee vormen geven.
+            "parent_value_id": matched_parents[0] if len(matched_parents) == 1 else None,
             "parent_matches": len(matched_parents),
         })
 
@@ -1078,6 +1088,46 @@ def category_facets(cat_id) -> Dict:
             hit2 = pools[key].get(str(f["facet_id"]))
             if hit2:
                 f["is_seo_facet"] = hit2["is_seo_facet"]
+
+    # Derde pas. De pas hierboven seedt met de EERSTE waarde van het parent-facet, en
+    # een dependent facet komt alleen terug als juist ZIJN parent-waarde gekozen is:
+    # `Kleurtint blauw` hangt aan kleur=blauw, dus een pool op kleur=zwart laat hem
+    # buiten beeld. Gemeten op Sneakers (9000608): 95 van de 98 dependent facetten
+    # bleven daardoor `?`, waaronder de acht `Kleurtint *` die AAN staan en precies
+    # één parent-waarde hebben. Voor die rijen is het exact te maken door op de eigen
+    # waarde te seeden — één call per facet, wat het TASKS-punt ook al vaststelde.
+    #
+    # Alleen voor AAN-staande rijen met een eenduidige parent: bij meerdere kandidaten
+    # (Collectie hangt aan 197 merken) weten we niet welke bij dit kind hoort, en bij
+    # UIT is de vraag "linkt de site zijn waarden" niet interessant genoeg voor een call.
+    if search["ok"]:
+        todo = {}
+        for f in facets:
+            if not (f["on"] and f["is_seo_facet"] is None
+                    and f["parent_facet_id"] is not None and f["parent_value_id"]):
+                continue
+            p = search["facets"].get(str(f["parent_facet_id"]))
+            if not p:
+                continue
+            key = (p["url_name"], str(f["parent_value_id"]))
+            todo.setdefault(key, []).append(f)
+            if len(todo) >= _MAX_OWN_SEED_POOLS:
+                break
+        if todo:
+            # PARALLEL, want serieel is dit de duurste stap van het paneel: gemeten op
+            # Sneakers 0,6-0,8 s zonder deze pas en 1,9-4,9 s met acht seriële calls.
+            # De calls zijn onafhankelijke GET's en `_search_pool` neemt zelf een token
+            # uit `productsearch_bucket`, dus de rate limit blijft gerespecteerd — de
+            # threads wachten daar netjes op elkaar in plaats van bij de socket.
+            keys = list(todo)
+            with ThreadPoolExecutor(max_workers=min(6, len(keys))) as ex:
+                pools3 = dict(zip(keys, ex.map(
+                    lambda k: _search_pool(cat["slug"], k[0], k[1]), keys)))
+            for key, rows in todo.items():
+                for f in rows:
+                    hit3 = (pools3.get(key) or {}).get(str(f["facet_id"]))
+                    if hit3:
+                        f["is_seo_facet"] = hit3["is_seo_facet"]
 
     # Relevant-en-aan eerst, dan de rest van de relevante, dan wat de index niet
     # kent — precies de volgorde waarin de UI ze standaard wel/niet laat zien.
