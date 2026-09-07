@@ -577,91 +577,12 @@ def _dkey(d: date) -> int:
 
 
 def _refresh_cat_month(as_of: date, months: int = 24) -> int:
-    """Aggregate ALL-CHANNEL visits per (deepest_subcat_id, yyyymm) over the
-    trailing `months` and (re)write pa.hs2_cat_month. Feeds the seasonal
-    climatology. All-channel (not SEO-only) so the demand-timing signal that
-    sizes caps reflects true seasonal demand, not just realised SEO traffic."""
-    from datetime import timedelta
-    lo, hi = _dkey(as_of - timedelta(days=int(months * 30.5))), _dkey(as_of)
-    sql = f"""
-        SELECT dv.deepest_subcat_id AS cat, fv.dim_date_key / 100 AS yyyymm,
-               COUNT(*) AS visits, SUM({_REV}) AS revenue
-        FROM datamart.fct_visits fv {_ALL_JOIN}
-        WHERE fv.dim_date_key BETWEEN %(lo)s AND %(hi)s AND {_ALL_WHERE}
-          AND dv.deepest_subcat_id IS NOT NULL
-        GROUP BY 1, 2
-    """
-    with _redshift() as rs, rs.cursor() as c:
-        c.execute(sql, {"lo": lo, "hi": hi})
-        data = c.fetchall()
-    pg = _postgres()
-    try:
-        with pg.cursor() as c:
-            c.execute(f"""CREATE TABLE IF NOT EXISTS {CAT_MONTH_TABLE} (
-                cat BIGINT, yyyymm INT, visits BIGINT, revenue DOUBLE PRECISION,
-                PRIMARY KEY (cat, yyyymm))""")
-            _refuse_empty(CAT_MONTH_TABLE, data)
-            c.execute(f"TRUNCATE {CAT_MONTH_TABLE}")
-            execute_values(c, f"INSERT INTO {CAT_MONTH_TABLE} (cat,yyyymm,visits,revenue) VALUES %s",
-                           [(r[0], r[1], int(r[2] or 0), float(r[3] or 0)) for r in data],
-                           page_size=10000)
-        pg.commit()
-    finally:
-        pg.close()
-    return len(data)
-
+    """Zie `_refresh_month`: dezelfde mechaniek, scope `cat` (deepest_subcat_id)."""
+    return _refresh_month("cat", as_of, months)
 
 def _refresh_cat_knee(as_of: date, months: int = 12) -> int:
-    """Coverage-knee per category (URLs to reach 80/90/95% of the category's own
-    ALL-CHANNEL visits) over the trailing `months`; (re)write pa.hs2_cat_knee.
-    All-channel (not SEO-only) so the bucket size reflects the full demand
-    distribution; the URL score that fills the bucket stays SEO-only. All the
-    cumulative-share work is done server-side on Redshift."""
-    from datetime import timedelta
-    lo, hi = _dkey(as_of - timedelta(days=int(months * 30.5))), _dkey(as_of)
-    nv = _norm("dv.url")
-    sql = f"""
-        WITH u AS (
-            SELECT dv.deepest_subcat_id AS cat, {nv} AS npath, COUNT(*) AS v
-            FROM datamart.fct_visits fv {_ALL_JOIN}
-            WHERE fv.dim_date_key BETWEEN %(lo)s AND %(hi)s AND {_ALL_WHERE}
-              AND dv.deepest_subcat_id IS NOT NULL
-            GROUP BY 1, 2
-        ),
-        r AS (
-            SELECT cat,
-                   SUM(v) OVER (PARTITION BY cat ORDER BY v DESC ROWS UNBOUNDED PRECEDING) AS cum,
-                   SUM(v) OVER (PARTITION BY cat) AS tot,
-                   ROW_NUMBER() OVER (PARTITION BY cat ORDER BY v DESC) AS rn
-            FROM u
-        )
-        SELECT cat, MAX(tot) AS yearly,
-               MIN(CASE WHEN cum >= 0.80*tot THEN rn END) AS knee80,
-               MIN(CASE WHEN cum >= 0.90*tot THEN rn END) AS knee90,
-               MIN(CASE WHEN cum >= 0.95*tot THEN rn END) AS knee95,
-               COUNT(*) AS n_urls
-        FROM r GROUP BY cat
-    """
-    with _redshift() as rs, rs.cursor() as c:
-        c.execute(sql, {"lo": lo, "hi": hi})
-        data = c.fetchall()
-    pg = _postgres()
-    try:
-        with pg.cursor() as c:
-            c.execute(f"""CREATE TABLE IF NOT EXISTS {KNEE_TABLE} (
-                cat BIGINT PRIMARY KEY, yearly BIGINT, knee80 INT, knee90 INT,
-                knee95 INT, n_urls INT)""")
-            _refuse_empty(KNEE_TABLE, data)
-            _guard_knee_shrink(c, KNEE_TABLE, [r[3] for r in data])
-            c.execute(f"TRUNCATE {KNEE_TABLE}")
-            execute_values(c, f"INSERT INTO {KNEE_TABLE} (cat,yearly,knee80,knee90,knee95,n_urls) VALUES %s",
-                           [(r[0], int(r[1] or 0), r[2], r[3], r[4], r[5]) for r in data],
-                           page_size=10000)
-        pg.commit()
-    finally:
-        pg.close()
-    return len(data)
-
+    """Zie `_refresh_knee`: dezelfde mechaniek, scope `cat` (deepest_subcat_id)."""
+    return _refresh_knee("cat", as_of, months)
 
 def _combine_caps(knee: dict, cm: dict, knee_p: int, cap_min: int, cap_max: int,
                   alpha: float, mult_min: float, mult_max: float) -> list:
@@ -933,6 +854,152 @@ MAINCAT_CAP_MAX_DEFAULT = 120000
 # dim_category, not categories. They must never become a push target.
 MAINCAT_SENTINELS = (-1, 0)
 
+# --- De categorie- en maincat-builders zijn één mechaniek ------------------
+#
+# `_refresh_cat_month`/`_refresh_maincat_month` en `_refresh_cat_knee`/
+# `_refresh_maincat_knee` stonden als vier losse functies ~400 regels uit elkaar, en dat
+# was de aanleiding voor het TASKS-punt: bijna-identieke SQL die je twee keer moet
+# aanpassen en waarvan je bij een verschil niet weet of het bedoeld is. Opgemeten met een
+# harness die de SQL opvangt (`test_healthscore_twins.py`) verschillen ze in precies DRIE
+# dingen plus de doeltabel:
+#
+#   1. de dimensiekolom       dv.deepest_subcat_id   vs  dc.main_category_id
+#   2. een extra join         (geen)                 vs  datamart.dim_category
+#   3. een sentinel-filter    (geen)                 vs  main_category_id NOT IN (-1, 0)
+#
+# De hele Postgres-helft — create, refuse-empty, truncate, insert, commit — was op de
+# tabelnaam na letterlijk gelijk. Vandaar één implementatie met een scope-tabel; de vier
+# oude namen blijven bestaan als dunne wrappers, want de aanroepers en de logregels
+# gebruiken ze.
+#
+# De maincat-join kan de visit-telling niet vermenigvuldigen: dim_category is 1:1 op
+# deepest_category_id.
+_SCOPE_MAINCAT_JOIN = """
+        JOIN datamart.dim_category dc
+          ON dc.deepest_category_id = dv.deepest_subcat_id AND dc.deleted_ind = 0"""
+_SCOPE_MAINCAT_WHERE = """
+          AND dc.main_category_id NOT IN %(sentinels)s"""
+
+_SCOPES = {
+    "cat": {
+        "dim": "dv.deepest_subcat_id",
+        "join": "",
+        "where": "",
+        "params": {},
+        "month_table": CAT_MONTH_TABLE,
+        "knee_table": KNEE_TABLE,
+    },
+    "maincat": {
+        "dim": "dc.main_category_id",
+        "join": _SCOPE_MAINCAT_JOIN,
+        "where": _SCOPE_MAINCAT_WHERE,
+        "params": {"sentinels": MAINCAT_SENTINELS},
+        "month_table": MAINCAT_MONTH_TABLE,
+        "knee_table": MAINCAT_KNEE_TABLE,
+    },
+}
+
+
+def _window(as_of: date, months: int):
+    """Het venster dat beide builders gebruiken: `months` maanden van 30,5 dagen terug.
+
+    Die 30,5 staat hier met opzet en niet als hele maanden: `scripts/analysis/
+    healthscore_caps.py` pint complete maanden en dat is precies een van de redenen dat
+    de twee paden verschillende caps schreven (zie de ENGINE-noot).
+    """
+    from datetime import timedelta
+    return _dkey(as_of - timedelta(days=int(months * 30.5))), _dkey(as_of)
+
+
+def _refresh_month(scope: str, as_of: date, months: int = 24) -> int:
+    """ALL-channel visits per (dimensie, yyyymm) over het venster; (her)schrijft de
+    month-tabel van deze scope. All-channel en niet SEO-only, zodat het vraagsignaal dat
+    de caps dimensioneert de echte seizoensvraag is en niet alleen gerealiseerd
+    SEO-verkeer."""
+    sc = _SCOPES[scope]
+    table = sc["month_table"]
+    lo, hi = _window(as_of, months)
+    sql = f"""
+        SELECT {sc['dim']} AS cat, fv.dim_date_key / 100 AS yyyymm,
+               COUNT(*) AS visits, SUM({_REV}) AS revenue
+        FROM datamart.fct_visits fv {_ALL_JOIN}{sc['join']}
+        WHERE fv.dim_date_key BETWEEN %(lo)s AND %(hi)s AND {_ALL_WHERE}
+          AND dv.deepest_subcat_id IS NOT NULL{sc['where']}
+        GROUP BY 1, 2
+    """
+    with _redshift() as rs, rs.cursor() as c:
+        c.execute(sql, {"lo": lo, "hi": hi, **sc["params"]})
+        data = c.fetchall()
+    pg = _postgres()
+    try:
+        with pg.cursor() as c:
+            c.execute(f"""CREATE TABLE IF NOT EXISTS {table} (
+                cat BIGINT, yyyymm INT, visits BIGINT, revenue DOUBLE PRECISION,
+                PRIMARY KEY (cat, yyyymm))""")
+            _refuse_empty(table, data)
+            c.execute(f"TRUNCATE {table}")
+            execute_values(c, f"INSERT INTO {table} (cat,yyyymm,visits,revenue) VALUES %s",
+                           [(r[0], r[1], int(r[2] or 0), float(r[3] or 0)) for r in data],
+                           page_size=10000)
+        pg.commit()
+    finally:
+        pg.close()
+    return len(data)
+
+
+def _refresh_knee(scope: str, as_of: date, months: int = 12) -> int:
+    """Coverage-knee per dimensie (URL's om 80/90/95% van de eigen ALL-CHANNEL visits te
+    halen) over het venster; (her)schrijft de knee-tabel van deze scope. Het cumulatieve
+    werk gebeurt server-side op Redshift. All-channel voor de bucketgrootte; de URL-score
+    die de bucket vult blijft SEO-only."""
+    sc = _SCOPES[scope]
+    table = sc["knee_table"]
+    lo, hi = _window(as_of, months)
+    nv = _norm("dv.url")
+    sql = f"""
+        WITH u AS (
+            SELECT {sc['dim']} AS cat, {nv} AS npath, COUNT(*) AS v
+            FROM datamart.fct_visits fv {_ALL_JOIN}{sc['join']}
+            WHERE fv.dim_date_key BETWEEN %(lo)s AND %(hi)s AND {_ALL_WHERE}
+              AND dv.deepest_subcat_id IS NOT NULL{sc['where']}
+            GROUP BY 1, 2
+        ),
+        r AS (
+            SELECT cat,
+                   SUM(v) OVER (PARTITION BY cat ORDER BY v DESC ROWS UNBOUNDED PRECEDING) AS cum,
+                   SUM(v) OVER (PARTITION BY cat) AS tot,
+                   ROW_NUMBER() OVER (PARTITION BY cat ORDER BY v DESC) AS rn
+            FROM u
+        )
+        SELECT cat, MAX(tot) AS yearly,
+               MIN(CASE WHEN cum >= 0.80*tot THEN rn END) AS knee80,
+               MIN(CASE WHEN cum >= 0.90*tot THEN rn END) AS knee90,
+               MIN(CASE WHEN cum >= 0.95*tot THEN rn END) AS knee95,
+               COUNT(*) AS n_urls
+        FROM r GROUP BY cat
+    """
+    with _redshift() as rs, rs.cursor() as c:
+        c.execute(sql, {"lo": lo, "hi": hi, **sc["params"]})
+        data = c.fetchall()
+    pg = _postgres()
+    try:
+        with pg.cursor() as c:
+            c.execute(f"""CREATE TABLE IF NOT EXISTS {table} (
+                cat BIGINT PRIMARY KEY, yearly BIGINT, knee80 INT, knee90 INT,
+                knee95 INT, n_urls INT)""")
+            _refuse_empty(table, data)
+            _guard_knee_shrink(c, table, [r[3] for r in data])
+            c.execute(f"TRUNCATE {table}")
+            execute_values(c, f"INSERT INTO {table} (cat,yearly,knee80,knee90,knee95,n_urls) VALUES %s",
+                           [(r[0], int(r[1] or 0), r[2], r[3], r[4], r[5]) for r in data],
+                           page_size=10000)
+        pg.commit()
+    finally:
+        pg.close()
+    return len(data)
+
+
+
 
 def refresh_maincat_map() -> dict:
     """Sync deepest-category -> maincat from datamart.dim_category into Postgres.
@@ -997,99 +1064,14 @@ def get_maincats() -> dict:
 
 
 def _refresh_maincat_month(as_of: date, months: int = 24) -> int:
-    """ALL-channel visits per (maincat, yyyymm) — the maincat climatology.
-
-    dim_category is 1:1 on deepest_category_id, so this join cannot fan out the
-    visit counts.
-    """
-    from datetime import timedelta
-    lo, hi = _dkey(as_of - timedelta(days=int(months * 30.5))), _dkey(as_of)
-    sql = f"""
-        SELECT dc.main_category_id AS cat, fv.dim_date_key / 100 AS yyyymm,
-               COUNT(*) AS visits, SUM({_REV}) AS revenue
-        FROM datamart.fct_visits fv {_ALL_JOIN}
-        JOIN datamart.dim_category dc
-          ON dc.deepest_category_id = dv.deepest_subcat_id AND dc.deleted_ind = 0
-        WHERE fv.dim_date_key BETWEEN %(lo)s AND %(hi)s AND {_ALL_WHERE}
-          AND dv.deepest_subcat_id IS NOT NULL
-          AND dc.main_category_id NOT IN %(sentinels)s
-        GROUP BY 1, 2
-    """
-    with _redshift() as rs, rs.cursor() as c:
-        c.execute(sql, {"lo": lo, "hi": hi, "sentinels": MAINCAT_SENTINELS})
-        data = c.fetchall()
-    pg = _postgres()
-    try:
-        with pg.cursor() as c:
-            c.execute(f"""CREATE TABLE IF NOT EXISTS {MAINCAT_MONTH_TABLE} (
-                cat BIGINT, yyyymm INT, visits BIGINT, revenue DOUBLE PRECISION,
-                PRIMARY KEY (cat, yyyymm))""")
-            _refuse_empty(MAINCAT_MONTH_TABLE, data)
-            c.execute(f"TRUNCATE {MAINCAT_MONTH_TABLE}")
-            execute_values(c, f"INSERT INTO {MAINCAT_MONTH_TABLE} (cat,yyyymm,visits,revenue) VALUES %s",
-                           [(r[0], r[1], int(r[2] or 0), float(r[3] or 0))
-                            for r in data], page_size=10000)
-        pg.commit()
-    finally:
-        pg.close()
-    return len(data)
-
+    """Zie `_refresh_month`: dezelfde mechaniek, scope `maincat` (main_category_id,
+    met de dim_category-join en de sentinel-uitsluiting)."""
+    return _refresh_month("maincat", as_of, months)
 
 def _refresh_maincat_knee(as_of: date, months: int = 12) -> int:
-    """Coverage-knee per MAINCAT: URLs needed to reach 80/90/95% of the whole
-    subtree's all-channel visits. Same shape as _refresh_cat_knee, but the
-    cumulative share is taken over the pooled subtree — which is the point: a
-    parent's own knee would be sized for its own facet URLs only.
-    """
-    from datetime import timedelta
-    lo, hi = _dkey(as_of - timedelta(days=int(months * 30.5))), _dkey(as_of)
-    nv = _norm("dv.url")
-    sql = f"""
-        WITH u AS (
-            SELECT dc.main_category_id AS cat, {nv} AS npath, COUNT(*) AS v
-            FROM datamart.fct_visits fv {_ALL_JOIN}
-            JOIN datamart.dim_category dc
-              ON dc.deepest_category_id = dv.deepest_subcat_id AND dc.deleted_ind = 0
-            WHERE fv.dim_date_key BETWEEN %(lo)s AND %(hi)s AND {_ALL_WHERE}
-              AND dv.deepest_subcat_id IS NOT NULL
-              AND dc.main_category_id NOT IN %(sentinels)s
-            GROUP BY 1, 2
-        ),
-        r AS (
-            SELECT cat,
-                   SUM(v) OVER (PARTITION BY cat ORDER BY v DESC ROWS UNBOUNDED PRECEDING) AS cum,
-                   SUM(v) OVER (PARTITION BY cat) AS tot,
-                   ROW_NUMBER() OVER (PARTITION BY cat ORDER BY v DESC) AS rn
-            FROM u
-        )
-        SELECT cat, MAX(tot) AS yearly,
-               MIN(CASE WHEN cum >= 0.80*tot THEN rn END) AS knee80,
-               MIN(CASE WHEN cum >= 0.90*tot THEN rn END) AS knee90,
-               MIN(CASE WHEN cum >= 0.95*tot THEN rn END) AS knee95,
-               COUNT(*) AS n_urls
-        FROM r GROUP BY cat
-    """
-    with _redshift() as rs, rs.cursor() as c:
-        c.execute(sql, {"lo": lo, "hi": hi, "sentinels": MAINCAT_SENTINELS})
-        data = c.fetchall()
-    pg = _postgres()
-    try:
-        with pg.cursor() as c:
-            c.execute(f"""CREATE TABLE IF NOT EXISTS {MAINCAT_KNEE_TABLE} (
-                cat BIGINT PRIMARY KEY, yearly BIGINT, knee80 INT, knee90 INT,
-                knee95 INT, n_urls INT)""")
-            _refuse_empty(MAINCAT_KNEE_TABLE, data)
-            _guard_knee_shrink(c, MAINCAT_KNEE_TABLE, [r[3] for r in data])
-            c.execute(f"TRUNCATE {MAINCAT_KNEE_TABLE}")
-            execute_values(c, f"INSERT INTO {MAINCAT_KNEE_TABLE} "
-                              f"(cat,yearly,knee80,knee90,knee95,n_urls) VALUES %s",
-                           [(r[0], int(r[1] or 0), r[2], r[3], r[4], r[5])
-                            for r in data], page_size=10000)
-        pg.commit()
-    finally:
-        pg.close()
-    return len(data)
-
+    """Zie `_refresh_knee`: dezelfde mechaniek, scope `maincat` (main_category_id,
+    met de dim_category-join en de sentinel-uitsluiting)."""
+    return _refresh_knee("maincat", as_of, months)
 
 def build_maincat_caps(as_of: date, knee_p: int = KNEE_P_DEFAULT,
                        cap_min: int = MAINCAT_CAP_MIN_DEFAULT,
