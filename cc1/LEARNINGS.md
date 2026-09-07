@@ -1,6 +1,66 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een vormregel op `.form-check-input` raakt ook elke switch (2026-09-07)
+
+Joep: "je hebt ook de selectievakjes in SEO Stats aangepast, de vakjes met 'Show DMA & GSAAS Revenue'
+en 'Show deltas'". Eerste reflex is die twee opzoeken en terugdraaien. Maar `git log -- frontend/seo-stats.html`
+laat zien dat er donderdag alleen sparkline-`fill` en vrijdag alleen "SEO stats" → "SEO Stats" in dat
+bestand is gewijzigd: **die twee controls zijn nooit aangeraakt.** Wat ze veranderde was de ronde-
+vakjesregel uit `f29142f`, vier dagen eerder — en het zijn geen checkboxes maar `.form-switch`-toggles.
+
+```
+.form-check-input[type="checkbox"]      (0,2,0)   ← onze regel, in style.css (ná Bootstrap)
+.form-switch .form-check-input          (0,2,0)   ← Bootstraps eigen regel, border-radius: 2em
+```
+
+**Een attribuutselector weegt net zo zwaar als een klasse.** Klasse + attribuut is dus even specifiek
+als twee klassen, en bij gelijkspel wint wie later in de cascade staat: onze regel. De 2em×1em baan
+van de switch kreeg `border-radius: 50%` en werd een **ellips** in plaats van een pil. Op ware grootte
+(1em hoog) valt dat nauwelijks op — daarom stond het er vier dagen — maar uitvergroot is het meteen te
+zien, en dat is precies wat "die vakjes zijn anders" betekende. Gemeten op zoom 5 tegen de CSS die
+:8003 uitlevert, aan én uit; de knop in de baan is een `background-image` en was nooit geraakt.
+
+Twee dingen om over te nemen:
+
+* **Bij "je hebt X aangepast" is de eerste vraag niet wát je aan X moet terugdraaien, maar of je X
+  hebt aangeraakt.** `git log -- <bestand>` en `git show -G'<patroon>'` kosten seconden en wezen hier
+  naar een andere commit, een ander bestand en een ander control-type dan de melding suggereerde.
+  Was ik op de melding afgegaan, dan had ik markup in `seo-stats.html` "hersteld" naar iets wat er
+  nooit anders had gestaan, en de oorzaak in `style.css` laten zitten.
+* **Repareer de regel, niet de gemelde pagina.** De ellips zat op alle vijf de switches van het
+  dashboard (SEO Stats 2, SEO Prio 2, Thema Ads 1). Alleen SEO Stats fixen zet terug wat `f29142f`
+  juist opruimde: een vormregel die per pagina verschilt. De uitzondering staat nu dashboardbreed in
+  `style.css`, mét `[type="checkbox"]` erin (0,3,0) zodat hij op **specificiteit** wint en niet op
+  regelvolgorde — anders breekt het stil als iemand de twee regels herschikt.
+
+Waar de grens ligt, staat in UI_BLUEPRINT: rond zegt "één van een set die je aanvinkt", een pil zegt
+"een stand die meteen effect heeft". Bij checkbox↔radio is bewust gekozen dat vorm niets meer zegt;
+bij een switch draagt de vorm juist de betekenis.
+
+## `git add` op een genegeerd-maar-getrackt pad stageert wél, en geeft toch exit 1 (2026-09-07)
+
+Bekend was al dat `cc1/` in `.gitignore` staat maar getrackt is, en dat de waarschuwing bij `git add`
+ruis is. Wat er niet bij stond en wat hier de commit oversloeg: **de exit code is 1, ook als het
+stagen slaagt.** Dus `git add cc1/X.md frontend/y.css && git commit …` stopt na de add — de bestanden
+staan gestaged, er is niets gecommit, en de melding die je ziet gaat over `.gitignore` en niet over
+je commit.
+
+```
+$ git add frontend/css/style.css cc1/UI_BLUEPRINT.md && git commit -F -
+The following paths are ignored by one of your .gitignore files:
+cc1
+hint: Use -f if you really want to add them.        ← exit 1, commit NIET uitgevoerd
+$ git diff --cached --stat
+ cc1/UI_BLUEPRINT.md    | 13 +++++++++++++                ← toch gestaged
+ frontend/css/style.css | 10 ++++++++++
+```
+
+`git check-ignore -v cc1/UI_BLUEPRINT.md` geeft niets terug: het is de **map** waarover git klaagt,
+niet het bestand. Dus: geen `-f` nodig (dat is voor een NIEUW cc1-bestand), maar hang een `git commit`
+nooit met `&&` achter een `git add` die een cc1-pad bevat — apart aanroepen, of eerst `git diff --cached`
+lezen. Controleer bij een afgebroken keten altijd de index vóór je de add overdoet.
+
 ## Een /c/-URL van een dependent facet ZONDER zijn parent is ongeldig, niet suboptimaal (2026-09-04)
 
 De facetwaarde-links in de nieuwe inspector stonden op `/c/kleurtint_goud~23793994`. Joep zei dat het

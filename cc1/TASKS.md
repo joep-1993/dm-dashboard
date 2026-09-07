@@ -3,6 +3,35 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-07 (1) — De twee SEO Stats-toggles: geen aanpassing teruggedraaid, maar een regel begrensd
+
+Commit `784e41f`. Les in LEARNINGS (2), regel in UI_BLUEPRINT (1).
+
+- [x] **De switches houden hun pil, dashboardbreed.** `.form-check-input[type="checkbox"]
+      { border-radius: 50% }` uit `f29142f` matcht ook `.form-switch .form-check-input`, is even
+      specifiek (0,2,0) en staat later in de cascade — dus won hij, en werd de 2em×1em baan een
+      ellips. Terug op Bootstraps `2em` in `style.css`, met `[type="checkbox"]` erbij zodat de regel
+      op specificiteit wint (0,3,0) en niet op volgorde.
+- [x] **Alle vijf de switches**, niet alleen de twee gemelde: SEO Stats (`showExtraRev`,
+      `showDeltas`), SEO Prio (`showKeep`, `dryRun`), Thema Ads (`autoQueueToggle`). Twee van vijf
+      repareren zet terug wat `f29142f` opruimde. Gewone vakjes en radio's blijven rond — gecontroleerd
+      in dezelfde render.
+- [x] **Nagetrokken dat `seo-stats.html` zelf níet is gewijzigd** donderdag/vrijdag: alleen
+      sparkline-`fill: 'start'` (`826fd4f`) en de labelrename (`ad4971e`). De melding "je hebt die
+      vakjes aangepast" wees naar een bestand dat er niets mee te maken had.
+- [x] Geverifieerd met een render op zoom 5 tegen `http://<wsl-ip>:8003/static/css/style.css` — dus
+      tegen de CSS die de server werkelijk uitlevert, niet tegen losse testregels in een los bestand.
+
+Open, klein:
+
+- [ ] **Er is geen check die een nieuwe globale control-regel tegen de bestaande controls houdt.**
+      Deze ellips stond er vier dagen omdat hij op 1em hoog nauwelijks opvalt. Een render van de
+      vijf control-soorten (checkbox, radio, switch, select, date-box) op zoom bij elke wijziging in
+      `style.css` zou dat vangen; nu is het handwerk.
+- [ ] **`.form-switch` staat op 3 van de 36 pagina's** (5 controls). Bij zo weinig gebruik is de
+      vraag gerechtvaardigd of een switch hier wel een eigen vorm verdient of dat die drie beter
+      gewone vakjes worden — niet nu opgelost, wel een keuze om te maken vóór er een vierde bijkomt.
+
 ### 2026-09-04 (2) — SEO Priority: de dependent-facetlinks waren ongeldig, plus vijf UI-wensen
 
 Commit `00089ee`, vervolg op (1). Lessen in LEARNINGS (2) en UI_BLUEPRINT (2).
