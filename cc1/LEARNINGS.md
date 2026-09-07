@@ -1,6 +1,133 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Reproduceer een klacht op de laag waar de klacht over gaat (2026-09-07, rurl)
+
+TASKS zei: "`grote wasknijpers` krijgt helemaal geen redirect meer (0 D, geen bestemming)".
+`match_subcategory_name('grote wasknijpers', cats)` gaf inderdaad `None` — en `wasknijpers`
+zonder bijvoeglijk naamwoord gaf 100. De oorzaak leek gevonden: `fuzz.ratio` van de VOLLE
+keyword tegen de categorienaam is 78,6 tegen een drempel van 80, dus het bijvoeglijk
+naamwoord verdunt de score en de bestemming valt weg. Ik was toe aan een fix.
+
+**Toen de andere tien voorbeelden erbij: alle elf gaven `None`** — ook de acht waarvan
+TASKS zegt dat ze wél een bestemming hadden. Dat kan dus niet de verklaring zijn. En dat is
+het signaal: als je "oorzaak" ook alle gevallen verklaart die het probleem NIET hebben,
+verklaart hij niets.
+
+Door de echte pijplijn (`process_global_url`, met de worker-data zelf opgebouwd uit de
+caches) blijkt het probleem niet te bestaan:
+
+```
+grote wasknijpers    -> Wasknijpers    tier B  score 80
+witte bloempotten    -> Bloempotten    tier B  score 80
+solar lampionnen     -> Lampionnen     tier B  score 80
+volwassen luiers     -> (geen)         tier D  score  0
+```
+
+De redding is de **V28 per-woord-fallback** (`process_global_rurls.py`, sectie 1): faalt de
+volle keyword, dan probeert de pijplijn de losse woorden, en `wasknijpers` matcht op 100.
+`match_subcategory_name` is één laag daaronder en heeft die fallback niet.
+
+Wat ik hieruit meeneem: **een functie die een fallback HEEFT, test je niet zonder die
+fallback.** Een uur bijna besteed aan een fix voor een drempel die in de praktijk nooit de
+laatste kans is. Voor rurl concreet: wie een reproductie wil, roept
+`process_global_url((url, keyword))` aan met de worker-data uit `preload_data()` — niet de
+matcher los. De caches (`data/cache/*.csv`, `search_derived.sqlite`) staan er, dus dat kost
+één seconde en geen Redshift.
+
+## Afwezig uit de zoekindex betekent NUL producten (2026-09-07, SEO Priority)
+
+De facetwaarden kwamen uit de taxonomie, en die kent de voorraad niet — dus "staat AAN maar
+heeft geen producten" was onzichtbaar. De zoek-API geeft per waarde `count` en `crawlable`,
+dus die erbij halen. Eerste versie telde `count == 0` en vond **nul** gevallen, terwijl er
+op Sneakers/Kleur twee waarden waren die de index helemaal niet teruggaf.
+
+**De API geeft alleen waarden mét producten terug. `count == 0` bestaat niet; afwezig IS
+nul.** Nagemeten met een directe gefilterde call per waarde in plaats van het aan te nemen:
+
+```
+Regenboog     niet in de index  ->  total=0
+Transparant   niet in de index  ->  total=0
+Beige         count 9473        ->  total=9473
+```
+
+Had ik dat niet omgezet, dan viel juist het geval dat de verrijking moet vinden weg als `?`.
+
+**Twee randen die dit anders stil onwaar maken:**
+
+* **Het mag alleen waar de index het facet in DEZE categorie kent.** Een dependent facet
+  verschijnt pas met zijn parent geselecteerd, dus dat staat per definitie niet in het
+  antwoord — daar is "afwezig" geen nul maar onbekend. Vandaar drie toestanden (`ok`,
+  `facet_absent`, `failed`) die de UI niet als hetzelfde toont.
+* **De lijst mag niet afgekapt zijn.** Een ongefilterde call kapt af (merk 100, maat 60,
+  kleur 24), en dan zou de staart onterecht als "nul producten" gelden. Een GEFILTERDE call
+  geeft de volledige lijst; getoetst op `Maat` (153 waarden, 52 als leeg gemeld) door zes
+  van die 52 met een directe call na te meten — alle zes werkelijk 0, en de niet-lege
+  kloppen exact (3=3, 7=7).
+
+Opbrengst op Sneakers: Kleur 2 van 24 aan zonder producten, **Maat 52 van 153** —
+gecombineerde kindermaten als `15/16`, `16/17`.
+
+## Een OLD-vs-NEW-harness hoeft de build niet te draaien (2026-09-07, Healthscore)
+
+De ~400 regels bijna-identieke SQL van de categorie- en maincat-builders stonden open met
+de notitie "vraagt een OLD-vs-NEW-harness met een volledige build tegen Redshift". Dat is
+waarom het punt maanden bleef liggen: zo'n build is duur en truncate `pa.hs2_*`.
+
+Het kan goedkoper. **Als de SQL die beide varianten UITVOEREN identiek is, is het gedrag
+identiek.** Vervang de twee connectie-fabrieken door fakes die elke `execute(sql, params)`
+opschrijven, leg de statements vast vóór de refactor, vang ze opnieuw op erna, en vergelijk
+witruimte-genormaliseerd. Uitkomst: 22 statements van vier functies, params inbegrepen, **0
+verschillen** — in 0,03 s en zonder één verbinding.
+
+Wat de fakes moesten kunnen (anders val je over je eigen harness): rijen met genoeg
+kolommen voor álle lezers (de month-builders lezen `r[0..3]`, de knee-builders `r[0..5]`),
+een `fetchone()` die het `(mediaan, n)`-paar van `_guard_knee_shrink` teruggeeft, en
+niet-lege data want `_refuse_empty` weigert terecht een lege uitkomst.
+
+En de test die eruit volgt bewaakt de eigenschap, niet de exacte string: vervang in de
+maincat-SQL de drie bekende verschillen door de cat-variant en er moet letterlijk de
+cat-SQL overblijven. Getoetst door hem te laten falen — met een extra WHERE-regel in alleen
+de maincat-helft vallen precies de twee equivalentie-tests om. **Dat is de fout die die 400
+regels heeft veroorzaakt** (iemand past één helft aan), dus die moet een test kunnen zien.
+
+## `cur.rowcount` na `execute_values` gaat alleen over de laatste pagina (2026-09-07)
+
+De backfill van `value_name` meldde **"written: 299"** terwijl er 4.099 rijen waren
+weggeschreven. `execute_values` splitst een chunk in pagina's van 100 (`page_size`) en voert
+er dus meerdere statements uit; `cur.rowcount` staat daarna op wat het LAATSTE statement
+raakte. 4.099 in chunks van 2.000 = 100 + 100 + 99 = 299. Precies.
+
+De write was compleet — nagemeten tegen de 4.099 audit_ids uit de pre-state-snapshot, alle
+4.099 gevuld, 0 met JSON-tekst. Maar het getal dat het script rapporteerde was onwaar, en
+bij een backfill is dat getal het enige wat je leest.
+
+Twee dingen: geef `page_size=len(chunk)` mee als je de rowcount wilt vertrouwen, en zet
+achter een backfill een **controlevraag die de aangeraakte rijen zelf telt** in plaats van
+de teller op te tellen.
+
+## Verwijderingen komen niet in bundels, dus indexeer de bak in één keer (2026-09-07)
+
+De naam van een verwijderde facetwaarde staat alleen in `/api/garbage-bin` (de auditlog
+draagt bij een `Facet Value DELETE` alleen `FacetId`, `CreatedAt`, `SeoPriority` — 12.758
+van de 13.113 rijen hebben `value_name IS NULL`). De bak heeft geen filter op `entityId`,
+maar `deletedAtUtc` is IDENTIEK aan de `ts_utc` van ons event (8 van 8, drift 0,0 s —
+dezelfde bron). Dus: bracket per verwijderingsmoment, één kleine call per bulkactie.
+
+**Toen gemeten hoe die momenten liggen, en de aanname klopte niet.** Facet 117 heeft 207
+naamloze deletes over 206 distincte seconden, en over 190 clusters van vijf minuten. Ze
+komen dus één of twee per keer, verspreid over het venster — per moment opvragen zou ~190
+calls per paneel-opening kosten.
+
+De hele bak in één index kost er acht (7.779 items, `Take` max 1.000, 2,15 s koud en ~0,15 s
+per pagina warm), 15 minuten geldig, gedeeld door elk facetpaneel. Gemeten: facet 117 vult
+58 namen in 4,44 s koud, facet 1290 daarna 265 namen in 1,17 s.
+
+Terzijde twee dingen over deze API: **`EntityType` wordt WEL gehonoreerd** (`Facet` geeft 0,
+onzin geeft 0), anders dan `From`/`To` op de audit-logs — het totaal is met en zonder dat
+filter gelijk omdat de bak over 30 dagen alleen facetwaarden bevat. En 63 van de 7.779 items
+hebben zelfs in de bak geen naam, dus een rij kan legitiem naamloos blijven.
+
 ## Een vormregel op `.form-check-input` raakt ook elke switch (2026-09-07)
 
 Joep: "je hebt ook de selectievakjes in SEO Stats aangepast, de vakjes met 'Show DMA & GSAAS Revenue'

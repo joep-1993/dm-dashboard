@@ -3,6 +3,75 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-07 (2) — De acht zelfstandige open punten uit TASKS opgepakt
+
+Commits `78294d2` (ui-check), `77b2926` (prullenbak-namen), `36145f6` (value_name),
+`50773f0` (pa.urls-cache), `3724955` (isSeoFacet), `6e98422` (count/crawlable),
+`520ee1b` (Healthscore-tweelingen). Lessen in LEARNINGS (5), zelfde datum.
+
+Joep vroeg de open punten op te pakken; gekozen scope was alles wat zonder zijn beslissing
+en zonder productiemutatie af kan (30 punten in totaal, waarvan ~11 op hem wachten).
+
+- [x] **Een check die de vorm van de controls MEET.** `scripts/ui_control_render_check.py`:
+      vulgraad = silhouet-oppervlak / omhullende rechthoek, dus cirkel 0,785, pil 0,893,
+      rechthoek 1,000. Bewezen dat hij vangt waarvoor hij is: met de `2em`-regel uit
+      `784e41f` tijdelijk weg meldt hij `switch: fill ratio 0.7957 — expected pill`, exit 1.
+      Twee eigen fouten onderweg rechtgezet: een afgekapte control meet gewoon door met een
+      verkeerde uitkomst (nu een harde guard) en de baseline bewaarde zoom-afhankelijke
+      pixelmaten die geen enkele vergelijking leest. Valideert zichzelf tegen wat er al in
+      UI_BLUEPRINT stond: `form-select-sm` 31,0px (blueprint 31,00) en de `.date-box`-delta
+      +1,40px op zoom 10 (blueprint "1,4px te hoog").
+- [x] **De naam van een verwijderde facetwaarde komt uit de prullenbak.** Eén gecachte index
+      van de hele bak (8 calls, 15 min geldig) in plaats van gericht zoeken — verwijderingen
+      zijn NIET gebundeld: facet 117 heeft 207 naamloze deletes over 190 clusters van vijf
+      minuten. 58 namen op facet 117, 265 op facet 1290, 0 onopgelost. De tooltip zegt dat
+      een naam uit de bak de naam BIJ VERWIJDEREN is.
+- [x] **`value_name` gevuld uit de eventpayload, 4.099 van 4.099 rijen.** De valkuil zat in
+      de vorm: bij een INSERT is `NameInColumn` een string, bij een UPDATE een object
+      (`{"New": ..., "Old": ...}`), en een blote `->>` zet dan JSON-tekst in de kolom. Ingest
+      en backfill delen één functie. Pre-state-snapshot in `logs/`, idempotent.
+- [x] **De pa.urls-scan gecacht per slug** (2,4 s → gratis vanaf de tweede opening; zes
+      facetten heten "Merk" en delen de slug). Sleutel is `(count(*), max(first_seen_at))`
+      van pa.urls (0,10 s) en niet de datum: een dagsleutel bouwt om middernacht nodeloos om
+      en mist een load op dezelfde dag. `DISTINCT ON` i.p.v. `array_agg` (4,95 → 3,92 s),
+      getoetst op 36.162 waarden: 0 afwijkingen.
+- [x] **`isSeoFacet` van een dependent facet is exact te maken** door op de EIGEN
+      parent-waarde te seeden in plaats van op de eerste waarde van het parent-facet. Op
+      Sneakers bleven daardoor 95 van de 98 op `?`; nu 0 van de AAN-staande. Parallel, want
+      serieel maakte het paneel 4x langzamer (0,6-0,8 s → 1,9-4,9 s → 1,1-2,1 s).
+- [x] **`count` en `crawlable` per facetwaarde uit de zoekindex**, met de correctie die de
+      hele opbrengst is: afwezig uit de index betekent NUL producten, niet onbekend.
+      Nagemeten met directe calls. Vondst op Sneakers: Kleur 2 van 24, **Maat 52 van 153**
+      staan AAN zonder producten.
+- [x] **De Healthscore-tweelingen geconsolideerd** — 174 regels eruit. De gevraagde
+      OLD-vs-NEW-harness hoefde géén Redshift-build: de SQL opvangen en vergelijken geeft 22
+      statements, 0 verschillen, in 0,03 s. `backend/test_healthscore_twins.py` bewaakt het,
+      en is getoetst door hem te laten falen op een eenzijdige wijziging.
+- [x] **`grote wasknijpers`: het probleem bestaat niet meer.** Door de echte pijplijn krijgt
+      hij Wasknijpers, tier B, score 80. Mijn eerste "oorzaak" (fuzz.ratio 78,6 tegen drempel
+      80) verklaarde ook alle tien andere voorbeelden die het probleem NIET hebben, en dat is
+      het signaal dat hij niets verklaart: de V28 per-woord-fallback vangt dit al.
+
+Nieuw open, uit metingen van deze sessie:
+
+- [ ] **`volwassen luiers` krijgt geen bestemming** (tier D, score 0, geen redirect) terwijl
+      de review van 03-09 schreef dat die van de twijfelgevallen juist meeging. Ander punt
+      dan `grote wasknijpers`, en niet door mij aangeraakt.
+- [ ] **`hogedrukreinigers slang` staat op tier B / score 80** terwijl de review van 03-09
+      noteerde dat die "in D blijft". Of de review of het gedrag is verschoven; dat is een
+      beslissing over de bedoeling, geen bug die ik zelf moet kiezen.
+- [ ] **52 van de 153 AAN-staande maten in Sneakers hebben geen producten** (gecombineerde
+      kindermaten `15/16`, `16/17`), Kleur 2 van 24. De tool laat het nu zien; wat er moet
+      gebeuren — uitzetten in de taxonomie — is werk aan de data, niet aan de code. Loont
+      een ronde over de grote categorieën.
+- [ ] **Een pg_trgm-index op `pa.urls.url` zou de scan naar milliseconden brengen** en de
+      cache hierboven overbodig maken. Niet gedaan: schemawijziging op een tabel die we met
+      n8n delen, dus dat vraagt Joeps akkoord.
+- [ ] **`count`/`crawlable` blijft onbekend voor dependent facetten** (`index_state =
+      facet_absent`): die verschijnen alleen met hun parent geselecteerd. Exact maken zou
+      per dependent facet een gefilterde call op de parent-waarde kosten, zoals de derde pas
+      in `category_facets` nu doet — dezelfde mechaniek, andere plek.
+
 ### 2026-09-07 (1) — De twee SEO Stats-toggles: geen aanpassing teruggedraaid, maar een regel begrensd
 
 Commit `784e41f`. Les in LEARNINGS (2), regel in UI_BLUEPRINT (1).
@@ -24,7 +93,8 @@ Commit `784e41f`. Les in LEARNINGS (2), regel in UI_BLUEPRINT (1).
 
 Open, klein:
 
-- [ ] **Er is geen check die een nieuwe globale control-regel tegen de bestaande controls houdt.**
+- [x] **Er is geen check die een nieuwe globale control-regel tegen de bestaande controls houdt.**
+      GEDAAN 07-09 (`78294d2`): `scripts/ui_control_render_check.py` meet de vulgraad. Zie (2).
       Deze ellips stond er vier dagen omdat hij op 1em hoog nauwelijks opvalt. Een render van de
       vijf control-soorten (checkbox, radio, switch, select, date-box) op zoom bij elke wijziging in
       `style.css` zou dat vangen; nu is het handwerk.
@@ -102,10 +172,10 @@ Commits `ad4971e` (rename) en `d3ba3de` (de pagina). Lessen in LEARNINGS (3) en 
 
 Open, klein:
 
-- [ ] **De facetwaarden komen uit de taxonomie, niet uit de index.** De zoek-API geeft per waarde ook
+- [x] GEDAAN 07-09 (`6e98422`), zie entry (2). **De facetwaarden komen uit de taxonomie, niet uit de index.** De zoek-API geeft per waarde ook
       `count` en `crawlable`, en dát zou "aan maar zonder producten" zichtbaar maken. Kost een
       gefilterde call per facet (de volledige pool), dus alleen doen als de vraag opkomt.
-- [ ] **`isSeoFacet` van een dependent facet blijft `?`** als de pool-call zijn parent-waarde niet
+- [x] GEDAAN 07-09 (`3724955`), zie entry (2). **`isSeoFacet` van een dependent facet blijft `?`** als de pool-call zijn parent-waarde niet
       raakte (de tien `Kleurtint *` op Sneakers). Exact maken kost één call per dependent facet.
 - [ ] De aanvraag voor de land-variabele is geschreven maar nog niet verstuurd — actie Joep.
 
@@ -143,10 +213,10 @@ Gedaan:
 
 Open:
 
-- [ ] **De naam van een verwijderde waarde is `?`** als het DELETE-event er geen droeg. De garbage
+- [x] GEDAAN 07-09 (`77b2926`), zie entry (2). **De naam van een verwijderde waarde is `?`** als het DELETE-event er geen droeg. De garbage
       bin (`/api/garbage-bin`, al gebruikt door `get_deletions`) kent die naam wél — dat zou de rij
       compleet maken. Klein, en alleen zichtbaar bij verwijderde waarden.
-- [ ] **De pa.urls-scan draait bij elke paneel-opening** (2,4 s worst case op `merk`). Prima voor
+- [x] GEDAAN 07-09 (`50773f0`), zie entry (2). **De pa.urls-scan draait bij elke paneel-opening** (2,4 s worst case op `merk`). Prima voor
       klikken met de hand; als het paneel ooit vaker opengaat, is een cache per (slug, dag) de
       volgende stap.
 
@@ -210,7 +280,7 @@ Open:
 - [ ] **4 slug-wijzigingen zijn niet eenduidig toe te wijzen** (facet 4501 de-DE/en-US, facet 5613
       en-US/nl-BE): meerdere wijzigingen komen op dezelfde slug uit met een verschillende `Old`. Met
       de hand na te kijken in de audit log; geen van de vier is nl-NL of heeft URL's, dus geen haast.
-- [ ] **`value_name` blijft NULL op `Facet Value`/`Facet Value Label` events terwijl de naam in
+- [x] GEDAAN 07-09 (`36145f6`), zie entry (2). **`value_name` blijft NULL op `Facet Value`/`Facet Value Label` events terwijl de naam in
       `changes->>'NameInColumn'` staat.** De nieuwe module leest daarom uit `changes`. Een backfill
       in de ingest zou die kolom bruikbaar maken voor alle latere queries — nu is er een kolom die
       belooft wat hij niet levert.
@@ -366,10 +436,10 @@ Open:
 - [x] **De twee UI-nafjes in Auto-Redirects zijn gedaan** (Joeps smaak gevraagd en gekregen, 03-09):
       de Min. score-dropdown is terug met stappen van 10 en zonder tier, en de Old/New-cellen tonen
       relatieve paden. Zie de entry van 03-09 (2).
-- [ ] **De Healthscore categorie/maincat-tweelingen** (~400 regels bijna-identieke SQL) is het enige
+- [x] GEDAAN 07-09 (`520ee1b`), zie entry (2). **De Healthscore categorie/maincat-tweelingen** (~400 regels bijna-identieke SQL) is het enige
       punt uit die hoop dat nog helemaal open staat. Vraagt volgens de notitie zelf een
       OLD-vs-NEW-harness met een volledige build tegen Redshift.
-- [ ] **`grote wasknijpers` krijgt helemaal geen redirect meer** (0 D, geen bestemming). Was in de
+- [x] ACHTERHAALD 07-09, zie entry (2) — hij krijgt Wasknijpers, tier B/80. **`grote wasknijpers` krijgt helemaal geen redirect meer** (0 D, geen bestemming). Was in de
       review een van de negen te-hard-rijen; nu een ander probleem, niet door V68 geraakt.
 
 ### 2026-09-03 (6) — Healthscore live-check, en het selectiemechanisme van Auto-Redirects naar acht tools
