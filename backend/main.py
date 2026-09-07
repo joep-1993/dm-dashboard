@@ -3437,14 +3437,20 @@ def seo_prio_category_facets(cat_id: str):
 
 
 @app.get("/api/seo-prio/facet-values/{facet_id}")
-def seo_prio_facet_values(facet_id: str, only_on: bool = True):
+def seo_prio_facet_values(facet_id: str, only_on: bool = True,
+                          category_id: str | None = None):
     """De facetwaarden van één facet; standaard alleen die met seoPriority=true.
 
     Blocking en niet async: dit pagineert door tot 12.000 waarden bij de
     taxonomie-API langs, dus het hoort in de threadpool en niet op de event loop.
+
+    Met `category_id` komen `count` en `crawlable` per waarde mee uit de zoekindex —
+    dat maakt "aan maar zonder producten" zichtbaar. Zonder blijven die velden weg,
+    want een productaantal bestaat alleen binnen een categorie.
     """
     try:
-        return seo_prio_service.facet_values(facet_id, only_on=only_on)
+        return seo_prio_service.facet_values(facet_id, only_on=only_on,
+                                             category_id=category_id)
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:

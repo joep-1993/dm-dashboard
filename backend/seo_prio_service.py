@@ -875,6 +875,12 @@ def _index_search_facets(data: Dict) -> Dict[str, Dict]:
             "url_name": f.get("urlName") or "",
             "value_ids": set(vals),
             "seed": vals[0] if vals else None,
+            # Per waarde wat de INDEX weet en de taxonomie niet: hoeveel producten er
+            # achter zitten en of de site hem crawlbaar aanbiedt. Additief naast
+            # `value_ids`, want daar hangt de relevantietoets aan.
+            "values": {str(v["id"]): {"count": v.get("count"),
+                                      "crawlable": v.get("crawlable")}
+                       for v in (f.get("values") or []) if v.get("id") is not None},
         }
     return idx
 
@@ -1162,19 +1168,82 @@ _FACET_VALS: Dict[str, Dict] = {}
 _FACET_VALS_TTL = 600
 
 
-def facet_values(facet_id, only_on: bool = True) -> Dict:
+def _enrich_from_index(cid: str, fid: str, values: List[Dict]) -> str:
+    """Zet `count` en `crawlable` op elke waarde. Geeft de index_state terug.
+
+    Eén gefilterde zoekcall, geseed met de eigen eerste waarde: ongefilterd kapt de API
+    de waardenlijst af (merk 100, maat 60, kleur 24, rest 8 — het lijkt de
+    seoDisplayLimit), en dan zou het verschil tussen "geen producten" en "niet in het
+    antwoord" onzichtbaar zijn. Precies dat verschil is hier de hele opbrengst.
+    """
+    try:
+        r = taxv2.get(f"/api/Categories/{cid}", timeout=60)
+        r.raise_for_status()
+        slug = _nl_label(r.json().get("labels"))["slug"]
+    except Exception as e:
+        print(f"[SEO_PRIO] index enrich: categorie {cid} niet op te halen: {e}")
+        return "failed"
+    if not slug:
+        return "failed"
+
+    base = _search_facets(slug)
+    if not base.get("ok"):
+        return "failed"
+    me = base["facets"].get(str(fid))
+    if not me:
+        return "facet_absent"
+
+    pool = _search_pool(slug, me["url_name"], me["seed"]) if me.get("seed") else {}
+    per_value = (pool.get(str(fid)) or {}).get("values") or me.get("values") or {}
+    if not per_value:
+        return "failed"
+    for v in values:
+        hit = per_value.get(str(v.get("id")))
+        # AFWEZIG UIT DE INDEX = NUL PRODUCTEN, en dat is de hele opbrengst van deze
+        # verrijking. De zoek-API geeft alleen waarden terug die producten hebben, dus
+        # `count == 0` komt niet voor — op Sneakers/Kleur waren er 0 nullen en 2
+        # afwezigen. Getoetst met een directe gefilterde call per afwezige waarde:
+        # `Regenboog` en `Transparant` geven beide `total=0`, terwijl een aanwezige
+        # waarde exact haar indexgetal geeft (Beige 9473 = 9473). Zonder deze regel
+        # zou "aan maar leeg" als `?` wegvallen — precies het geval dat we zoeken.
+        #
+        # Dit mag alleen omdat we hier WETEN dat de index dit facet in deze categorie
+        # kent: is dat niet zo, dan is er hierboven al `facet_absent` teruggegeven en
+        # komen we niet langs deze regel.
+        v["count"] = hit["count"] if hit else 0
+        # `crawlable` blijft None voor een afwezige waarde: dat is een eigenschap die de
+        # index niet heeft gegeven, en die is niet uit "geen producten" af te leiden.
+        v["crawlable"] = hit["crawlable"] if hit else None
+    return "ok"
+
+
+def facet_values(facet_id, only_on: bool = True, category_id=None) -> Dict:
     """Facetwaarden van één facet, standaard alleen die met seoPriority=true.
 
     De API kan niet op seoPriority filteren (`/api/Facets/{id}/values` neemt
     alleen searchTerm/skip/take), dus dit pagineert en zeeft zelf. Resultaat gaat
     10 minuten in een cache: doorklikken op dezelfde categorie zou anders elke
     keer opnieuw 12.000 waarden ophalen.
+
+    Met `category_id` komt er per waarde bij wat de ZOEKINDEX weet en de taxonomie
+    niet: `count` (hoeveel producten erachter zitten) en `crawlable`. Dat maakt het
+    geval zichtbaar waar deze tool voor bestaat — **een waarde die AAN staat maar geen
+    producten heeft** — en dat is uit de taxonomie principieel niet te zien, want die
+    kent de voorraad niet. Kost één gefilterde zoekcall: die geeft de VOLLEDIGE
+    waardenlijst, terwijl een ongefilterde call is afgekapt op de seoDisplayLimit.
+
+    Zonder `category_id` gedraagt de functie zich als voorheen. Dat is niet louter
+    achterwaartse compatibiliteit: `count` bestaat alleen BINNEN een categorie, dus een
+    getal zonder categorie zou een som over alle categorieën suggereren die het niet is.
     """
     fid = str(facet_id).strip()
     if not fid.isdigit():
         raise ValueError("facet id must be numeric")
+    cid = str(category_id).strip() if category_id not in (None, "") else None
+    if cid is not None and not cid.isdigit():
+        raise ValueError("category id must be numeric")
 
-    key = f"{fid}|{int(bool(only_on))}"
+    key = f"{fid}|{int(bool(only_on))}|{cid or '-'}"
     hit = _FACET_VALS.get(key)
     if hit and time.time() - hit["at"] < _FACET_VALS_TTL:
         return {k: v for k, v in hit.items() if k != "at"}
@@ -1212,10 +1281,23 @@ def facet_values(facet_id, only_on: bool = True) -> Dict:
             truncated = True
             break
 
+    index_state = "not_requested"
+    if cid:
+        index_state = _enrich_from_index(cid, fid, values)
+
     values.sort(key=lambda x: ((x["name"] or "").lower(), x["sequence"] or 0))
     out = {"facet_id": int(fid), "total_values": total if total is not None else skip,
            "scanned": skip, "on_count": len(values) if only_on else None,
-           "values": values, "truncated": truncated, "only_on": bool(only_on)}
+           "values": values, "truncated": truncated, "only_on": bool(only_on),
+           "category_id": int(cid) if cid else None,
+           # 'ok' = de index is bevraagd en heeft dit facet; 'facet_absent' = de index
+           # kent het facet in deze categorie niet (dan is `count` niet 0 maar ONBEKEND);
+           # 'failed' = de zoekcall lukte niet. De UI moet die drie niet als hetzelfde
+           # tonen, want alleen bij 'ok' betekent een leeg getal iets.
+           "index_state": index_state,
+           "on_without_products": sum(
+               1 for v in values
+               if v.get("seo_priority") is True and v.get("count") == 0) if index_state == "ok" else None}
     _FACET_VALS[key] = {**out, "at": time.time()}
     return out
 
