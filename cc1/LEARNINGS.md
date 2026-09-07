@@ -40,9 +40,10 @@ bij een switch draagt de vorm juist de betekenis.
 
 ## `git add` op een genegeerd-maar-getrackt pad stageert wél, en geeft toch exit 1 (2026-09-07)
 
-Bekend was al dat `cc1/` in `.gitignore` staat maar getrackt is, en dat de waarschuwing bij `git add`
-ruis is. Wat er niet bij stond en wat hier de commit oversloeg: **de exit code is 1, ook als het
-stagen slaagt.** Dus `git add cc1/X.md frontend/y.css && git commit …` stopt na de add — de bestanden
+**Dit is de derde keer** en het staat hieronder al twee keer — de entry van 2026-07-29 in dit bestand
+beweert zelfs het tegenovergestelde en die is fout: "de héle `git add` doet dan niets (atomisch)".
+Vandaag opnieuw gemeten met twee paden, één cc1 en één frontend: **beide staan gestaged.** De add is
+niet atomisch en weigert niets, hij **stageert en geeft toch exit 1**. Dus `git add cc1/X.md frontend/y.css && git commit …` stopt na de add — de bestanden
 staan gestaged, er is niets gecommit, en de melding die je ziet gaat over `.gitignore` en niet over
 je commit.
 
@@ -60,6 +61,13 @@ $ git diff --cached --stat
 niet het bestand. Dus: geen `-f` nodig (dat is voor een NIEUW cc1-bestand), maar hang een `git commit`
 nooit met `&&` achter een `git add` die een cc1-pad bevat — apart aanroepen, of eerst `git diff --cached`
 lezen. Controleer bij een afgebroken keten altijd de index vóór je de add overdoet.
+
+**Waarom het bleef terugkomen, en dat is de eigenlijke les:** de kennis stond wél ergens — sinds
+2026-09-03 in de auto-memory — maar de samenvattingsregel in de index zei alleen "`git add` SLAAGT
+voor getrackte bestanden (waarschuwing is ruis)". Dat is waar en precies de helft: het weglaten van
+de exitcode maakte de regel misleidend voor de enige situatie waarin het misgaat. Een verkorte regel
+moet het deel houden dat je gedrag verandert, niet het deel dat je gerust stelt. De indexregel is
+bijgewerkt; de entry van 2026-07-29 hieronder blijft staan met deze correctie erboven.
 
 ## Een /c/-URL van een dependent facet ZONDER zijn parent is ongeldig, niet suboptimaal (2026-09-04)
 
@@ -9317,6 +9325,8 @@ Joep: "de X-buttons in Redirect Generator hebben nog het oude gedrag" en daarna 
 ## `cc1/` staat in `.gitignore` maar de bestanden zijn tracked (2026-07-29)
 
 `git add cc1/UI_BLUEPRINT.md` faalt met "The following paths are ignored" en de héle `git add` doet dan niets (atomisch) — ook de 20 frontend-bestanden niet.
+
+> **Gecorrigeerd 2026-09-07 — deze bewering is fout.** De add is NIET atomisch en doet wél iets: getrackte cc1-bestanden worden gestaged, alleen de exitcode is 1. Twee keer nagemeten (2026-09-03, 2026-09-07). Zie de entry bovenaan dit bestand; `-f` is alleen nodig voor een NIEUW cc1-bestand.
 
 - Tracked bestanden negeren `.gitignore` voor commits, maar `git add` weigert het pad alsnog. Gebruik **`git add -f cc1/<file>`**, of stage cc1 in een aparte call.
 - Handig te weten omdat cc1 bij elke sessie meegaat en dit anders stil je hele staging leegkiept.
