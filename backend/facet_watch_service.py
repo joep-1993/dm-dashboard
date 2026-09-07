@@ -345,6 +345,34 @@ def _clean_json(o):
     return o
 
 
+def _name_from_changes(ch):
+    """De waardenaam uit de eventpayload zelf, voor als de live lookup hem niet had.
+
+    `value_name` werd alleen uit `vmap` gevuld — de live waarde-naar-facet-cache — en bleef
+    dus NULL voor elke waarde die de API niet (meer) kent. Gemeten 2026-09-07: 4.099
+    `Facet Value Label`-events hadden `value_name IS NULL` terwijl de naam in de payload
+    stond, en dan belooft die kolom iets wat hij niet levert.
+
+    **De vorm verschilt per actie** en dat is de valkuil: bij een INSERT is
+    `NameInColumn` een string ("Ford Bronco", 4.019 rijen), bij een UPDATE een object
+    (`{"New": "Yoni", "Old": "YONI"}`, 80 rijen). Een blote `changes->>'NameInColumn'`
+    levert bij die tweede de JSON-TEKST op en zet dus `{"New": ...}` in de kolom.
+
+    Let op wat dit NIET is: de payload draagt geen taalveld (0 van de 4.099 heeft er een),
+    dus of dit de nl-NL-naam is of een andere locale valt hier niet vast te stellen. De
+    leesweg geeft de live naam altijd voorrang (`_value_row`), dus dit is een terugval,
+    geen bron van waarheid.
+    """
+    v = (ch or {}).get("NameInColumn")
+    if isinstance(v, dict):
+        v = v.get("New")
+    if not isinstance(v, str):
+        return None
+    # `_clean` haalt NUL-bytes weg maar laat witruimte staan, en een naam van louter
+    # spaties is geen naam — dan is NULL eerlijker dan een lege cel die gevuld lijkt.
+    return (_clean(v) or "").strip() or None
+
+
 def _value_name(v):
     """Prefer the nl-NL label, fall back to `global`, then to anything."""
     labels = v.get("labels") or []
@@ -848,6 +876,8 @@ def ingest(from_date=None, to_date=None, resolve_misses=True):
             else:
                 resolution = "no_link"
             ch = ev.get("changes") or {}
+            # De live naam heeft voorrang; pas als vmap hem niet had, de payload.
+            vname = vname or _name_from_changes(ch)
             rows.append((
                 ev["id"], ev["timestampUtc"][:26], ev.get("action"), name,
                 str(ev.get("entityId")) if ev.get("entityId") is not None else None,
