@@ -3,6 +3,51 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-07 (6) — seoPriority-opruiming: 1.014 cat×facet-combo's uit, en borstels_stof als type-facet ingetrokken
+
+Geen code gewijzigd; alles via de Taxonomy API en de DB's. Lessen in LEARNINGS, zelfde datum.
+
+- [x] **`borstels_stof` was een type-facet in beide generatoren** — één rij in
+      `pa.facet_position_rules` (`is_type_facet=true`, order 815) die zowel de SEO-titles-blueprints
+      als de unique titles stuurt, en die vóór de LLM-classifier kortsluit.
+- [x] **Geflipt naar `false` en alles hergenereerd.** 34 van de 44 blueprints herbouwd (de andere 10
+      bevatten óók `type_stofzuiger`, dus terecht ongewijzigd) en gepusht naar productie
+      (`{"status":"OK","records":34}`). 590 van de 602 unique titles opnieuw gedraaid; 12 falen op
+      `facet_not_available` — dode URL's, retry helpt niet, oude titel blijft staan.
+- [x] **33 plak-artefacten hersteld** met `polish=False`. Zie LEARNINGS.
+- [x] **seoPriority uit voor `kleur` + `borstels_stof` in de hele stofzuigertak** (8 combo's).
+      Onderbouwing: borstels_stof deed €0,09/URL tegen €0,66 voor `merk`, en 0,26% van de
+      impressies in de tak.
+- [x] **Kleur over alle categorieën geanalyseerd** — 256.757 URL's en €137.477/jaar, dus globaal
+      een wérkende facet. Niet blanket uitzetten; per categorie op de ratio.
+- [x] **Kleur Tier 1 doorgevoerd:** 84 van de 87 categorieën op `false` (17.835 URL's, €3.764).
+      Uitgezonderd op verzoek: Elektrische fietsen 9001191, Kerstverlichting 9002698,
+      Koffiezetapparaten 9005311.
+- [x] **Hele estate in kaart:** 13.464 cat×facet-combo's op `true` over 3.265 categorieën en 2.030
+      facet-slugs. 1.178 kandidaten op ratio<0,40 + ≥100 URL's.
+- [x] **Ronde 1 doorgevoerd: 922 combo's op `false`** (118.278 URL's, €14.483 = 0,90% van de
+      omzet). 607 op ratio<0,40 + ≥100 URL's + omzet<€50, plus 315 nul-verkeercombo's die bewezen
+      ouder dan een jaar zijn. 57 combo's uitgesloten omdat 48 categorieën anders al hun
+      seoPrio-facetten zouden verliezen. Verificatie met verse GET: 922/922, `displayOrder` en
+      `isHidden` overal intact. Estate: 13.464 → 12.542.
+- [x] **`pa.seoprio_changes` aangemaakt** — logboek van alle 1.014 wijzigingen met de 365d-metriek
+      van vóór de ingreep, voor effectmeting én rollback.
+
+**Open:**
+
+- [ ] **Ronde 1 meten voordat ronde 2 volgt.** Over 6-8 weken de matrix opnieuw draaien en joinen
+      op `pa.seoprio_changes`. Pas dan een echte voor/na in plaats van de observationele
+      vergelijking.
+- [ ] **Ronde 2: de 74 grote gevallen die de €50-grens tegenhield.** Daar zit het crawlbudget —
+      `maat_mode_broeken` in Broeken (3.844 URL's à €0,04), `seizoen_schoenen` in Schoenen (2.919
+      à €0,10), `type` in Broeken (2.912 à €0,08), `populaire_themas_mode` in Shirts (2.763 à
+      €0,05), `maat` in Sportschoenen (2.337 à €0,06).
+- [ ] **Kleur Tier 2 en 3 staan nog open** — 72 categorieën / 24.314 URL's resp. 54 / 26.140.
+- [ ] **Guard in de v3-polish tegen samentrekking** van twee naast elkaar staande tokens uit
+      `composed_h1`. Nu nog handmatig repareren met `polish=False`.
+- [ ] **624 nul-verkeercombo's zonder leeftijdsbewijs** blijven aan staan. Als er ooit een
+      betrouwbare aanmaakdatum beschikbaar komt, opnieuw langs.
+
 ### 2026-09-07 (5) — Herkomst van de id-kolom in list14 uitgezocht, en de waterdichte vorm bepaald
 
 Geen code gewijzigd; vervolgvraag van Joep op (4). Les in LEARNINGS, zelfde datum.

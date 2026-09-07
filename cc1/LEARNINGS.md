@@ -1,6 +1,85 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## seoPriority opruimen: de vlag stuurt het verkeer niet, en drie manieren om je eigen meting te slopen (2026-09-07, taxonomie/Redshift)
+
+Begonnen met één vraag ("is `borstels_stof` een type-facet?") en geëindigd bij 1.014
+seoPriority-wijzigingen. Vijf lessen die herbruikbaar zijn.
+
+**1. Alle cat×facet-prestaties passen in één query van 23 seconden.** Niet per facet of per
+categorie loopen — de facet-slugs uit de `/c/`-URL exploderen geeft alle ~30.000 combinaties
+tegelijk. Eerst per URL aggregeren, dán exploderen (scheelt een factor 3-4 aan rijen):
+
+```sql
+WITH agg AS (SELECT dv.deepest_subcat_id AS cat_id, SPLIT_PART(dv.url,'?',1) AS u,
+                    COUNT(*) AS visits, SUM(...) AS omzet FROM ... GROUP BY 1,2),
+ex  AS (SELECT cat_id, u, visits, omzet,
+               SPLIT_TO_ARRAY(SPLIT_PART(u,'/c/',2),'~~') AS parts FROM agg)
+SELECT cat_id, SPLIT_PART(p::varchar,'~',1) AS facet_slug, COUNT(DISTINCT u), SUM(visits), SUM(omzet)
+FROM ex AS t, t.parts AS p GROUP BY 1,2
+```
+
+De alias in `FROM ex AS t, t.parts AS p` is verplicht en `p::varchar` moet vóór SPLIT_PART. De
+taxonomiekant is nóg goedkoper: hele boom uitlopen = 3.575 categorieën in 29s, `CategoryFacets` +
+`CategoryFacetSettings` voor allemaal = 7.150 calls in **12s** bij 16 workers. Complete analyse
+van de hele estate: **~3,5 minuut**.
+
+**2. De vlag doet aantoonbaar niets — twee keer gemeten.** In de stofzuigertak stond
+`borstels_stof` aan in 2 van 4 categorieën: aan 2,1 en 1,1 visits/URL, uit 1,4 en 1,1. En over
+251 slecht presterende categorieën: `seoPriority=True` 3,19 visits/URL en €0,37/URL,
+`None/False` 3,22 en €0,40. Observationeel, niet gerandomiseerd, maar het betekent dat de omzet
+achter een uit te zetten combo een **scope**-getal is en geen risicogetal — je verplaatst
+noscript-facetlinks en crawlbudget, je haalt geen omzet weg.
+
+**3. Een absolute omzetgrens filtert op omvang, niet op kwaliteit.** Joep stelde "alles onder €50"
+voor. Dat pakt 8.905 van de 13.464 true-combos (twee derde), en 898 daarvan verdienen ≥€0,50/URL —
+`merk` in Kalknagelmiddelen doet €2,43/URL en haalt €48 omdat de categorie klein is. Erger: de
+grens houdt juist de grootste opruiming áán, want `maat_mode_broeken` in Broeken (3.844 URL's,
+€0,04/URL) passeert de €50 door zijn omvang. Wat werkt is de **ratio** — facet-€/URL gedeeld door
+de €/URL van de rest van dezelfde categorie — met een URL-ondergrens erbij die kleine categorieën
+beschermt. Kleur werkt waar kleur de koopbeslissing is (meubels, verlichting, mode, sanitair,
+ratio 0,84-1,56) en faalt bij techniek (telefoons 0,07, stofzuigers 0,10, hardloopschoenen 0,12).
+
+**4. De leeftijd van een facet is niet uit de taxonomie te halen.** `createdAt` op de
+CategoryFacet-rijen: 798 van de 996 nul-verkeercombos delen **27-01-2026**, `st_created` 673x
+16-03-2026, `st_updated` 843x 24-06-2026. Bulk-migratiestempels (bevestigt de bestaande entry
+over `createdAt`/`updatedAt`). Had ik die gebruikt, dan was de conclusie "allemaal jonger dan een
+jaar" geweest — aantoonbaar onjuist. `pa.urls.first_seen_at` helpt ook niet: die tabel is zelf pas
+op 07-05-2026 gevuld, dus alles staat op mei 2026. **Wat wél werkt: verkeer en GSC-vertoningen van
+vóór het analysevenster.** `fct_visits` gaat terug tot 2022-01-01, `bt.search_console` tot
+2024-01-01. Van de 996 nul-verkeercombos hadden er 369 verkeer vóór 07-09-2025 (230 al in 2022) en
+3 alleen GSC-vertoningen — dat zijn uitgedoofde facetten, geen nieuwe. De overige 624 hebben in
+4,5 jaar historie nooit één visit gehad; niet te onderscheiden van nieuw, dus laten staan.
+
+**5. Bij het uitzetten van een facet: check of de categorie niet leegvalt.** Elke snede die ik
+maakte liet categorieën over zónder enig seoPrio-facet — 109 bij de eerste, 48 bij de laatste.
+Die horen eruit; een categorie zonder crawlbare facetten is geen opruiming maar een gat.
+
+**Ijklat-valkuil:** vergelijk je een facet tegen het categoriegemiddelde, dan zit het facet in
+zijn eigen benchmark en valt de ratio ~0,09 milder uit dan wanneer je de facet-URL's uit de
+baseline haalt. De rangorde blijft gelijk, de drempel niet. Zeg er altijd bij welke je gebruikt.
+
+**Vastgelegd in `pa.seoprio_changes`** (shared Postgres): elke wijziging met de 365d-metriek van
+vóór de ingreep. Join op `(cat_id, facet_slug)` tegen een verse matrix om het effect te meten.
+
+## Een type-facet uitzetten plakt de facetwaarde aan de categorienaam (2026-09-07, kopteksten)
+
+`borstels_stof` van type-facet naar gewoon facet gezet. De deterministische builder doet het goed,
+maar de v3-polish smeedt `!!facet!! !!sub_category!!` tot één Nederlandse samenstelling zodra de
+facetwaarden op hetzelfde grondwoord eindigen als de categorie: "Turboborstel Stofzuigers" wordt
+**"Turboborstelstofzuigers"**. 33 van de 598 geregenereerde H1's.
+
+Opsporen met `\b\w*<grondwoord>\w+\b`, niet met de nauwe vorm `borstel(stofzuiger|...)` — die
+mist `borstelhandstofzuigers` en `dierenborstelbesturing`. Herstel: `generate_title_v3(url,
+polish=False)` plus dezelfde post-processing als `process_single_url` (`format_dimensions`,
+`normalize_preposition_case`, `fix_redundant_met`, `normalize_tv_category_caps`) en
+`update_title_record`. Output leest prima: "Philips Turboborstel Stofzuigers met stofzak".
+
+De bestaande polish-guards (a2e5879 voor audience-woorden, be5325d voor `-loos`) dekken dit niet.
+Een guard tegen het samentrekken van twee naast elkaar staande tokens uit `composed_h1` staat nog
+open.
+
+
 ## Een id die in de goede numerieke buurt zit, is nog geen id van ons (2026-09-07, taxonomie/Redshift/MySQL)
 
 Scherpt de entry hieronder aan. Joep vroeg of de naam-match niet op hetzelfde neerkomt als de
