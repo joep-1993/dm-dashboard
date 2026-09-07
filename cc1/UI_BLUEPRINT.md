@@ -1627,6 +1627,19 @@ carries through automatically:
   `<input type="checkbox">` wordt door de browser zelf getekend en negeert
   `border-radius`, dus zet die klasse er altijd op — de elf blote vakjes in Bot Hits,
   DMA Exclusions, GSD Campaigns en SEO titles hebben hem op 2026-09-03 daarom gekregen.
+- **Een `.form-switch` valt buiten die regel en houdt zijn pil** (Joep, 2026-09-07:
+  de twee toggles boven de per-dag-tabel van SEO Stats). De ronde-vakjesregel matcht ook
+  `.form-switch .form-check-input`, is even specifiek (0,2,0) als die van Bootstrap en
+  staat later in de cascade — dus won hij, en werd de 2em×1em baan van alle vijf switches
+  (SEO Stats 2, SEO Prio 2, Thema Ads 1) een **ellips**. Dat was collateral, niet een
+  keuze. Terug op Bootstraps `border-radius: 2em`, in `style.css` direct onder de
+  50%-regel en met `[type="checkbox"]` erbij zodat hij op specificiteit wint (0,3,0) en
+  niet op volgorde.
+  **Waarom een switch hier de uitzondering is:** de ronde vorm zegt "dit is er één van een
+  set die je aanvinkt". Een switch zegt iets anders — een stand die meteen effect heeft,
+  meestal op wat je al ziet (een kolom erbij, een reeks in de grafiek) — en dat verschil is
+  precies wat de pilvorm draagt. Rond maken haalt het onderscheid weg dat dit control zijn
+  betekenis geeft, terwijl bij checkbox↔radio juist gekózen is dat vorm niets meer zegt.
 
 ### Een label hernoemen krimpt de control ernaast
 

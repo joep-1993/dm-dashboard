@@ -816,6 +816,16 @@ input[type="file"].form-control { max-width: 32rem; }
  * checkbox]`-regel staat die daar stil niets doet. */
 .form-check-input[type="checkbox"] { border-radius: 50%; }
 
+/* ...maar een SWITCH is geen selectievakje (Joep, 2026-09-07). De regel hierboven
+ * matcht ook `.form-switch .form-check-input` — even specifiek (0,2,0) als Bootstraps
+ * eigen regel en later in de cascade, dus hij won — en trok de 2em×1em baan van de vijf
+ * switches in SEO Stats (2), SEO Prio (2) en Thema Ads (1) tot een ELLIPS. Dat was
+ * collateral van 2026-09-03, niet een keuze: een switch stelt geen lidmaatschap voor maar
+ * een stand, en zijn vorm hoort dat te zeggen. Hier terug op Bootstraps `2em` (de pil),
+ * met `[type="checkbox"]` erbij zodat deze regel op specificiteit wint (0,3,0) en niet
+ * op volgorde. De knop in de baan is een background-image en was nooit geraakt. */
+.form-switch .form-check-input[type="checkbox"] { border-radius: 2em; }
+
 /* ------------------------------------------------------------------ *
  * Tabellen — vlakke kop op paneelkleur, lichte rijscheiding, accentzachte hover.
  * ------------------------------------------------------------------ */
