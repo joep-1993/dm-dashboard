@@ -3,6 +3,29 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-07 (4) — Kanaalvraag op list14: welk kanaal draagt de visits op de foute spelling
+
+Geen code gewijzigd; één vraag van Joep beantwoord op Redshift. Les in LEARNINGS, zelfde datum.
+
+- [x] **"Welk kanaal draagt de 1.937 visits op `Andrelon` (956329)?" — SEO tweederde, SEA een
+      kwart.** SEO 1.296 (66,9%), SEA 495 (25,6%), `Overig Kanaal` 125, DMA paid 20, AI 1. SEA
+      staat voor 88% op de kale `/c/merk~251464`; SEO heeft daarnaast de lange staart van
+      facetcombinaties. Gemeten op taxonomie-waarde 251464, niet op kolom C — zie LEARNINGS.
+- [x] **Onderweg gecorrigeerd: het verschil met `Andrélon` is geen spellingsvoorkeur.** Zes
+      gelijknamige `Merk`-facetten in zes maincats; alleen de maincat met de producten heeft
+      bezochte pagina's. De accentvariant 2128762 is crawlable en staat op 0.
+
+**Open — raakt het uitgeleverde bestand:**
+
+- [ ] **`list14_standardized_duplicates_zkv_visits.xlsx` mist zijn Toelichting-sheet.** Die zit
+      alleen in `list14_standardized_duplicates.xlsx`. Zonder die sheet leest de visits-kolom als
+      "visits op kolom C", en kolom C komt in nul `/c/`-URL's voor. Sheet meekopiëren of de
+      kolomkop laten zeggen op welke ids gemeten is, vóór het bestand verder gaat.
+- [ ] **De vlag "wijkt af van kolom D" suggereert een spellingsconclusie.** Bij varianten die in
+      verschillende maincat-Merk-facetten zitten vergelijkt de visits-tiebreak twee losstaande
+      pagina-verzamelingen. Niet fout in de uitkomst, wel misleidend in de motivering — overweeg
+      een aparte vlag voor "varianten zitten niet in hetzelfde facet".
+
 ### 2026-09-07 (3) — SEO-verkeer uitgezocht: weekend, juli→augustus, en de YoY-daling
 
 Geen code gewijzigd; drie analysevragen van Joep beantwoord op Redshift + Search Console.

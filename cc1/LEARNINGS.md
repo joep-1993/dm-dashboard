@@ -1,6 +1,47 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een visits-verschil tussen accentvarianten is maincat-scope, geen spellingsvoorkeur (2026-09-07, taxonomie/Redshift)
+
+Joep vroeg welk kanaal de visits draagt op `Andrelon` (verkeerde spelling, kolom C id 956329) in
+`list14_standardized_duplicates_zkv_visits.xlsx`, want die waarde staat op 1.937 visits tegen 0
+voor `Andrélon` (876890).
+
+**Eerst de meetbasis, want die is niet wat het bestand suggereert.** De ids in kolom C komen in
+**nul** `/c/`-URL's voor — het zijn geen facetwaarde-ids. De visits zijn via de naam gematcht op
+taxonomie-Merk-waarden: `Andrelon` -> 251464 (Merk-facet 114) en 23906233, `Andrélon` -> 2128762,
+23842770, 24064268 en 24076376. Alle 1.937 zitten op 251464; de vijf andere staan op 0. Dat stond
+in de Toelichting-sheet van `list14_standardized_duplicates.xlsx`, en die sheet is in het
+`_zkv_visits`-bestand niet meegekomen — wie alleen dat laatste bestand openslaat, leest de kolom
+als "visits op kolom C" en meet iets anders dan er staat.
+
+**Kanaalsplit van de 1.937** (365 dagen t/m 06-09-2026, `is_real_visit=1`, alle domeinen): SEO
+1.296 (66,9%, waarvan 2 Carrousel), SEA 495 (25,6% — Adwords NL 471, Bing NL 14, Bing BE 5,
+Adwords BE 5), `Overig Kanaal` 125 (6,5%), DMA paid 20, AI/ChatGPT 1. De betaalde en de
+organische helft landen anders: **88% van het SEA-verkeer staat op de kale `/c/merk~251464`**,
+terwijl SEO daarnaast een lange staart van facetcombinaties heeft (`type_shampoos`, `haartype`,
+`ingr_shamp`, `doelgroep_drogisterij`, `inhoud_ml`) van 8-145 visits per URL. België is
+marginaal: 22 SEO + 13 SEA op de kale pagina. Bots zijn klein maar geconcentreerd: 2.069
+`all_visits` tegen 1.937 real, en 129 van die 132 vallen in `Overig Kanaal` aff0/ch3.
+
+**Het mechanisme achter de nul.** Alle zes waarden zitten in een facet dat `Merk` heet, maar het
+zijn zes verschillende facetten — één per maincat. 251464 hoort bij de maincat waar de
+Andrelon-producten liggen (de facetten in de URL's — `type_shampoos`, `haartype`,
+`doelgroep_drogisterij` — wijzen op drogisterij/haarverzorging; niet apart nagetrokken via
+CategoryFacets). De accentvarianten zitten in de Merk-facetten van andere maincats, waar geen
+Andrélon-pagina's bestaan om te bezoeken. Dat is dus geen zoekgedrag: 2128762 heeft zelfs
+`seoPriority: true`, is daarmee crawlable, en staat nog op 0.
+
+**Wat dat betekent voor de dedup.** De `visits`-tiebreak kiest 956329 wel correct — daar zit het
+verkeer — maar om een andere reden dan de kolom suggereert. De vlag "wijkt af van kolom D" leest
+als een uitspraak over spelling terwijl het een uitspraak over maincat-scope is. Bij elke
+canoniek-keuze op visits hoort daarom de vraag: **zitten de varianten in hetzelfde facet?** Zo
+niet, dan vergelijkt de kolom twee losstaande pagina-verzamelingen en zegt hij niets over welke
+schrijfwijze de gebruiker kiest.
+
+Zie [[redshift_visits_per_facet_value_id]], [[redshift_channel_derivation]],
+[[taxonomy_facet_maincat_scope]], [[seoprio_noscript_facetlinks]].
+
 ## Augustus 2025 was een piek, en ik las mean reversion als een instorting (2026-09-07, SEO/GSC)
 
 Ik meldde een "CTR-instorting op informational queries": jaar-op-jaar deden informationele
