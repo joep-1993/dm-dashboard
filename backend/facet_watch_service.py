@@ -62,6 +62,7 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -1177,42 +1178,96 @@ def _facet_slug_nl(facet_id):
     return (row or {}).get("facet_name") or name, slug
 
 
-def _value_url_samples(slug, value_ids):
-    """value_id -> (aantal URL's, kortste URL) voor de waarden van dít facet.
+# --- pa.urls-scan, gecacht per slug ----------------------------------------
+# De scan zelf is de kost: een LIKE met voorloopwildcard over 1,02 M rijen kan geen
+# btree gebruiken, dus hij leest de tabel. Gemeten 2026-09-07 op `merk`: 2,4 s gefilterd
+# op de gevraagde value-ids, 4,95 s ongefilterd met `array_agg`, 3,92 s ongefilterd met
+# `DISTINCT ON`. De ONGEFILTERDE variant is de gecachte: één slug bedient meerdere
+# facetten — zes facetten heten "Merk" (117, 124, 94, 114, 1290, 3238) en delen slug
+# `merk` — dus vanaf de tweede paneel-opening is dit gratis. Break-even ligt bij twee
+# openingen; een enkele losse opening is met 3,9 s trager dan de 2,4 s van eerst, en dat
+# is de prijs die hier bewust betaald wordt.
+URL_CACHE_MAX_SLUGS = 4               # `merk` is ~8 MB; vier slugs is een redelijk plafond
+_url_cache = OrderedDict()            # slug -> {"token": (...), "map": {...}}
 
-    Eén scan over pa.urls (1,02 M rijen) in plaats van één LIKE-query per waarde.
-    De value-id wordt uit de URL getrokken en pas daarna tegen de meegegeven set
-    gehouden: op de slug alléén filteren is fout, want dezelfde slug hangt aan
-    meerdere facet-ids (`merk` zit in 540 k URL's) — dezelfde valkuil als in
-    `_count_affected_urls`.
 
-    De KORTSTE URL is het voorbeeld: dat is de pagina met alleen dit facet
-    geselecteerd in plaats van een stapeling van zes filters.
+def _urls_token():
+    """Verandert zodra `pa.urls` verandert. Kost 0,10 s.
+
+    `(count(*), max(first_seen_at))` en niet de datum van vandaag: een dagsleutel bouwt de
+    cache om middernacht opnieuw op terwijl er niets gewijzigd is, en mist een load die
+    dezelfde dag gebeurt. Het aantal zit erbij omdat `max(first_seen_at)` niet meebeweegt
+    als er rijen VERDWIJNEN.
     """
-    if not slug or not value_ids:
-        return {}
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("""
-            WITH hit AS (
-                SELECT (regexp_match(u.url, '(?:/|~~)' || %s || '~([0-9]+)'))[1]::bigint
-                           AS value_id,
-                       u.url
-                FROM pa.urls u
-                WHERE u.url LIKE '%%/' || %s || '~%%'
-                   OR u.url LIKE '%%~~' || %s || '~%%'
-            )
-            SELECT value_id, count(*) AS n,
-                   (array_agg(url ORDER BY length(url), url))[1] AS sample
-            FROM hit
-            WHERE value_id = ANY(%s)
-            GROUP BY value_id
-        """, (slug, slug, slug, list(value_ids)))
-        return {r["value_id"]: (r["n"], r["sample"]) for r in cur.fetchall()}
+        cur.execute("SELECT count(*) AS n, max(first_seen_at) AS newest FROM pa.urls")
+        r = dict(cur.fetchone() or {})
+        return (r.get("n"), r.get("newest"))
     finally:
         cur.close()
         return_db_connection(conn)
+
+
+def _value_url_samples(slug, value_ids):
+    """value_id -> (aantal URL's, kortste URL) voor de waarden van dít facet.
+
+    Eén scan over pa.urls in plaats van één LIKE-query per waarde. De value-id wordt uit
+    de URL getrokken en pas daarna tegen de gevraagde set gehouden: op de slug alléén
+    filteren is fout, want dezelfde slug hangt aan meerdere facet-ids (`merk` zit in
+    540 k URL's) — dezelfde valkuil als in `_count_affected_urls`.
+
+    De KORTSTE URL is het voorbeeld: dat is de pagina met alleen dit facet geselecteerd
+    in plaats van een stapeling van zes filters.
+
+    Gecacht per slug, ongeldig zodra `_urls_token()` verschuift.
+    """
+    if not slug or not value_ids:
+        return {}
+
+    token = _urls_token()
+    hit = _url_cache.get(slug)
+    if hit and hit["token"] == token:
+        _url_cache.move_to_end(slug)
+        full = hit["map"]
+    else:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            # `DISTINCT ON` in plaats van `(array_agg(url ORDER BY ...))[1]`: dat laatste
+            # materialiseert alle URL's per groep en kostte 1,0 s meer op `merk`.
+            cur.execute("""
+                WITH hit AS (
+                    SELECT (regexp_match(u.url, '(?:/|~~)' || %s || '~([0-9]+)'))[1]::bigint
+                               AS value_id,
+                           u.url
+                    FROM pa.urls u
+                    WHERE u.url LIKE '%%/' || %s || '~%%'
+                       OR u.url LIKE '%%~~' || %s || '~%%'
+                ),
+                c AS (
+                    SELECT value_id, count(*) AS n FROM hit
+                    WHERE value_id IS NOT NULL GROUP BY value_id
+                ),
+                s AS (
+                    SELECT DISTINCT ON (value_id) value_id, url FROM hit
+                    WHERE value_id IS NOT NULL
+                    ORDER BY value_id, length(url), url
+                )
+                SELECT c.value_id, c.n, s.url AS sample
+                FROM c JOIN s USING (value_id)
+            """, (slug, slug, slug))
+            full = {r["value_id"]: (r["n"], r["sample"]) for r in cur.fetchall()}
+        finally:
+            cur.close()
+            return_db_connection(conn)
+        _url_cache[slug] = {"token": token, "map": full}
+        _url_cache.move_to_end(slug)
+        while len(_url_cache) > URL_CACHE_MAX_SLUGS:
+            _url_cache.popitem(last=False)
+
+    return {vid: full[vid] for vid in value_ids if vid in full}
 
 
 def _changed_values(days, facet_id):
