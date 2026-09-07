@@ -1039,6 +1039,22 @@ Het label-event draagt geen locale, dus die wordt bepaald door de huidige slugs 
         if (!vals.length) {
             return head + '<span class="note">Dit facet heeft geen waarden om te tonen.</span>';
         }
+        // De tooltip op de naam draagt wat constant is (UI_BLUEPRINT: in de badge wat
+        // verschilt, in de tooltip wat constant is). Bij een verwijderde waarde is de
+        // HERKOMST van de naam constant en relevant: de live API kent hem niet meer, dus
+        // hij komt uit de prullenbak en is de naam ZOALS BIJ VERWIJDEREN — niet
+        // noodzakelijk de naam die er ooit in de URL stond.
+        function fvNameTitle(v) {
+            const bits = [];
+            if (!v.name) bits.push(v.deleted || v.missing_live
+                ? 'naam onbekend: buiten de 30-daagse bewaartermijn van de prullenbak, '
+                  + 'of ook daar zonder naam'
+                : 'naam onbekend: niet opgehaald bij de Taxonomy API');
+            if (v.name_source === 'garbage_bin') bits.push('naam uit de prullenbak (bij verwijderen)');
+            if (v.sequence !== null && v.sequence !== undefined) bits.push('sequence ' + v.sequence);
+            return esc(bits.join(' — '));
+        }
+
         // Kolomvolgorde is hier geen smaak: dit paneel zit in een tabel die BREDER is
         // dan de kaart (`.tbl-nowrap` op "Per main categorie" scrollt horizontaal), dus
         // de laatste kolom staat buiten beeld tot je scrollt. Wat je komt halen —
@@ -1056,8 +1072,7 @@ Het label-event draagt geen locale, dus die wordt bepaald door de huidige slugs 
             <tbody>${vals.map(v => {
                 const ents = (v.entities || []).map(e => FV_ENTITY[e] || e);
                 return `<tr>
-                <td class="fv-name" title="${v.sequence === null || v.sequence === undefined
-                    ? '' : 'sequence ' + v.sequence}"><strong>${esc(v.name || '?')}</strong>
+                <td class="fv-name" title="${fvNameTitle(v)}"><strong>${esc(v.name || '?')}</strong>
                     <span class="facet-slug">${v.value_id}</span> ${fvStateBadges(v)}</td>
                 <td class="ts">${v.last_change ? fmtTs(v.last_change) : '<span class="facet-slug">–</span>'}
                     ${ents.length ? `<span class="facet-slug">${esc(ents.join(', '))}</span>` : ''}</td>

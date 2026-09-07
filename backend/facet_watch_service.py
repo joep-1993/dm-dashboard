@@ -1202,7 +1202,14 @@ def _changed_values(days, facet_id):
                    bool_or(e.entity_name = 'Facet Value' AND e.action = 'INSERT')
                                                                AS is_new,
                    bool_or(e.entity_name = 'Facet Value' AND e.action = 'DELETE')
-                                                               AS is_deleted
+                                                               AS is_deleted,
+                   -- Het moment van verwijderen apart, niet `last_change`: dat is de
+                   -- LAATSTE gebeurtenis en hoeft de DELETE niet te zijn. De garbage
+                   -- bin wordt op dit tijdstip bevraagd, dus een seconde ernaast
+                   -- kost de naam.
+                   max(e.ts_utc) FILTER (WHERE e.entity_name = 'Facet Value'
+                                           AND e.action = 'DELETE')
+                                                               AS deleted_at
             FROM pa.facet_watch_events e
             WHERE e.ts_utc > now() - (%s || ' days')::interval
               AND e.facet_id = %s
@@ -1219,11 +1226,16 @@ def _changed_values(days, facet_id):
 def _value_row(vid, dto, ev, gone):
     """Eén tabelrij. `dto` is de live waarde (of None), `ev` de eventaggregatie
     (of None), `gone` of de per-id lookup een 404 gaf."""
+    # De live naam heeft voorrang: het event bewaart de naam van TOEN, en bij een
+    # label-wijziging is dat juist niet wat er nu op de pagina staat. Naam en herkomst
+    # worden uit dezelfde keuze afgeleid — anders kan `name_source` "live" zeggen terwijl
+    # de naam uit het event komt (een live DTO zonder naam), en dan liegt de tooltip.
+    live_name = _value_name(dto) if dto else None
+    ev_name = (ev or {}).get("value_name")
+    name = live_name or ev_name
     return {
         "value_id": vid,
-        # De live naam heeft voorrang: het event bewaart de naam van TOEN, en bij
-        # een label-wijziging is dat juist niet wat er nu op de pagina staat.
-        "name": (_value_name(dto) if dto else None) or (ev or {}).get("value_name"),
+        "name": name,
         "seo_priority": bool(dto.get("seoPriority")) if dto else None,
         "sequence": dto.get("sequence") if dto else None,
         "updated_at": dto.get("updatedAt") if dto else None,
@@ -1233,7 +1245,11 @@ def _value_row(vid, dto, ev, gone):
         # DELETE zonder 404 betekent teruggezet, een 404 zonder DELETE-event
         # betekent verwijderd buiten dit venster (of buiten de log).
         "deleted": bool((ev or {}).get("is_deleted")),
+        "deleted_at": (ev or {}).get("deleted_at"),
         "missing_live": vid in gone,
+        # `_bin_names()` zet dit op 'garbage_bin' als hij de naam daar vandaan haalt —
+        # dat is de naam ZOALS BIJ VERWIJDEREN, en de tooltip zegt dat.
+        "name_source": "live" if live_name else ("event" if ev_name else None),
         "events": (ev or {}).get("events") or 0,
         "first_change": (ev or {}).get("first_change"),
         "last_change": (ev or {}).get("last_change"),
@@ -1242,6 +1258,86 @@ def _value_row(vid, dto, ev, gone):
         "actors": [a for a in ((ev or {}).get("actors") or []) if a],
         "is_new": bool((ev or {}).get("is_new")),
     }
+
+
+# --- Namen van verwijderde waarden -----------------------------------------
+# De bak bevat over 30 dagen 7.779 items (gemeten 2026-09-07), Take maximaal 1.000, dus
+# acht pagina's in 2,15 s koud en ~0,15 s per pagina warm. Eén index voor het hele
+# venster is daarom goedkoper dan gericht zoeken: verwijderingen zijn NIET gebundeld —
+# facet 117 heeft 207 naamloze deletes over 190 clusters van 5 minuten, dus per moment
+# opvragen zou ~190 calls per paneel kosten. Deze index kost er acht, één keer per TTL,
+# en alleen als er werkelijk een naamloze verwijderde waarde in beeld staat.
+BIN_INDEX_TTL = timedelta(minutes=15)
+BIN_INDEX_PAGE = 1000
+BIN_INDEX_MAX_PAGES = 15          # plafond: 15.000 items, ~2x de huidige bak
+_bin_index = {"built_at": None, "days": 0, "names": {}}
+
+
+def _bin_name_index(days):
+    """entityId -> entityName voor alles wat in `days` dagen is verwijderd.
+
+    Gecacht omdat elk facetpaneel dezelfde bak nodig heeft. De bak zelf heeft geen
+    filter op `entityId` — alleen `EntityType`, `DeletedAfter`/`DeletedBefore`, en een
+    `SearchTerm` op de naam die we juist niet hebben. `EntityType` wordt WEL gehonoreerd
+    (`Facet` geeft 0, onzin geeft 0), in tegenstelling tot `From`/`To` op de audit-logs.
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    fresh = (_bin_index["built_at"] is not None
+             and now - _bin_index["built_at"] < BIN_INDEX_TTL
+             and _bin_index["days"] >= days)
+    if fresh:
+        return _bin_index["names"]
+
+    since = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+    names, skip, pages = {}, 0, 0
+    while pages < BIN_INDEX_MAX_PAGES:
+        try:
+            d = _get("/api/garbage-bin", {"EntityType": "Facet Value",
+                                          "DeletedAfter": since,
+                                          "Skip": skip, "Take": BIN_INDEX_PAGE,
+                                          "SortBy": "deletedAtUtc",
+                                          "SortDescending": "true"})
+        except requests.RequestException:
+            # Een naam is een nicety; het paneel valt hier niet om. Wat er staat wordt
+            # bewaard, en de TTL zorgt dat een volgende opening het opnieuw probeert.
+            break
+        items = d.get("items") or []
+        pages += 1
+        for i in items:
+            if i.get("entityName"):
+                names[str(i.get("entityId"))] = i["entityName"]
+        skip += len(items)
+        if len(items) < BIN_INDEX_PAGE:
+            break
+    _bin_index.update({"built_at": now, "days": days, "names": names})
+    return names
+
+
+def _bin_names(rows, days):
+    """Vul de naam van verwijderde waarden aan uit `/api/garbage-bin`.
+
+    De auditlog draagt bij een `Facet Value DELETE` alleen `FacetId`, `CreatedAt` en
+    `SeoPriority` — GEEN naam. Gemeten 2026-09-07: 12.758 van de 13.113 DELETE-rijen
+    (97%) hebben `value_name IS NULL`, en `changes` bevat de naam bij geen enkele. De
+    waarde bestaat live niet meer, dus de prullenbak is de enige bron die hem nog kent
+    (`entityName`, 30 dagen bewaartermijn).
+
+    Muteert `rows`; geeft terug hoeveel namen erbij kwamen en hoeveel er onbekend bleven.
+    """
+    todo = [r for r in rows if not r["name"] and (r.get("deleted_at") or r["missing_live"])]
+    if not todo:
+        return {"filled": 0, "unresolved": 0}
+
+    names = _bin_name_index(days)
+    filled = 0
+    for r in todo:
+        nm = names.get(str(r["value_id"]))
+        if nm:
+            r["name"], r["name_source"] = nm, "garbage_bin"
+            filled += 1
+    # Wat overblijft is buiten de bewaartermijn verwijderd, of heeft ook in de bak geen
+    # naam (63 van de 7.779 items, gemeten 2026-09-07).
+    return {"filled": filled, "unresolved": sum(1 for r in todo if not r["name"])}
 
 
 def get_facet_values(facet_id, days=30, with_urls=True, limit=CHANGED_MAX):
@@ -1297,6 +1393,11 @@ def get_facet_values(facet_id, days=30, with_urls=True, limit=CHANGED_MAX):
     # ontbreekt onder deze tabel geen waarde meer" — ook na het `limit`-plafond.
     complete = complete and len(rows) >= (total or 0)
 
+    # De naam van een verwijderde waarde staat niet in het event en niet meer live;
+    # de prullenbak kent hem wel. Pas hier, als de rijenlijst vaststaat, zodat er nooit
+    # gezocht wordt naar een naam die de live API alsnog gaf.
+    bin_names = _bin_names(rows, days)
+
     if with_urls and slug:
         urls = _value_url_samples(slug, [r["value_id"] for r in rows])
         for r in rows:
@@ -1319,6 +1420,11 @@ def get_facet_values(facet_id, days=30, with_urls=True, limit=CHANGED_MAX):
         "seo_priority": sum(1 for r in rows if r["seo_priority"]),
         "with_urls": bool(with_urls and slug),
         "api_error": api_error,
+        # Wat de prullenbak-lookup opleverde. `unresolved` > 0 betekent dat er rijen
+        # zonder naam overblijven: buiten de 30-dagen bewaartermijn, of voorbij
+        # BIN_LOOKUP_MAX_CALLS. Dat hoort zichtbaar te zijn, niet als `?` zonder uitleg.
+        "names_from_bin": bin_names["filled"],
+        "names_unresolved": bin_names["unresolved"],
         "values": rows,
     }
 
