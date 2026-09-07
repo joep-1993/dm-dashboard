@@ -1,6 +1,43 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## "AAN in de taxonomie" is geen belofte dat de pagina het linkt (2026-09-07, Sneakers/Maat)
+
+Ik meldde 52 van de 153 AAN-staande maat-waarden in Sneakers als lege pagina's, en schreef
+in TASKS dat het opruimen taxonomiewerk was. **Beide helften waren fout**, en het kostte
+drie metingen om dat te zien.
+
+**Eén: de site linkt ze niet.** De Sneakers-categoriepagina bevat precies 60 `maat~`-links
+(= de `seoDisplayLimit`) en daarvan is er NUL leeg. Mijn "18 van de eerste 60 op sequence
+zijn leeg" rekende over de taxonomie-volgorde, terwijl de limiet werkt op wat de zoekindex
+teruggeeft — en die geeft per definitie alleen waarden mét producten. Zie
+[[seoprio_noscript_facetlinks]]: de site leest zijn facetlinks uit de index, niet uit de
+taxonomie. Dus een waarde die AAN staat maar leeg is, valt er automatisch buiten.
+
+**Twee: per categorie uitzetten kan niet.** `seoPriority` van een WAARDE zit op
+`FacetValueDto` — facet-globaal, geen `categoryId` — en in de hele spec bestaat geen enkel
+endpoint dat een categorie met een facetwaarde combineert. Het categorie-niveau bestaat
+alleen per FACET (`CategoryFacetSetting`). Dus:
+
+    de leegte is PER CATEGORIE   |   de schakelaar is FACET-GLOBAAL
+
+`maat 15/16` heeft 0 producten in Sneakers en 486 in de bredere schoenen-boom. Uitzetten
+zou de goede pagina's slopen om een pagina te repareren die niemand linkt.
+
+**Drie: mijn eerste URL-telling was niet op scope begrensd.** 689 URL's op die 52 maten,
+klonk als een probleem — tot ik splitste: 58 onder het Sneakers-pad, **631 elders onder
+schoenen en die zijn gewoon goed**. Een `LIKE '%/maat~%'` over pa.urls zegt niets over de
+categorie waarin de leegte gemeten is.
+
+Wat er overblijft na alle drie: 58 URL's in `pa.urls` die live 200 geven met nul producten
+(nagetrokken: 441 kB HTML, geen enkele EAN), waarvan 8 ooit gecrawld zijn — 53 hits in zeven
+maanden. Verwaarloosbaar, en niets om de taxonomie voor aan te raken.
+
+**De regel die ik hieruit meeneem:** bij een facet-bevinding is "staat het aan?" de
+verkeerde eerste vraag. De eerste vraag is **"linkt de pagina het?"**, en die beantwoord je
+door de pagina op te halen en te tellen — niet door de taxonomie te lezen. En vóór je
+"opruimen" adviseert: kijk of het veld waarin je wil opruimen de scope HEEFT die je bedoelt.
+
 ## Reproduceer een klacht op de laag waar de klacht over gaat (2026-09-07, rurl)
 
 TASKS zei: "`grote wasknijpers` krijgt helemaal geen redirect meer (0 D, geen bestemming)".

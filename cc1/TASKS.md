@@ -60,10 +60,24 @@ Nieuw open, uit metingen van deze sessie:
 - [ ] **`hogedrukreinigers slang` staat op tier B / score 80** terwijl de review van 03-09
       noteerde dat die "in D blijft". Of de review of het gedrag is verschoven; dat is een
       beslissing over de bedoeling, geen bug die ik zelf moet kiezen.
-- [ ] **52 van de 153 AAN-staande maten in Sneakers hebben geen producten** (gecombineerde
-      kindermaten `15/16`, `16/17`), Kleur 2 van 24. De tool laat het nu zien; wat er moet
-      gebeuren — uitzetten in de taxonomie — is werk aan de data, niet aan de code. Loont
-      een ronde over de grote categorieën.
+- [x] **52 van de 153 AAN-staande maten in Sneakers hebben geen producten** — NAGETROKKEN
+      07-09 en het is GEEN actiepunt. Twee dingen die ik er eerst fout bij schreef:
+      * **De site linkt ze niet.** De Sneakers-pagina linkt precies 60 maat-waarden (=
+        `seoDisplayLimit`) en daarvan is er NUL leeg. De limiet werkt op wat de zoekindex
+        teruggeeft — en die geeft alleen waarden mét producten — niet op de
+        taxonomie-sequence. Mijn "18 van de eerste 60 zijn leeg" was daarmee een
+        rekensom over de verkeerde lijst.
+      * **"Uitzetten in de taxonomie" kan niet per categorie.** `seoPriority` van een
+        WAARDE zit op `FacetValueDto` (facet-globaal, geen categoryId), en er is geen enkel
+        endpoint dat een categorie met een facetwaarde combineert; het categorie-niveau
+        bestaat alleen per FACET (`CategoryFacetSetting`). Uitzetten zou de waarde overal
+        uitzetten, en elders in schoenen hebben ze 200-486 producten. De leegte is
+        per-categorie, de schakelaar is facet-globaal.
+      Wat er feitelijk staat: 58 URL's in `pa.urls` onder het Sneakers-pad op een lege maat,
+      live HTTP 200 met 0 producten (twee nagetrokken, 441 kB, geen enkele EAN). Daarvan
+      zijn er 8 ooit gecrawld: 53 hits tussen 14-02 en 04-09, dus ~7 per maand. Verwaarloosbaar.
+      Van de 689 URL's die mijn eerste query gaf waren er 631 gewoon goed — die query was
+      niet op het Sneakers-pad begrensd.
 - [ ] **Een pg_trgm-index op `pa.urls.url` zou de scan naar milliseconden brengen** en de
       cache hierboven overbodig maken. Niet gedaan: schemawijziging op een tabel die we met
       n8n delen, dus dat vraagt Joeps akkoord.
