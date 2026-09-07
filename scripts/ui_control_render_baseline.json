@@ -1,0 +1,30 @@
+{
+  "recorded_at_zoom": 6,
+  "controls": {
+    "checkbox": {
+      "w_css": 16.0,
+      "h_css": 16.0,
+      "ratio": 0.8027
+    },
+    "radio": {
+      "w_css": 16.0,
+      "h_css": 16.0,
+      "ratio": 0.8027
+    },
+    "switch": {
+      "w_css": 32.0,
+      "h_css": 16.0,
+      "ratio": 0.9014
+    },
+    "select_sm": {
+      "w_css": 52.5,
+      "h_css": 31.0,
+      "ratio": 0.9821
+    },
+    "date_box": {
+      "w_css": 261.67,
+      "h_css": 32.33,
+      "ratio": 0.9966
+    }
+  }
+}
