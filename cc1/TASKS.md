@@ -3,6 +3,33 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-07 (5) — Herkomst van de id-kolom in list14 uitgezocht, en de waterdichte vorm bepaald
+
+Geen code gewijzigd; vervolgvraag van Joep op (4). Les in LEARNINGS, zelfde datum.
+
+- [x] **Zes id-ruimtes getest op de 737 kolom-C ids — allemaal 0 hits.** Taxonomy API v2 (552.326),
+      `bt.facet_facetvalues` inclusief historie (488.655), `brand_id` in
+      `bt.cpa_outclicks_transactional`, `taxonomy.nl-nl_FacetValue` (194.620), `beslist.tblBrands`
+      plus alle 8 `*FacetValue*`-tabellen, en `datamart.dim_shop`.
+- [x] **Aangetoond dat het geen subset-probleem is.** Het kolom-C-bereik 400131–1859508 bevat
+      9,4 miljoen rijen in `bt.facet_facetvalues`. De ids zitten in de goede numerieke buurt en
+      bestaan niet — vreemde of hernummerde ruimte.
+- [x] **`ALL'GRILL` in kaart:** 12 facetwaarden over 10 Merk-facetten; Redshift kent 24251698 en
+      24294101 als `brand_id`. 1084380 is geen van die twaalf.
+- [x] **De vergelijkingsvorm bepaald:** binnen `facet_id`. 208 van de 363 groepen kwalificeren,
+      147 liggen alleen over facetten heen, 8 hebben geen merk-facetwaarde. En list14
+      onderrapporteert 6,7x (4.950 taxonomie-waarden tegen 737 rijen).
+
+**Open:**
+
+- [ ] **Vraag de maker van list14 waar de id-kolom uit komt.** Enige route die dit sluit; het
+      bestand komt niet uit onze repos en resolvet nergens. Zolang dat open staat, is elke
+      uitspraak "op id X" in dat bestand niet te verifiëren.
+- [ ] **Aangeboden en wacht op Joep: lijst opnieuw opbouwen vanuit de taxonomie.** Per Merk-facet
+      groeperen op gevouwen naam, alleen groepen met ≥2 waarden binnen dat facet, visits per
+      `value_id` erbij, canonieke keuze binnen het facet, cross-facet-varianten als apart
+      tabblad. Dan hoeft kolom C niet geresolveerd te worden.
+
 ### 2026-09-07 (4) — Kanaalvraag op list14: welk kanaal draagt de visits op de foute spelling
 
 Geen code gewijzigd; één vraag van Joep beantwoord op Redshift. Les in LEARNINGS, zelfde datum.

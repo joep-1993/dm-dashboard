@@ -1,6 +1,62 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een id die in de goede numerieke buurt zit, is nog geen id van ons (2026-09-07, taxonomie/Redshift/MySQL)
+
+Scherpt de entry hieronder aan. Joep vroeg of de naam-match niet op hetzelfde neerkomt als de
+facetwaarde eerst opzoeken via kolom C, en daarna om 1084380 / `ALL'GRILL` ergens in het
+landschap te matchen. Uitkomst: **kolom C hoort bij geen enkele id-ruimte die we hebben.**
+
+| Id-ruimte | Omvang | Kolom-C ids gevonden |
+|---|---|---|
+| Taxonomy API v2, live dump | 552.326 waarden | 0 / 737 |
+| `bt.facet_facetvalues` (versioneerd, mét historie) | 488.655 unieke ids | 0 / 737 |
+| `brand_id` in `bt.cpa_outclicks_transactional` (365d) | — | 0 / 737 |
+| `taxonomy.nl-nl_FacetValue` (legacy MySQL) | ~194.620 rijen | 0 / 737 |
+| `beslist.tblBrands` + alle 8 `*FacetValue*`-tabellen | — | 1084380 afwezig |
+| `datamart.dim_shop` | — | 0 / 737 |
+
+**Het is geen subset- of retentiegat, en dat is het hele punt.** Het bereik van kolom C
+(400131–1859508) valt middenin het bewoonde deel van de facetwaarde-ruimte: `bt.facet_facetvalues`
+heeft **9,4 miljoen rijen** met een id in precies dat venster. De ids zitten dus in de goede
+numerieke buurt en bestaan gewoon niet. Dat is de signatuur van een vreemde of hernummerde
+ruimte. `ALL'GRILL` bestaat wél, als **twaalf** facetwaarden over **tien** Merk-facetten
+(24251698 en 24294101 zijn de ids die Redshift als `brand_id` kent), en 1084380 is geen van die
+twaalf. Conclusie: de herkomst van die kolom moet van de maker van het bestand komen — het komt
+niet uit onze repos, en Joep's oorspronkelijke opdracht ("visits op facet value id in kolom C")
+ging al van de aanname uit die hier onderuit gaat.
+
+**Nieuw en nuttig onderweg: `beslist.tblBrands` in de legacy MySQL.** Kolommen `bucket_id`
+(= facetwaarde-id), `cat_id` (= maincat), `column_id` (= facet-id), `caption`. Die koppeling is
+strikt — 3253↔36000, 3605↔11111, 117↔165, 17↔12000 — dus dit is het één-Merk-facet-per-maincat
+mechanisme, live in de legacy DB, en een snellere plek om het te controleren dan de 190 MB-dump.
+Let op dat de legacy tabellen een **subset** zijn: 194.620 rijen tegen 552.326 in API v2, zelfde
+id-ruimte (beide vanaf 703). `ALL'GRILL` mist er bijvoorbeeld terwijl Redshift het wel kent.
+
+**Meetvalkuil: `pa.urls` bestaat niet in Redshift** (`relation "pa.urls" does not exist`) — het
+`pa`-schema in Redshift heeft 564 tabellen maar niet die; de URL-inventaris leeft in PostgreSQL.
+
+**De waterdichte vorm van deze analyse: vergelijk binnen `facet_id`.** Dat is de enige
+vergelijking waarin twee varianten dezelfde pagina's kunnen krijgen. Over de 363 groepen:
+**208** hebben ≥2 varianten binnen hetzelfde Merk-facet (daar is een visits-vergelijking geldig),
+**147** hebben varianten die alleen over facetten heen liggen (daar vergelijk je losse
+paginaverzamelingen — een taxonomie-consistentieprobleem, geen spellingsvraag), 8 hebben geen
+enkele merk-facetwaarde.
+
+**En twee cijfers die de entry hieronder harder maken dan hij nu staat.** Van de 737 rijen mapt
+maar **14% (106) op precies één** facetwaarde; 574 rijen mappen op meer dan één, tot 27 stuks. Van
+alle real visits in kolom G staat **99% (69.846 van 70.713) op rijen die over méér dan één
+facetwaarde sommeren**. En **alle 363 van de 363 groepen** bestaan uit varianten die na accent- en
+interpunctievouwing identiek zijn, terwijl de gebruikte matchsleutel (NFC + NBSP + witruimte +
+`casefold()`) accenten en interpunctie juist bewaart. Kolom G is dus geen spellingssignaal maar
+een maincat-signaal — en kolom F (zoekvolume) vouwt accenten wél weg, dus twee kolommen naast
+elkaar gebruiken onverenigbare normalisaties. Daar komt bij dat list14 **6,7x onderrapporteert**:
+onder diezelfde 363 gevouwen sleutels heeft de taxonomie 4.950 merk-facetwaarden tegen 737 rijen
+(`allgrill`: 2 rijen, 12 waarden).
+
+Zie [[taxonomy_facet_maincat_scope]], [[redshift_visits_per_facet_value_id]],
+[[mysql_dbs_htz_host]], [[redshift_channel_derivation]].
+
 ## Een visits-verschil tussen accentvarianten is maincat-scope, geen spellingsvoorkeur (2026-09-07, taxonomie/Redshift)
 
 Joep vroeg welk kanaal de visits draagt op `Andrelon` (verkeerde spelling, kolom C id 956329) in
