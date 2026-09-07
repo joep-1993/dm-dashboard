@@ -1,6 +1,70 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Augustus 2025 was een piek, en ik las mean reversion als een instorting (2026-09-07, SEO/GSC)
+
+Ik meldde een "CTR-instorting op informational queries": jaar-op-jaar deden informationele
+queries -42,9% clicks bij impressies die net zo hard daalden als bij de rest (-8,7% tegen
+-9,0%), en in augustus 2025 hadden beide groepen nog een CTR die tot op drie decimalen gelijk
+was (1,0988% tegen 1,0956%). Dat cijfer klopt. **De conclusie eruit klopte niet.**
+
+**Augustus 2025 was zelf een piek — in alle drie de queryintenties tegelijk.** Vanaf juli 2025
+springt de mobiele CTR omhoog bij informational (1,34 -> 1,85), commercieel (1,26 -> 1,71) en
+transactioneel (1,99 -> 2,55). Een YoY-venster landt precies op die top. Met augustus 2024 als
+derde ijkpunt staat informational vandaag op 1,16% tegen 1,17% twee jaar eerder: er is niets
+ingestort, er is een uitzonderlijk jaar teruggegeven.
+
+Hetzelfde geldt voor de zichtbaarheid. Het aandeel informationele impressies op positie 1-3
+ging **38,3% -> 59,5% -> 37,4%** over de drie augustussen. Een volledige rondgang, dus ook de
+"verschuiving uit de top-3" die ik als oorzaak aanwees is grotendeels mean reversion.
+
+**Wat er wel overblijft, en scherper is dan de eerste lezing.** Per positiebucket, 2026 tegen
+2024: niet-informational staat op pos 1-3 **+21%**, op 4-6 **+29%**, op 7-10 **+50%**;
+informational staat op **-8%**, -1% en +15%. De CTR hield dus stand naar rato van de
+commerciele intentie van de query, en informational is het enige segment dat niet
+meeprofiteerde. In de top-3-bucket is dat een gat van 29 procentpunt tussen twee querytypen op
+dezelfde pagina's, in dezelfde posities, in hetzelfde land.
+
+Dit corrigeert ook de conclusie "geen AI-Overview-signatuur" uit de trap-analyse van 24-08:
+die keek week-op-week naar querylengte, en op die schaal is het patroon onzichtbaar.
+
+De regel eruit: **twee ijkpunten kunnen geen piek van een trend onderscheiden.** Bij elke
+YoY-uitspraak op GSC hoort een derde jaar erbij voordat je "instorting" schrijft — zeker als
+de beweging in alle segmenten tegelijk zit, want dat is precies de vorm van een artefact.
+Zie [[seo_ctr_collapse_yoy_informational]].
+
+## De SEO-cut in fct_visits bevat de Carrousel, en dat kantelt je PLP-cijfers (2026-09-07, Redshift)
+
+`chan_deriv.ref_channel_derivation_stats` mapt **twee** paren op `marketing_channel = 'SEO'`:
+`aff_id 0 / channel_id 4` en **`aff_id 908 / channel_id 1` = affiliate "Carrousel"**
+(traffic_type Free). Die tweede is ~12% van SEO en **bijna volledig `type_url = 'PLP'`** —
+14.003 van 14.262 visits op 5-6 september, ruim tweederde van al ons PLP-volume.
+
+Filteren op `aff_id=0 AND channel_id=4` (wat in [[redshift_real_visits_query]] stond) mist dus
+niet alleen 12% van SEO, maar **kantelt de PLP-lijn volledig**. Concreet: op dat filter leek
+PLP in het weekend van 5-6 sept -36,9% te doen en 19% van het verlies te dragen; met de juiste
+chan-join is het -19,1%, en tegen de augustus-basislijn zelfs maar -5,0%. Ik heb daar een halve
+analyse op gebouwd voordat de totalen niet bleken te kloppen (100.477 tegen 114.739).
+
+Gebruik altijd de chan-join op `marketing_channel='SEO'`, en splits `aff0` (puur organisch) van
+`aff908` zodra je een daling wilt toewijzen — bij het septemberweekend zat 95% van het verlies
+in aff0 terwijl de Carrousel juist licht steeg.
+
+**Vier GSC-valkuilen uit dezelfde sessie**, alle vier stil:
+- `keyword_length` is **geen woordaantal** — een filter `BETWEEN 1 AND 8` geeft nul rijen.
+- De **TABLET-rijen** geven een CTR van 18-22% op R- en C-urls. Dat is een instrumentatie-
+  artefact (~5% van de clicks); laat ze buiten elke conclusie.
+- **PLP heeft een dekkingsbreuk** tussen 2025 en 2026: 33M -> 4,9M desktopimpressies, positie
+  39,8 -> 35,8. Niet bruikbaar in een YoY-reeks.
+- `avg_position` is **niet impressie-gewogen**; een keyword met 3 impressies telt even zwaar
+  als een met 30.000. Weeg zelf, anders "verbetert" je positie puur doordat diepe impressies
+  wegvallen (desktop R-url deed 9,01 -> 7,52 bij -19,9% impressies).
+
+Verder: vergelijk CTR **per device**. De aggregatie over beide devices wordt vertekend door de
+device-mix, en desktop heeft een veel lagere CTR met een impressie-aandeel dat per jaar
+verschuift. Op mobiel stegen onze impressies 3,3%, op desktop daalden ze 19,2%, samen -8,8% —
+drie verschillende verhalen uit dezelfde tabel.
+
 ## "AAN in de taxonomie" is geen belofte dat de pagina het linkt (2026-09-07, Sneakers/Maat)
 
 Ik meldde 52 van de 153 AAN-staande maat-waarden in Sneakers als lege pagina's, en schreef

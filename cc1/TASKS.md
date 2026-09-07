@@ -3,6 +3,46 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-07 (3) — SEO-verkeer uitgezocht: weekend, juli→augustus, en de YoY-daling
+
+Geen code gewijzigd; drie analysevragen van Joep beantwoord op Redshift + Search Console.
+Lessen in LEARNINGS (2), zelfde datum. Twee artifacts gepubliceerd (privé):
+`claude.ai/code/artifact/54b1f0c9-9c1e-459d-b0fb-5bff6c9ff9a8` (drie vragen) en
+`.../01ba1135-9bd2-438c-937b-10e6513fa489` (informational, ingezoomd).
+
+- [x] **"Waarom was afgelopen weekend zo laag?" — seizoen, geen storing.** 5-6 sept 114.739
+      visits tegen 135.739 het weekend ervoor (-15,5%), maar dat vergelijkingspunt lag 8,7%
+      boven de twee weekenden daarvoor. Tegen een augustus-basislijn is het -10,7%, en dezelfde
+      kalenderovergang deed vorig jaar -13,5%. Signatuur bevestigt seizoen: R-url en C-url
+      allebei -14,7%, NL en BE allebei -16,0%, grootste deepest-cat-verliezer 2,2% van het
+      totaal.
+- [x] **"Augustus -8% tegen juli, vorig jaar +5%" — hittegolf plus een vertekend startpunt.**
+      Tuinartikelen, Huishoudelijk en Sport & outdoor dragen 72,7% van de -178.566 visits bij
+      22,6% van het julivolume. Airconditionings 28.234 -> 6.634 (juli was +302% YoY),
+      ventilatoren 20.164 -> 7.330. Huishoudelijk staat YoY in augustus op -3,9%: augustus is
+      normaal, juli was de uitschieter. Daarnaast was juli 2025 een lage startmaand — +33,3%
+      binnen de maand tegen -3,6% in 2026. Like-for-like eind-juli -> eind-augustus is -5,6%
+      tegen -9,3%, dus van de ~14pp swing is maar ~4pp echte verslechtering.
+- [x] **"Waar komt de -23,6% YoY op R-urls vandaan?" — CTR, niet zichtbaarheid.** Impressies
+      op mobiel +6,1%, clicks -30,7%. 87,3% van het clickverlies zit op URL's die in beide
+      maanden impressies hadden. Shift-share: volume +27.526, positiemix -62.356, CTR bij
+      gelijke positie -103.126.
+- [x] **Eigen conclusie teruggenomen.** Zie LEARNINGS: "CTR-instorting op informational" hield
+      geen stand tegen een derde ijkpunt. Wat overblijft is dat informational als enige segment
+      niet meeprofiteerde — pos 1-3 -8% tegen +21% voor niet-informational, beide 2026 vs 2024.
+
+**Open — allebei blokkerend voor verdere YoY-uitspraken op dit dossier:**
+
+- [ ] **De sprong van juli 2025 is onverklaard.** Week 28 van 2025 (7-13 juli) doet +26%
+      verkeer in één week, en tegelijk gaat de CTR omhoog in alle drie de queryintenties.
+      ~45% van de verkeerssprong is de lancering van de Carrousel (aff 908: 18.747 -> 61.306
+      visits/week), maar dat verklaart de CTR-sprong niet en de rest van het verkeer ook niet.
+      Zolang dit staat, is elk cijfer dat op augustus 2025 ankert wankel.
+- [ ] **Desktopimpressies R-url + C-url doen -19,2% YoY, niet uitgezocht.** Bij PLP bleek een
+      daling van die orde een dekkingsbreuk in de rapportage (33M -> 4,9M). Voor R en C is dat
+      niet nagetrokken, dus behandel het als onverklaard en niet als vastgesteld zoekgedrag.
+      Raakt beide artifacts.
+
 ### 2026-09-07 (2) — De acht zelfstandige open punten uit TASKS opgepakt
 
 Commits `78294d2` (ui-check), `77b2926` (prullenbak-namen), `36145f6` (value_name),
