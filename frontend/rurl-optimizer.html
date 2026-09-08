@@ -71,7 +71,15 @@
            it is the one column that ellipsises, which is the right one to lose:
            it is prose, and the full text is on the cell's title. */
         #historyTable { table-layout: fixed; width: 100%; }
-        #historyTable th.col-check   { width: 42px; }
+        /* Vinkkolom: kop EN rij dragen dezelfde klasse, breedte en padding.
+           Zonder dat stond het rijvinkje 10px links van select-all — de kop
+           erft de 14px van `.tool-table th`, een `.table-sm` td krijgt er 4
+           (dezelfde scheefstand die #pushTable hieronder al rechttrok).
+           Gecentreerd, zodat de twee ook los van hun eigen 1em-grootte
+           (kop 1rem, rij 0,9rem) op hun midden samenvallen. */
+        #historyTable th.col-check,
+        #historyTable td.col-check   { width: 42px; text-align: center; padding-left: 4px; padding-right: 4px; }
+        #historyTable .col-check .form-check-input { margin: 0; vertical-align: middle; cursor: pointer; }
         #historyTable th.col-started { width: 145px; }
         #historyTable th.col-version { width: 88px; }
         #historyTable th.col-status  { width: 96px; }
@@ -648,7 +656,7 @@
                     : '';
                 const msg = h.error || h.message || '';
                 return `<tr class="history-row">
-                    <td>${cb}</td>
+                    <td class="col-check">${cb}</td>
                     <td class="cell-clip" title="${escapeHtml(String(h.started_at || ''))}">${escapeHtml(started)}</td>
                     <td class="col-center">${escapeHtml(h._version || '')}</td>
                     <td>${statusBadge(h.status)}</td>
