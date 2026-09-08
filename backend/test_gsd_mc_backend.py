@@ -534,6 +534,77 @@ def test_get_or_create_rechecks_with_a_fresh_listing_inside_the_lock(monkeypatch
     assert seen == [False, True]           # cached first, fresh inside the lock
 
 
+def test_a_renamed_subaccount_is_reused_instead_of_duplicated(monkeypatch):
+    """PassaPadel, 2026-09-08: sub-account 5849461135 was renamed in the Merchant Center UI
+    from "PassaPadel|BE" to "PassaPadel", the next run found nothing under the feed's name
+    and created a second, empty account while the five live campaigns kept pointing at the
+    first. pa.mc_ids_efficy knew the right answer all along."""
+    monkeypatch.setattr(g, "_lookup_mc_id_with_retry", lambda p, sh, refresh=False: (None, True))
+    monkeypatch.setattr(g, "_mc_account_lock", lambda p, sh: _yield_true())
+    monkeypatch.setattr(g, "current_mc_state",
+                        lambda ids: {(666767, "BE"): (5849461135, "20260908", "PassaPadel|BE", 1)})
+    monkeypatch.setattr(g, "_mc_account_name",
+                        lambda p, mc, refresh=False: "PassaPadel")      # the new name
+    monkeypatch.setattr(g, "create_merchant_id", lambda *a: pytest.fail("must not duplicate"))
+    monkeypatch.setattr(g, "link_to_google_ads", lambda *a: True)
+
+    assert g._get_or_create_mc_account("5588879919", "PassaPadel|BE", "2454295509",
+                                       "BE", 666767) == ("5849461135", False, True)
+
+
+def test_a_stale_state_row_does_not_send_campaigns_at_a_dead_account(monkeypatch):
+    """The account the state table names is gone from the parent, so it must be ignored;
+    pointing a campaign's merchant_id at a deleted account fails at create time."""
+    monkeypatch.setattr(g, "_lookup_mc_id_with_retry", lambda p, sh, refresh=False: (None, True))
+    monkeypatch.setattr(g, "_mc_account_lock", lambda p, sh: _yield_true())
+    monkeypatch.setattr(g, "current_mc_state",
+                        lambda ids: {(666767, "BE"): (111, "20260101", "Gone.be", 1)})
+    monkeypatch.setattr(g, "_mc_account_name", lambda p, mc, refresh=False: None)
+    monkeypatch.setattr(g, "create_merchant_id", lambda *a: "222")
+    monkeypatch.setattr(g, "link_to_google_ads", lambda *a: True)
+
+    assert g._get_or_create_mc_account("5588879919", "Shop.be", "2454295509",
+                                       "BE", 666767) == ("222", True, True)
+
+
+def test_state_lookup_is_skipped_without_a_shop_id(monkeypatch):
+    monkeypatch.setattr(g, "_lookup_mc_id_with_retry", lambda p, sh, refresh=False: (None, True))
+    monkeypatch.setattr(g, "_mc_account_lock", lambda p, sh: _yield_true())
+    monkeypatch.setattr(g, "current_mc_state", lambda ids: pytest.fail("no shop_id to look up"))
+    monkeypatch.setattr(g, "create_merchant_id", lambda *a: "333")
+    monkeypatch.setattr(g, "link_to_google_ads", lambda *a: True)
+    assert g._get_or_create_mc_account("p", "Shop.nl", "cid", "NL")[0] == "333"
+
+
+def test_an_unreadable_state_table_still_lets_the_run_create(monkeypatch):
+    """Best-effort guard: Redshift being down leaves us exactly where we were before it."""
+    monkeypatch.setattr(g, "_lookup_mc_id_with_retry", lambda p, sh, refresh=False: (None, True))
+    monkeypatch.setattr(g, "_mc_account_lock", lambda p, sh: _yield_true())
+    def boom(ids): raise RuntimeError("redshift down")
+    monkeypatch.setattr(g, "current_mc_state", boom)
+    monkeypatch.setattr(g, "create_merchant_id", lambda *a: "444")
+    monkeypatch.setattr(g, "link_to_google_ads", lambda *a: True)
+    assert g._get_or_create_mc_account("p", "Shop.nl", "cid", "NL", 999)[0] == "444"
+
+
+def test_state_table_is_read_once_per_shop_per_run(monkeypatch):
+    calls = []
+    monkeypatch.setattr(g, "current_mc_state", lambda ids: calls.append(ids) or {})
+    for _ in range(5):
+        assert g._mc_id_from_state("p", 666767, "BE") is None
+    assert calls == [[666767]]
+
+
+def test_the_id_index_tracks_names_and_new_accounts(monkeypatch):
+    use_merchant(monkeypatch, FakeService(listSubaccounts=[
+        {"accounts": [{"accountId": "111", "accountName": "Alpha.nl"}]},
+    ]))
+    assert g._mc_account_name("p", "111") == "Alpha.nl"
+    assert g._mc_account_name("p", "999") is None
+    g._remember_mc_account("p", "Beta.nl", "999")
+    assert g._mc_account_name("p", "999") == "Beta.nl"
+
+
 def test_create_inside_the_lock_passes_the_country_through(monkeypatch):
     """Merchant API needs the country for the time zone and language; forgetting it made
     every account nl-NL/Europe-Amsterdam regardless of market."""

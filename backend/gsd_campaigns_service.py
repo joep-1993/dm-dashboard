@@ -1504,6 +1504,11 @@ def _create_subaccount(
 # to fail, and it is the single biggest reason the 2026-09-08 run lost 7 of its 8 NL
 # shops. Cleared per run by _reset_mc_caches().
 _mc_listing_cache: Dict[str, Dict[str, str]] = {}
+_mc_ids_cache: Dict[str, Dict[str, str]] = {}      # parent -> {account id: name}
+
+# pa.mc_ids_efficy answers per run, not per shop: the state lookup only runs on the create
+# path, but a run that onboards twenty shops should not open twenty Redshift connections.
+_mc_state_cache: Dict[tuple, Optional[str]] = {}
 
 
 def _reset_mc_caches() -> None:
@@ -1515,6 +1520,8 @@ def _reset_mc_caches() -> None:
     until the backend is restarted.
     """
     _mc_listing_cache.clear()
+    _mc_ids_cache.clear()
+    _mc_state_cache.clear()
     _merchant_api_state.clear()
     _merchant_api_logged.clear()
 
@@ -1526,10 +1533,20 @@ def _mc_name_index(mc_parent_id: str, refresh: bool = False) -> Dict[str, str]:
     """
     if refresh or mc_parent_id not in _mc_listing_cache:
         index: Dict[str, str] = {}
+        by_id: Dict[str, str] = {}
         for acc in _list_subaccounts(mc_parent_id):
             index.setdefault((acc["name"] or "").lower(), acc["id"])
+            by_id[acc["id"]] = acc["name"] or ""
         _mc_listing_cache[mc_parent_id] = index
+        _mc_ids_cache[mc_parent_id] = by_id
     return _mc_listing_cache[mc_parent_id]
+
+
+def _mc_account_name(mc_parent_id: str, mc_id: str, refresh: bool = False) -> Optional[str]:
+    """The name this sub-account currently carries under ``mc_parent_id``, or None when it
+    is not (or no longer) there."""
+    _mc_name_index(mc_parent_id, refresh=refresh)
+    return _mc_ids_cache.get(mc_parent_id, {}).get(str(mc_id))
 
 
 def _remember_mc_account(mc_parent_id: str, shop_name: str, mc_id: str) -> None:
@@ -1539,6 +1556,7 @@ def _remember_mc_account(mc_parent_id: str, shop_name: str, mc_id: str) -> None:
     duplicate."""
     if mc_parent_id in _mc_listing_cache:
         _mc_listing_cache[mc_parent_id][(shop_name or "").lower()] = str(mc_id)
+        _mc_ids_cache.setdefault(mc_parent_id, {})[str(mc_id)] = shop_name or ""
 
 
 # ---------------------------------------------------------------------------
@@ -3606,8 +3624,59 @@ def _lookup_mc_id_with_retry(
     return None, False
 
 
+def _mc_id_from_state(mc_parent_id: str, shop_id: Any, country: Optional[str]) -> Optional[str]:
+    """Second lookup key for a shop's Merchant Center sub-account: pa.mc_ids_efficy,
+    keyed on shop_id + country instead of on the account name.
+
+    The name lookup stays primary, but a sub-account's NAME is editable in the Merchant
+    Center UI and its shop_id is not. On 2026-09-08 someone renamed PassaPadel's
+    sub-account 5849461135 from "PassaPadel|BE" to "PassaPadel" (and gave it the shop's
+    real URL); the next run looked up the feed's name, found nothing, and created
+    5849248002 — a second, empty account, while the five live campaigns kept pointing at
+    the first. The state table knew the right answer the whole time.
+
+    Returns the id only when that account is still present under this parent, so a stale
+    row for a deleted account cannot send campaigns at a merchant_id that does not exist.
+    """
+    if shop_id is None:
+        return None
+    key = (int(shop_id), (country or "").upper())
+    if key not in _mc_state_cache:
+        try:
+            state = current_mc_state([int(shop_id)])
+        except Exception as ex:
+            # Best-effort: without it we are exactly as well off as before this guard.
+            logger.warning("Could not read pa.mc_ids_efficy for shop %s: %s", shop_id, ex)
+            return None
+        row = state.get(key)
+        _mc_state_cache[key] = str(row[0]) if row and row[0] else None
+    mc_id = _mc_state_cache[key]
+    if not mc_id:
+        return None
+
+    current_name = _mc_account_name(mc_parent_id, mc_id, refresh=True)
+    if current_name is None:
+        logger.warning(
+            "pa.mc_ids_efficy has MC %s for shop %s/%s, but it is not under parent %s "
+            "(deleted, or moved) — ignoring it and creating a fresh sub-account",
+            mc_id, shop_id, key[1], mc_parent_id,
+        )
+        return None
+    logger.warning(
+        "No sub-account named for shop %s/%s under parent %s, but pa.mc_ids_efficy points "
+        "at MC %s, which is present as %r. Reusing it instead of creating a duplicate — "
+        "the account was most likely renamed in the Merchant Center UI.",
+        shop_id, key[1], mc_parent_id, mc_id, current_name,
+    )
+    return mc_id
+
+
 def _get_or_create_mc_account(
-    mc_parent_id: str, shop_name: str, ads_customer_id: str, country: Optional[str] = None
+    mc_parent_id: str,
+    shop_name: str,
+    ads_customer_id: str,
+    country: Optional[str] = None,
+    shop_id: Any = None,
 ) -> tuple[Optional[str], bool, bool]:
     """Find or create a Merchant Center sub-account and link to Google Ads.
 
@@ -3629,6 +3698,10 @@ def _get_or_create_mc_account(
     DELETEd accounts stayed in the listing minutes after the API had already stopped
     serving them) — so even a single run calling this twice for one shop could duplicate.
     Hence the lock AND the re-check inside it, not one or the other.
+
+    ``shop_id`` enables the second lookup key (see _mc_id_from_state): the account NAME can
+    be edited in the Merchant Center UI, the shop_id cannot, so a rename no longer earns
+    the shop a duplicate sub-account.
     """
     _last_mc_error["msg"] = None  # cleared per attempt; set on failure below
     mc_id, lookup_ok = _lookup_mc_id_with_retry(mc_parent_id, shop_name)
@@ -3649,6 +3722,10 @@ def _get_or_create_mc_account(
                     logger.info("MC sub-account for '%s' appeared while waiting for the "
                                 "lock (%s) — reusing it instead of creating a second one",
                                 shop_name, mc_id)
+            if mc_id is None:
+                # Last check before creating: the name is gone, but does the state table
+                # still know this shop's account? A rename must not cost a duplicate.
+                mc_id = _mc_id_from_state(mc_parent_id, shop_id, country)
             if mc_id is None:
                 website_url = _shop_website_url(shop_name, country)
                 mc_id = create_merchant_id(mc_parent_id, shop_name, website_url, country)
@@ -4845,7 +4922,7 @@ def _run_gsd_script_unlocked(
 
                         # Get or create MC sub-account and link
                         mc_id, mc_was_created, mc_linked = _get_or_create_mc_account(
-                            mc_parent_id, shop_name, customer_id, country)
+                            mc_parent_id, shop_name, customer_id, country, shop_id)
                         if mc_id is None:
                             overall_results["errors"].append({
                                 "shop_name": shop_name,
