@@ -3,6 +3,34 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-08 (7) — SEO title blueprints voor de `opties_kast`-familie in de Kasten-tak
+
+Joep vroeg blueprints voor key `f_meubel~materiaal~opties_kast` in alle children onder Kasten
+(9000018) met 365d verkeer, daarna ook voor Kasten zelf en voor de diepere combi's. Lessen in
+LEARNINGS, zelfde datum. Geen repo-code geraakt: meetscripts stonden in de scratchpad, gebouwd met
+het bestaande `scripts/analysis/seo_titles_build_gap_combos.py`.
+
+- [x] **Verkeer gemeten per exacte combo**, 2025-09-08 t/m 2026-09-07, `is_real_visit=1`, via
+      `dim_visit`+`fct_visits`+`chan_deriv` met een LIKE-prefilter op de drie facetslugs en op
+      `meubilair_389371`. 419 URL-rijen, 758 visits (667 SEO), ~10 min per run.
+- [x] **De trio zelf**: 14 van de 32 children hadden verkeer (64 visits), 6 waren al gedekt
+      (3 lokaal, 3 alleen in de live store) → **8 blueprints gebouwd**.
+- [x] **De hele familie erbij** (alle combo's die de trio bevatten, parent + children): 185
+      (cat,combo)-paren, 745 visits, 76 keys, 0 blocked → **63 extra gebouwd**, samen 71 over 22
+      categorieën. `winkel`-combi's (4 rijen, 13 visits) er zelf uit gefilterd.
+- [x] **Gepusht naar productie**: 71 records in 1 batch, HTTP 200, 0 fouten; nagemeten via
+      `GET /page-titles/{cat}/record?key=` — alle 185 familie-combo's hebben nu een record, 114 met
+      onze huidige template.
+- [x] **Deliverables**: `Downloads\claude\kasten_f_meubel_materiaal_opties_kast.csv` en
+      `kasten_opties_kast_family(.._buildable).csv` (per rij visits, verdict, voorbeeld-URL).
+
+**Open:**
+- [ ] **71 legacy-records in deze tak laten staan is Joeps expliciete keuze** (495 visits, 66% van
+      het verkeer in de familie), inclusief de trio van Kasten 9000018 zelf. Wil hij ze later
+      omzetten, dan moet dat bewust langs `store_has_combos()` heen en met een backup-tabel vooraf.
+- [ ] **Dezelfde legacy-check op andere takken** is nooit gedaan; als 62% hier representatief is,
+      staat er estate-breed veel oude titel-tekst achter een groene dekkingsscore.
+
 ### 2026-09-08 (6) — Facetwaarde-seoPriority: 82.719 waarden ingedeeld, en de helft blijkt nergens gelinkt
 
 Vervolg op de cat×facet-opruiming van 07-09, nu op de waarde-vlag (`FacetValue.seoPriority`,

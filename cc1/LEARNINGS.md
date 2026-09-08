@@ -1,6 +1,43 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Dekking is geen kwaliteit, en een legacy-title kan op de onze lijken (2026-09-08, SEO title blueprints)
+
+Joep vroeg blueprints voor `f_meubel~materiaal~opties_kast` onder Kasten. Bij het narekenen van wat
+al gedekt was, kwam het echte verhaal boven. Vier lessen.
+
+**1. `store_has_combos()` telt een legacy-record als gedekt, dus een gap-getal meet gaten en niet
+kwaliteit.** Van de 185 (cat,combo)-paren met verkeer in de Kasten-tak zat 114 al in de store — en
+**71 daarvan (62% van de records, 495 van 745 visits = 66%) draagt de legacy-template.** De grootste
+combi van de hele tak (Boekenkasten `aantal_deuren~f_meubel~materiaal~opties_kast`, 85 visits) was
+legacy. Geen enkele gap-run of build-script vernieuwt die ooit, want de store zegt "aanwezig" en de
+tooling herbouwt nooit bij twijfel (terecht: een valse "nieuw" overschrijft een live record). Wie
+dekking rapporteert, rapporteert dus niet de tekst die live staat. Zie ook de memory
+`page_title_source_tracing`.
+
+**2. Herken legacy aan `!!sub_category_lower!!`, niet aan de tail.** Naast de bekende
+`kopen? | Laagste prijs | beslist.nl` bestaat de variant
+`kopen? | Tot !!DISCOUNT!! korting! | beslist.nl` — bijna onze tekst, maar met `|` waar wij `✔️`
+zetten en met de oude facetvolgorde (`!!f_meubel!! !!materiaal!! !!sub_category_lower!! …` tegen
+onze `!!materiaal!! !!f_meubel!! … !!sub_category!!`). Een tail-match had 71 legacy-records als
+"onze template" geteld.
+
+**3. `seo_titles_build_gap_combos.py` filtert `winkel` NIET.** Die uitsluiting zit alleen in
+`seo_titles_gap_from_query.py`. Bouw je vanaf een eigen CSV, dan moet je de `winkel`-combo's zelf
+weggooien (hier 4 rijen, 13 visits), anders maak je blueprints voor pagina's waarvan het facet
+globaal uitstaat.
+
+**4. Een combo is de exacte facetverzameling, en de supersets zijn een eigen, grotere vraag.** De
+trio had 64 visits over 14 children; de combo's die de trio *bevatten* hadden er samen 745 over 76
+keys — de grootste (`aantal_deuren~…`, 94) trekt meer dan de trio zelf. "Heeft deze combi verkeer?"
+is dus twee vragen, en het antwoord op de tweede is hier 12× groter dan op de eerste.
+
+**Twee procesnotities.** De Redshift-resultaatcache greep *niet* op een woordelijk identieke query
+(twee keer ~10 min in plaats van 0,3s), dus pickle de rijen zelf voordat je iets in Python
+uitprobeert. En `tail --pid=$(pgrep -f script.py)` in hetzelfde commando dat dat script start,
+matcht de eigen bash-wrapper (die de scriptnaam in zijn argv heeft) en wacht op zichzelf — 20
+minuten deadlock; wacht op een PID die je uit `$!` hebt, of op de outputfile.
+
 ## Een vlag die aanstaat en toch niets linkt, en drie manieren om leeftijd te verzinnen (2026-09-08, facetwaarde-seoPriority)
 
 Joep vroeg de opruiming van 07-09 te herhalen op de **tweede** seoPriority — die van de facet
