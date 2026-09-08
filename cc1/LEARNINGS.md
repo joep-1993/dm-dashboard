@@ -1,6 +1,50 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een komma in een waarde en een komma als scheidingsteken (2026-09-08, redirect-tool)
+
+Twee wensen van Joep: de rewire-badge moet de regel noemen die hij omzet, en de Run-view krijgt
+een "Retry errors"-knop die de mislukte rijen als nieuwe run oppakt (`ff827ba`, `7205dad`).
+
+**Wie rijen terugvoert in de plakinvoer, moet TABS gebruiken.** `_parse_text` sniffing kiest het
+scheidingsteken dat het vaakst op de **eerste regel** staat, uit tab/`;`/`,`. En `country` is bij
+ons `nl, be` — met komma's als scheidingsteken wordt `be` dus het **label** van de rij, en de
+country valt terug op `MANUAL_COUNTRY` (`NL+BE`). Met tabs overleeft alles: getest met de drie
+mislukte rijen van run #50 door de échte `/parse-text` op :8003, alle vijf velden (old, new,
+statuscode, country, label) komen identiek terug. Kolomorde is die van `EXPECTED_COLUMNS`.
+
+**Een retry hoort langs de gewone weg, niet langs een eigen endpoint.** parse-text → preflight →
+Submit hergebruikt alle bestaande logica én geeft de retry een verse preflight: sinds de vorige
+poging kan een rij al doorverwezen zijn, een rewire nodig hebben of een nieuw conflict opleveren.
+Submit maakt er dan gratis een eigen run # van. Een knop die zelf POST'te had die drie dingen
+allemaal opnieuw moeten uitvinden.
+
+**`warning` is niet herkansbaar, en dat is geen omissie maar een eigenschap.** Een `warning`-rij
+(hoofdregel geplaatst, ≥1 inkomende rewire mislukt en teruggedraaid) heeft zijn regel wél
+gekregen: bij een retry ziet preflight die als bestaand en zet de rij op skip. Alleen `fail` gaat
+mee. Wil je de mislukte rewires herkansen, dan moet je de **inkomende** regels aanbieden, niet de
+hoofdregel — dat is een ander pad dan deze knop.
+
+**Bootstrap zet `.badge` op `white-space: nowrap`.** Elke badge met een URL erin heeft dus de
+wrap-trio nodig (`white-space: normal; word-break: break-all; text-align: left`), anders schuift
+een `/products/…`-pad de From-kolom voorbij zijn `max-width: 380px`. Dat was al de reden dat
+`.badge-current` bestond; `.badge-rewire` deelt die regel nu. **En de laadorde doet mee:** in mijn
+eerste testopstelling stond Bootstrap ná de eigen `<style>` en won `nowrap` alsnog op gelijke
+specificiteit — de badge liep over de kolom heen. De pagina zelf laadt Bootstrap eerst, dus die
+overflow was mijn harness, niet de fix. Bouw een testopstelling in de echte volgorde na.
+
+**Recept om een pagina met inline JS te testen zonder hem te herschrijven:** trek de échte
+functie-body en de échte `<style>` met python uit het HTML-bestand, evalueer ze in node met een
+stubrij, schrijf het resultaat naar een harness-HTML en screenshot die met Windows-Chrome. Zo test
+je de code die er staat in plaats van een overgetypte kopie. Valkuil: `out.innerHTML = \`` komt in
+`redirect-tool.html` meerdere keren voor — anker op een uniek commentaar in de buurt (`// Shell —
+table rows…`), niet op de eerste treffer, anders extraheer je de foutmelding-template.
+
+**Twee features in één bestand splitsen in twee commits:** `git diff <file>` naar een patch,
+splitsen op de `@@`-regels, en de **achterste** hunks eerst met `git apply --cached` stageren. Dan
+houden de voorste hunks hun exacte regelnummers voor de tweede commit en hoeft git niets met
+offsets te zoeken. Daarna is `git add <file>` genoeg voor de rest. Zie [[git_stage_own_hunk_parallel_session]].
+
 ## De search-leider kan één winkel met volgestopte titels zijn (2026-09-08, rurl/Search API)
 
 Vervolg op Joeps vraag "welke URL zou je dan voorstellen voor de caravan-rij". Het

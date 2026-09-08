@@ -3,6 +3,33 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-08 (4) — Redirect-tool: rewire-badge noemt zijn regel, en Retry errors in de Run-view
+
+Twee wensen van Joep, beide in `frontend/redirect-tool.html`. Lessen in LEARNINGS, zelfde datum.
+
+- [x] **Rewire-badge noemt de regel** (`7205dad`): `⚠ 1 rewire` → `⚠ rewire: <fromUrl>`, bij meer
+      dan één de eerste met `+N` en de volledige lijst in de tooltip. `.badge-rewire` deelt de
+      wrap-regel van `.badge-current`, anders loopt een `/products/…`-pad de From-kolom uit.
+- [x] **"Retry errors (N)" naast Close in de Run-view** (`ff827ba`): zet de `fail`-rijen in de
+      plakinvoer (TAB-gescheiden, zie LEARNINGS), schakelt naar Manual input, sluit de Run-view en
+      draait Preview; Submit maakt er een nieuwe run # van. Voorgevuld label
+      `retry run #<id> — <label>`, en een bevestiging als er al invoer klaarstaat.
+- [x] **Round-trip getest** tegen de echte `/parse-text` met de drie mislukte rijen van run #50, en
+      de kaartkop gerenderd in beide toestanden (met/zonder fouten).
+
+Open:
+
+- [ ] **De knop is nog niet in een echte browser geklikt** — headless Chrome kan niet klikken, dus
+      de klikketen (staging → `applyInputMode` → `runPreview`) is alleen statisch geverifieerd
+      (`node --check`, alle id's bestaan). Run #50 heeft 3 fails en is de testkandidaat. Er wordt
+      niets geschreven tot Submit.
+- [ ] **`warning`-rijen hebben geen herkansingspad.** De hoofdregel staat er, de inkomende rewire
+      niet. Wil Joep die kunnen herkansen, dan moet er een pad komen dat de **inkomende** regels
+      opnieuw aanbiedt (en dus met `replace_existing` of via de rewire-stap werkt), niet de
+      hoofdregel — die wordt nu terecht als bestaand overgeslagen.
+- [ ] **Prod pullen + herstarten** — zie ook (3) hierboven: `bf179a0`, `ff827ba` en `7205dad`
+      staan op main maar niet op win-htz-006:3003, waar Joep werkt.
+
 ### 2026-09-08 (3) — Run van 07-09 ontbrak in Recent runs, en de vinkkolom stond scheef
 
 Joeps melding: laatste run in Auto-Redirects is 28-08 11:53:39, terwijl hij op 07-09 een Tier-A-run
