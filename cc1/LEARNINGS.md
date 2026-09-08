@@ -1,6 +1,72 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een score die precies op een vloer landt, is geen berekening (2026-09-08, rurl)
+
+Joep: "auto-redirects gaf deze redirect 90, dat is veel te hoog — zou ongeveer 60 moeten
+zijn." `/huis_tuin/huis_tuin_505061_505308/r/caravan/` → Binnenverlichting
+`/c/ruimte_woonaccessoires~'Caravan'`, tier A.
+
+**De eerste vraag bij een te hoge score is niet "welke component is te royaal", maar "is dit
+getal wel opgeteld".** Alle componenten samen gaven 50: 60 basis (match_score 100 × 0,6) + 10
+exact-match − 10 voor de `[maincat]`-sprong − 10 voor H1-gelijkenis 50. De 90 komt van RC5's
+`base_score = max(base_score, 90)`. Dát de uitkomst exact 90 is en niet 91 of 96, is het
+bewijs: een vloer die bijt, laat zijn eigen getal achter. Zoek in de scorer dus eerst op
+`max(`/`min(` voordat je aan de banden gaat rekenen.
+
+**Een "de facetwaarde IS de query"-test is blind voor de andere helft van de bestemming.** De
+H1 van een /c/-pagina is `<categorie> <facetwaarde>`. RC5 leest alleen de tokens van de query
+en vergelijkt die met de waarde; de categorie komt er niet in voor. Binnen de eigen categorie
+is dat onschadelijk (de zoeker stond al op dat onderwerp, het facet verkleint het alleen — het
+zusterverzoek `/huis_tuin_505064_5007960/r/caravan/` → dezelfde categorie + `ruimte~Caravan`
+staat terecht op 95). Bij een categoriesprong claimt de vloer iets wat hij niet gemeten heeft:
+'Caravan' is de query, maar 'Binnenverlichting' is een producttype dat niemand vroeg. V55 zet
+om precies deze reden een plafond op 89 — "H1 alleen fabriceert nooit een tier A" — en
+waarde-gelijkheid is een zwákker signaal dan H1, want die kijkt de categorie niet eens aan.
+
+**De discriminator is de search-leider, niet de woordsoort of de H1.** Zowel `squishy` →
+Fidgets 'Squishy' (goed) als `caravan` → Binnenverlichting 'Caravan' (mis) heeft h1_overlap
+67: waarde echoot de query, categorie is vreemd. Tokens kunnen dit niet scheiden, semantiek
+wel, en het bewijs lag er al: de Search API legt "caravan" in huis_tuin bij Overgordijnen
+(0,55 van 23.559). Op de 100 cross-categorie value≡query-rijen van de run van 26-08 is de
+leider het **29 keer wél** eens met de bestemming (squishy → Fidgets, airfryer → Airfryers,
+ferrero rocher → Bonbons, beterschap → Beterschapskaarten) en **71 keer niet** (`koel` → LED
+Strips 'Koel wit', `wifi` → Videocamera's, `glas` → Waterkokers, `25 cm` → Pannen, `teer` →
+Shampoo). Dezelfde vraag die V65 al aan een merksprong stelt, en generieker dan hij daar
+stond: een facetwaarde die de héle query draagt is een claim over het product, dus als de
+producten elders liggen is die waarde een filter en geen bestemming.
+
+**Meet de botte variant voordat je hem afwijst.** "Laat de vloer vallen bij élke
+categoriesprong" is één regel en voelt principieel — en zet `airfryer` → Airfryers van 96 naar
+36 (tier D), `squishy` → Fidgets en `beterschap` → Beterschapskaarten net zo. De vloer doet op
+cross-categorierijen dus écht werk; alleen blind. Zonder die meting had ik een fix gepusht die
+29 goede redirects uit productie haalt om er 71 uit te halen.
+
+**Een demotie hoort in de staart, niet in de scorer.** V64 schreef het al op en het geldt hier
+weer: `calculate_reliability_score` verlagen verschuift de `reliability_score < 50`-poorten
+halverwege de cascade (V31-guard, search-derived rescue), en dan verandert er een BESTEMMING.
+In `_finalize_redirect` kan een stap per constructie alleen het getal aanraken. De scorer kreeg
+er daarom alleen een `value_eq_floor`-vlag bij, zodat de staart hetzelfde getal zonder vloer
+kan opvragen en pas dan beslist. A/B: **0 bestemmingen gewijzigd, 13 van 904 scores, allemaal
+tier A eraf.**
+
+**De rij wist het zelf al, maar de export laat het niet zien.** `flag_for_review` stond op
+"[V28] Legacy score 90, but search (23559 products) shows no dominant deepest_cat". Die kolom
+zit níet in de xlsx (`old url | new url | score | main_category | deepest_category | h1 |
+h1_match | target_products | visits | revenue | reason`), dus wie op score sorteert ziet een
+schone 90. Een waarschuwing die de reviewer niet bereikt, bestaat niet — open punt in TASKS.
+
+**Praktisch, twee dingen die tijd scheelden.** (1) Eén rij reproduceren kost twee seconden:
+CSV met kolom `r_url` en één URL, `main_parallel_v2.py … --multi-facet --enable-facet-probe
+--reuse-data-cache -w 1`; de caches (`data/cache/*.csv`, `search_derived.sqlite`) staan er en
+de prefetch meldt `cache hits: 1, to fetch: 0`. (2) **Een A/B-vlag in de parent zetten werkt
+hier niet:** `main_parallel_v2` doet `mp.set_start_method('spawn', force=True)`, dus workers
+importeren de module opnieuw en zien de waarde uit het BESTAND. Een arm draaien betekent de
+constante in de source omzetten (`sed`) en na de run terugzetten — of de vlag uit een env-var
+laten lezen op importmoment. En let op de kolom `main_category` in de xlsx: die komt uit
+`_main_category_from_redirect` en is de MAINCAT-naam van de bestemming (huis_tuin →
+"Woonaccessoires"), niet de broncategorie van de R-url.
+
 ## IndexNow: een pushkanaal bewijs je op de klok, en een 2xx-range verzwijgt een mislukking (2026-09-08, IndexNow/bothits/Redshift)
 
 Vraag van Joep: "werkt IndexNow, kun je dat bewijzen?" Het kanaal werkt aantoonbaar, de schaal

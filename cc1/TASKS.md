@@ -3,6 +3,53 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-08 (2) — V69: de value≡query-vloer trok een tier A uit een categoriesprong
+
+Joeps melding: `/huis_tuin/huis_tuin_505061_505308/r/caravan/` → Binnenverlichting
+`/c/ruimte_woonaccessoires~'Caravan'` op score 90. Commit `e282d5c`. Lessen in LEARNINGS,
+zelfde datum.
+
+- [x] **Oorzaak: de 90 is RC5's vloer, geen som.** Componenten gaven 50 (60 basis + 10 exact
+      − 10 `[maincat]`-sprong − 10 H1-gelijkenis 50); `base_score = max(base_score, 90)` zette
+      er tier A op. Reproduceerbaar met één rij door `main_parallel_v2.py`.
+- [x] **V69 gebouwd in `_finalize_redirect` (stap 4), niet in de scorer.** De vloer wordt
+      teruggetrokken als de bestemming een andere categorie in dezelfde maincat is, de
+      search-leider die categorie niet is (ook niet als ouder/kind), geen querytoken de
+      bestemmingscategorie benoemt, én de score nog het getal van de scorer zelf is (een
+      vlakke constante van V31/V65/search-derived is niet RC5's werk). Vlag
+      `V69_WITHDRAW_UNBACKED_VALUE_FLOOR` voor de A/B; scorer kreeg `value_eq_floor`.
+- [x] **A/B op 904 rijen** (alle 203 value≡query-rijen van de 26-08-run + 700 willekeurige
+      controles, identieke cache): **0 bestemmingen gewijzigd, 13 scores gewijzigd, allemaal
+      tier A eraf (10 → C, 3 → D), geen enkele omhoog.** Alle dertien herkenbaar mis: `koel` →
+      LED Strips 'Koel wit' (31), `riva` → Overgordijnen, `5 kg` → Gewichten, `300 cm` →
+      Eettafels, `aquarel` → Schetsboeken, `portable` → Scanners, `raam` → Sloten,
+      `minoxidil` → Geneesmiddelen (leider = de bróncategorie), `bamboe` → Tuinbanken,
+      `280 cm` → Hoekbanken, `bluetooth` → Speakers, `ouderwetse` → Wekkers, en Joeps caravan
+      op 50 = tier C.
+- [x] **Botte variant gemeten en afgewezen** (vloer weg bij élke categoriesprong): zet
+      `airfryer` → Airfryers 96 → 36 en `squishy`/`ferrero rocher`/`beterschap` net zo. De
+      leider is het op 29 van de 100 zulke rijen wél eens met de bestemming.
+- [x] **10 regressietests** in `tests/test_v69_value_eq_floor.py` (Joeps rij, gelijke
+      categorie, afdaling naar een kindcategorie, brugtest, maincat-grens, geen bewijs,
+      latere-branch-score, synoniemvloer ongemoeid). Hele suite: 163 passed.
+
+**Open:**
+
+- [ ] **`flag_for_review` staat niet in de xlsx-export.** Deze rij droeg al "[V28] Legacy
+      score 90, but search (23559 products) shows no dominant deepest_cat", maar de export
+      heeft die kolom niet, dus wie op score sorteert ziet een schone 90. Kolom toevoegen of
+      de vlag in `reason` opnemen — anders blijft elke V28-waarschuwing onzichtbaar.
+- [ ] **Betere bestemming, niet alleen een lagere score.** V69 raakt per constructie alleen
+      het getal. Voor `caravan` in Woonaccessoires is de bruikbare bestemming vermoedelijk de
+      BRON-subcategorie + `ruimte~Caravan` (het facet heet `ruimte_woonaccessoires`, dus die
+      pagina bestaat waarschijnlijk), of de leider Overgordijnen. Dat is de V65-vorm
+      (`_xbrand_unsupported` breder maken dan merk/winkel) en verandert bestemmingen: op de
+      26-08-run 14 rijen, allemaal fout (o.a. `sonos` → Piano's, `60 x 60` → Schildersdoeken,
+      `draadloos opladen` → Mobiele telefoons). Joeps besluit.
+- [ ] **Geen share-drempel in V69.** V65 eist `dom_share >= 0,5` voor zijn merktest; V69 doet
+      het zonder, omdat de bewijslast bij de vloer ligt en de 71 oneens-rijen op élk
+      share-niveau rommel zijn. Als de leider ooit te grillig blijkt, is dit de knop.
+
 ### 2026-09-08 (1) — IndexNow bewezen werkend, runlogging erbij, en een 202-bug die werk stil liet verdwijnen
 
 Geen repo-code gewijzigd; wijzigingen zitten in Redshift en in de n8n-flow (export in
