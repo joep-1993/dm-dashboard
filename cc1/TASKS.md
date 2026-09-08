@@ -86,6 +86,12 @@ zelfde datum.
       producten met caravan. Wie de intentie wél wil dekken, moet de maincat uit
       (Kampeerartikelen 4.009, Trekhaken 1.365, Aanhangeronderdelen 1.763) — en dat hoort
       geen tier A te worden voor een eenwoordsquery.
+- [ ] **Winkelconcentratie als kwalificatie op het zoekbewijs.** De leider voor "caravan" is
+      Overgordijnen met 0,55 over 13.203 producten, waarvan **13.201 van één winkel** met
+      volgestopte titels. Winkel is facet-id 1 en zit al in elke respons, dus de check is
+      gratis: bij een grootste-winkelaandeel boven ~90% is de leider een feed-artefact. Raakt
+      V45 (`DOMINANCE_BANDS`), V62, V65 én V69, die alle vier op `dom_cat_*` leunen. Eerst
+      meten hoeveel rijen op zo'n leider staan voordat er een guard bijkomt.
 - [ ] **Geen share-drempel in V69.** V65 eist `dom_share >= 0,5` voor zijn merktest; V69 doet
       het zonder, omdat de bewijslast bij de vloer ligt en de 71 oneens-rijen op élk
       share-niveau rommel zijn. Als de leider ooit te grillig blijkt, is dit de knop.

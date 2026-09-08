@@ -1,6 +1,41 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## De search-leider kan één winkel met volgestopte titels zijn (2026-09-08, rurl/Search API)
+
+Vervolg op Joeps vraag "welke URL zou je dan voorstellen voor de caravan-rij". Het
+zoekbewijs waar V45, V62, V65 en nu V69 alle vier op leunen — `dom_cat_share` en
+`dom_cat_name` — bleek bij navraag zelf de zwakke schakel.
+
+**Een dominantie-share zegt niets over hoeveel WINKELS de match dragen.** De leider voor
+"caravan" in huis_tuin is Overgordijnen met 0,55 over 13.203 producten. Van die 13.203 komen
+er **13.201 van één winkel** (Amazon Partners), met titels van de vorm "… for Keuken Camper
+Caravan Slaapkamer …". Eén feed die alle ruimtes in elke titel opsomt, produceert een
+categorieleider die er statistisch onberispelijk uitziet. Zelfde patroon elders in dezelfde
+meting: Grondzeil 2.928 van 3.002, Kampeerartikelen 3.201 van 4.009 — allemaal dezelfde
+winkel. Winkel is facet-id 1 en zit al in elke respons (`facets[]`), dus de kwalificatie is
+gratis: **lees naast de share de concentratie van de grootste winkel binnen de match.** Boven
+~90% is de leider een feed-artefact en geen uitspraak over de categorie.
+
+**`limit` verandert de waarheid, dus meet met `limit=0`.** Douchegordijnen "matcht" 6.000
+caravanproducten bij `limit=6` en 5 bij `limit=0`: de API valt terug op OR zodra de AND-set
+kleiner is dan `limit` (staat als V31 in `search_derived.py`, maar je trapt er live meteen
+in). Op subcategorieniveau valt hij ook terug bij een onzinwoord — `xyzzyplugh` in
+Overgordijnen geeft 72.363 — en op maincat-niveau juist niet (daar geeft het 0). Dus: **zet
+altijd een onzinwoord naast je meting**, dan zie je meteen of je een matchtelling of een
+fallbackset in handen hebt. `countryLanguage` moet trouwens `nl-nl` zijn, niet `nl-NL`, anders
+HTTP 400 met `{"errors":"language must be one of the following values: nl-nl, de-de, be-nl."}`.
+
+**Uitkomst voor de rij zelf: er is geen bestemming.** `ruimte_woonaccessoires~24078346`
+('Caravan') bestaat in de hele maincat in 6 categorierijen met tellingen 1-5, staat niet onder
+de bron (Douchegordijnen) en geeft 0 onder Overgordijnen — "zelfde facet, betere categorie"
+kan dus niet, en V61 zou het fragment daar toch prunen. De bronpagina zelf heeft 5 van 5.139.
+De echte caravan-intentie ligt buiten de maincat: Kampeerartikelen 4.009 (Dorema-voortenten,
+tenttapijten, Thetford), Trekhaken 1.365 (15,4% van de pagina, Winparts 819),
+Aanhangeronderdelen 1.763. **Dat een facetpagina er zes producten heeft, is geen
+scoreargument** — dun is een taxonomieprobleem — maar het is wél een reden om die pagina niet
+te KIEZEN als je een bestemming aanwijst. Die twee vragen scheiden.
+
 ## Een verdwenen run is weggeklikt, niet gecrasht (2026-09-08, auto-redirects)
 
 Joep: "de laatste run in Auto-redirects is van 28-8, maar ik heb gisteren een run gedraaid met
