@@ -3,6 +3,57 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-08 (1) — IndexNow bewezen werkend, runlogging erbij, en een 202-bug die werk stil liet verdwijnen
+
+Geen repo-code gewijzigd; wijzigingen zitten in Redshift en in de n8n-flow (export in
+`Downloads\claude`). Lessen in LEARNINGS, zelfde datum.
+
+- [x] **Bewezen dat IndexNow werkt, op de klok.** 71,9% van de bingbot-hits op net-ingezonden
+      URL's valt in 16:00-16:29 UTC (= de 18:00 CEST POST) tegen 1,6% referentie; op
+      seconde-niveau begint de burst op alle 20 logdagen tussen 16:00:53 en 16:01:27, met 0-3
+      hits in het uur ervóór. bingbot kreeg 200 op 94,2%.
+- [x] **En bewezen hoe klein het is.** Reactiegraad 0,58% (1.158 van 200.000 in 20 dagen), `/c/`
+      0,95% vs `/p/` 0,45%. Eenmalig: voorperiode 1,09 → submitdag 5,00 → naperiode 0,98 per
+      1.000/dag. Verkeerseffect nul via DiD met R-urls als controlegroep (+5,6pp / −2,2pp tegen
+      8,3% maandruis).
+- [x] **Joeps keyfile-vraag beantwoord.** `…/2e11f87f415a492294eaf378a8a52004.txt` 404't echt
+      (robots/llms/ads.txt geven 200, dus geen WAF), maar blokkeert niets: de key is op
+      hostniveau geregistreerd. Live: echte payload → 200, verzonnen key → 202.
+- [x] **`pa.index_now_joep_runs` aangemaakt** (Redshift, SORTKEY submitted_date, GRANT ALL TO
+      GROUP bi_users gespiegeld van `index_now_joep`): één regel per submit met `response_code`,
+      `ok`, `msedge_ref_a`, `msedge_ref_b`, `api_time` (Ref C = echt POST-moment), `url_count`,
+      `attempted`, `detail`. Wordt **ook bij een mislukking** geschreven — dat gat liet de fix van
+      1 sep open.
+- [x] **202-als-succes-bug gevonden en gefixt.** `_fixed.json` testte `code >= 200 && code < 300`;
+      202 = key validation pending → Bing gooit de batch weg, maar de dedup schreef die 10.000
+      URL's voorgoed op "ingezonden". Nu `ok = code === 200` met eigen Slack-alarmregel.
+- [x] **Getest vóór oplevering.** Node-code uit de import-JSON getrokken en gedraaid met een
+      nagebootste n8n-context (200/202/403/geen-antwoord/lege lijst), en de gegenereerde INSERT's
+      echt tegen Redshift uitgevoerd inclusief een detail met apostrof én backslash. Testrijen
+      verwijderd; `pa.index_now_joep` onaangeroerd op 2.126.645 rijen.
+- [x] **Import klaargezet:** `Downloads\claude\indexnow_submitter_IMPORT_2026-09-08.json`
+      (`active: false` en `versionId` eruit zodat een mis-import geen tweede dagelijkse submitter
+      start), plus losse snippets per node.
+
+**Open:**
+
+- [ ] **Importeren en daarna de Active-toggle checken.** In de bestáánde workflow importeren, niet
+      als nieuwe — twee Schedule Triggers op 18:00 = 20.000/dag in twee batches.
+- [ ] **Vaststellen of de live n8n op `_fixed.json` of nog op de pre-fix versie draait.** Niet uit
+      de data af te leiden (beide geven 10.000/dag met code 200) en er is geen n8n-MCP in deze
+      omgeving. Kijken of `item.json.statusCode || 200` nog in `build_tracking_insert1` staat.
+- [ ] **Keyfile hosten als verzekering.** Verbetert het rendement niet, maar als de
+      BWT-hostregistratie ooit vervalt wordt de 200 stil een 202 en stopt alles ongemerkt.
+      Inhoud = alleen de key als platte tekst.
+- [ ] **De echte hefboom is de mix, niet de implementatie.** 68% van het quotum gaat naar `/p/` —
+      juist het type met de láágste reactiegraad — en 0% naar R-urls, die 62% van de
+      Bing-organische entries leveren. Voorstel uitwerken voordat er meer aan de flow gebeurt.
+- [ ] **beslist.be krijgt nog niets uit n8n**: de fetch-query filtert op `dv.url like
+      '%beslist.nl%'`. BE heeft zijn eigen 10k-quotum en levert 21% van Bing-organisch.
+- [ ] **Optioneel: ruwe runhistorie afleiden** uit `pa.index_now_joep` per `submitted_date`. Niet
+      gedaan omdat Ref A voor oude runs niet bestaat en die historische 200-en deels de neppe van
+      vóór 1 september zijn.
+
 ### 2026-09-07 (6) — seoPriority-opruiming: 1.014 cat×facet-combo's uit, en borstels_stof als type-facet ingetrokken
 
 Geen code gewijzigd; alles via de Taxonomy API en de DB's. Lessen in LEARNINGS, zelfde datum.

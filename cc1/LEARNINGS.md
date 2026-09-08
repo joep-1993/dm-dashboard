@@ -1,6 +1,73 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## IndexNow: een pushkanaal bewijs je op de klok, en een 2xx-range verzwijgt een mislukking (2026-09-08, IndexNow/bothits/Redshift)
+
+Vraag van Joep: "werkt IndexNow, kun je dat bewijzen?" Het kanaal werkt aantoonbaar, de schaal
+niet. Zes lessen, waarvan de meetmethode de meest herbruikbare is.
+
+**1. Een pushkanaal bewijs je met de klok, niet met een correlatie.** De n8n-flow POST om 18:00
+CEST = 16:00 UTC. Van de bingbot-hits op URL's die diezelfde dag zijn ingezonden valt **71,9% in
+16:00-16:29 UTC**, tegen **1,6%** voor alle overige bingbot-hits op dezelfde dagen — factor 44.
+Drukste minuut 16:01. Op seconde-niveau begint de burst op alle 20 logdagen tussen **16:00:53 en
+16:01:27**, met 0-3 hits in het hele uur ervóór. Twintig onafhankelijke dagen in een venster van
+34 seconden laat geen alternatieve verklaring over; een voor/na-vergelijking op dagkorrel had dit
+nooit kunnen aantonen (die geeft 4,6x en is met handenvol confounders te bestrijden).
+Joeps eigen n8n-response gaf later `x-msedge-ref … Ref C: 2026-09-07T16:01:40Z` — een
+onafhankelijk anker op exact dezelfde klokpositie. **Ref C is het POST-moment, Ref A het
+correlatie-ID dat Bing-support opvraagt.**
+
+**2. Het effect is eenmalig en klein — meet dat apart van "werkt het".** Reactiegraad **0,58%**
+(1.158 van 200.000 in 20 dagen; `/c/` 0,95%, `/p/` 0,45%). Cohorten met een volledig
+[-7,+7]-venster: voorperiode 1,09 → submitdag 5,00 → naperiode 0,98 per 1.000 URL's per dag. Eén
+fetch, dan terug naar de basislijn, geen recrawl. Verkeerseffect nul: R-urls worden **nooit**
+ingezonden en zijn dus een gratis controlegroep — vóór/na de dagelijkse cadans (april 2026) is
+R-url −3,4%, C-url +2,3%, P-url −5,5%, dus DiD +5,6pp en −2,2pp tegen 8,3% maandruis.
+
+**3. `code >= 200 && code < 300` is fout voor IndexNow.** 202 = "key validation pending": Bing
+valt dan terug op het keyfile op de host, dat 404't, en gooit de batch weg. Gold 202 als succes,
+dan schrijft de dedup (die alleen op `url` matcht) 10.000 URL's/dag voorgoed op "ingezonden"
+terwijl ze Bing nooit bereiken — stil en onomkeerbaar. Nu `ok = code === 200`, plus
+`logged = ok && urls.length > 0` zodat een 200 op een lege batch geen succesregel wordt.
+**Generieke les: een statusrange die een "pending"-code omvat, retireert werk dat nooit is
+gedaan.** Het keyfile 404't overigens écht (robots/llms/ads.txt geven 200, dus geen WAF), maar de
+key is op hostniveau geregistreerd: echte payload → 200, verzonnen key van dezelfde vorm → 202.
+Die 202 is de negatieve controle die bewijst dat de 200 niet onvoorwaardelijk is.
+
+**4. Voor uur/minuut-vragen moet je naar de ruwe logs, en die scan kost 68 seconden.**
+`pa.bothits_url_daily` dekt maar 56,8% van de ingezonden C-urls (alleen `pa.urls`-leden, en
+`pa.urls` bevat **geen** productpagina's: 1.020.947 van 1.024.727 is een C-url) en heeft alleen
+dagkorrel. De ruwe `.gz` in `~/bothits_s3/_processed` (20 dagen vanaf 2026-07-24) geven 100%
+dekking én seconden. Vier valkuilen: **(a)** `xargs -P8 zgrep … >> één bestand` verminkt regels
+op 4KB-blokgrenzen (102 van 55.942) — laat elke worker naar zijn eigen bestand schrijven en `cat`
+ze daarna; **(b)** `ls ~/bothits_s3/_processed/*/*.gz` = "Argument list too long" bij 58k
+bestanden, gebruik `find`; **(c)** log-URI's zijn percent-encoded (`~` = `%7E`) → zonder
+`unquote` matcht 3 van 39.617 tegen `pa.index_now_joep`; **(d)** neem alleen cohorten waarvan het
+héle event-venster binnen de logdagen valt, anders tellen ontbrekende dagen als nul en loopt je
+voorperiode kunstmatig op (0,22 → 1,09 na correctie).
+
+**5. Een gepoolde Redshift-connectie commit niet, en DDL verdwijnt stil.**
+`get_redshift_connection()` doet een `SELECT 1`-healthcheck en heeft dus al een transactie open:
+`conn.autocommit = True` gooit `set_session cannot be used inside a transaction`, en zonder
+expliciete `conn.commit()` wordt een `CREATE TABLE` **teruggedraaid zonder foutmelding** — de
+`GRANT` erna zei vervolgens "relation does not exist". Losse bijvangst: visits tellen kan zónder
+de `fct_visits`-join. `dim_visit` alleen gaf exact dezelfde 10.306 Bing-organische visits voor
+augustus, terwijl de join over 2 jaar op 120s timeoutte.
+
+**6. Bings SERP-operators zijn onbruikbaar voor een indexatiecheck.** `url:` en `site:` worden
+voor een gescrapete request niet geëerd: zowel een echt gecrawlde URL als een verzonnen URL geeft
+10 `b_algo`-blokken met onverwante resultaten (Microsoft Learn, Hotmail-support), en
+`&format=rss` doet hetzelfde. De string "geen resultaten" staat als JS-template óók in een pagina
+mét resultaten, dus die is als detector waardeloos — daar ben ik eerst in getrapt en het gaf een
+schijnbaar schone 0/15-vs-0/15. Zonder BWT-toegang is de indexzijde niet verifieerbaar; de keten
+die je hard kunt maken is submit → crawl, niet submit → index.
+
+**Bestandsvalkuil om te onthouden:** van 1 september bestaan `indexnow_submitter_new.json` (13:08,
+**zonder** de fix) en `indexnow_submitter_fixed.json` (13:10, **met**). De oude aantekening wees
+naar `_new` als master en dat is precies de verkeerde. Sinds vandaag is
+`indexnow_submitter_IMPORT_2026-09-08.json` de importversie en heet de tussenversie
+`..._SUPERSEDED.json`.
+
 ## seoPriority opruimen: de vlag stuurt het verkeer niet, en drie manieren om je eigen meting te slopen (2026-09-07, taxonomie/Redshift)
 
 Begonnen met één vraag ("is `borstels_stof` een type-facet?") en geëindigd bij 1.014
