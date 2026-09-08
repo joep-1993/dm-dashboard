@@ -1,6 +1,88 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een sunset die op een percentage van de calls slaat, en een migratie die je architectuur herschrijft (2026-09-08, GSD Campaigns / Merchant API)
+
+Joeps vraag was "kijk eens naar de errors in `gsd_run_2026-09-08.xlsx`": 24 foutregels in twee
+soorten die niets met elkaar te maken lijken te hebben. Zelfde oorzaak. Werd een volledige
+migratie naar Merchant API v1 (`3e12bf8`, `a33aa51`).
+
+**Handhaving van een API-sunset kan probabilistisch zijn, en dan is "Gone" retryable.** Google
+zette de Content API for Shopping op 18-08-2026 uit voor GCP-project `acoustic-racer-258913`,
+maar niet in één keer: 40 identieke `accounts.list`-calls gaven 37× 200 en 3× **HTTP 410
+`content_api_sunset`**. Een loterij per HTTP-call. `_is_transient_mc_error` classificeerde 410 als
+permanent — verdedigbaar, want "Gone" is permanent — en daarmee liet één ongelukkige pagina een
+hele shop vallen. **Meet het percentage voor je conclusies trekt:** "de API is uit" en "de API
+weigert 8% van de calls" vragen totaal verschillende fixes. Een enkele call is geen steekproef.
+
+**Twee onverklaarbare foutteksten met dezelfde oorzaak: zoek de gedeelde call, niet de gedeelde
+shop.** `content_api_sunset` (14 rijen, lookupfase) en de Google Ads-fout `Resource was not found.`
+(10 rijen, 2 shops × 5 labels) waren dezelfde 410, één stap verderop: `link_to_google_ads` ving hem,
+gaf `False`, en `_get_or_create_mc_account` **gooide die returnwaarde weg**. Het MC-account bestond
+dan zonder `adsLinks` en alle vijf labels stierven op RESOURCE_NOT_FOUND op
+`shopping_setting.merchant_id`, elk na ~2 min retries. De foutmelding wijst naar Google Ads terwijl
+het gat in Merchant Center zit. Bewezen door `adsLinks` van de vier shops te vergelijken: de twee
+mislukte hadden `[]`, de twee geslaagde `[{active}]`.
+
+**Waarom de ene shop doorkwam en de andere niet: tel de lootjes, niet de shops.** `get_mc_id`
+pagineerde de héle parent bij elke aanroep, en `_get_or_create_mc_account` roept hem twee keer per
+shop. NL = 1.448 subaccounts = 6 pagina's = 12 calls; DE = 274 = 2 pagina's = 4 calls. Bij 8%
+afwijzing per call is dat ~60% versus ~28% kans om te sneuvelen — en precies dát patroon stond in de
+Excel (7 van de 8 NL-shops weg, DE erdoorheen). Eén listing per parent per run maakt het probleem
+grotendeels weg, náást de retry.
+
+**Merchant API is geen 1-op-1 vervanging: één GCP-project hoort bij één merchant-account.** Google:
+*"Each Google Cloud project can only be registered with a single Merchant Center account at any
+given time"* — een tweede geeft `ALREADY_REGISTERED`. En het geregistreerde project is dat van de
+**credentials waarmee je belt**; je kunt het niet meegeven. Drie parents = drie GCP-projecten =
+drie keys. Dat is niet af te leiden uit hoe de Content API werkte, waar één service account met
+Admin op alle drie genoeg was. Signaal dat ik eerst verkeerd las: op alle drie de accounts stond al
+een `gsd-*-merchant-api@`-service account in een eigen project (`beslist-skippy`,
+`beslist-pegel-factor`, `beslist-pattas`) — dat was geen toeval maar iemand die deze regel al had
+uitgezocht. **Een service-account-adres verraadt zijn project:** `<naam>@<project-id>.iam.gserviceaccount.com`.
+
+**De keys van de nieuwe projecten kunnen het oude pad niet dragen.** Op `beslist-skippy` c.s. staat
+de Content API niet aan (403 `accessNotConfigured`), dus zodra ik de terugval óók door de
+per-markt-keys routeerde was het vangnet een harde fout. Merchant API per markt, Content API op de
+gedeelde key. Ontdekt doordat een vergelijkingsscript omviel, niet doordat ik het bedacht.
+
+**Registratie: de aanroeper mag een service account zijn, het developer-adres niet.** Mijn eerste
+poging faalde met `PERMISSION_DENIED_TO_REGISTER_GCP_WITH_SERVICE_ACCOUNT` omdat ik het service
+account als `developerEmail` opgaf. De docs zijn expliciet: *"Must not be a service account email"*
+— terwijl de identiteit die de call autoriseert er juist wél een mag zijn, mits Admin. Twee velden
+met tegengestelde eisen; lees de registratiepagina vóór je hem aanroept.
+
+**`gcloud auth application-default login` is geen route naar de `content`-scope.** gcloud's eigen
+client-ID is daarvoor dichtgezet: de browser antwoordt "Deze app is geblokkeerd", en gcloud
+waarschuwt zelf ("will be blocked soon for the default client ID"). Werkende vorm: een
+`InstalledAppFlow` met een eigen client uit `.env`, `open_browser=False`, de URL geprint en op
+Windows geopend met `chrome.exe`. Maar let op **welk project** die client heeft — een login via de
+Google Ads-client (project `cla-campaign-creation`) had dát project geregistreerd, niet degene
+waarvan we de key gebruiken.
+
+**Valideer een API-migratie op het veld dat de sleutel ís, niet op de aantallen.** Onze lookup
+matcht op de accountnaam, dus heb ik per parent de volledige listing van beide API's gediff'd:
+identieke set id's, identieke namen, identieke volgorde (1.451 / 1.006 / 274), en Merchant API
+~2,5× sneller. Alleen tellen was hier onvoldoende geweest: een genormaliseerde naam leest als
+"bestaat niet" en levert een duplicaat.
+
+**Een naam die een mens kan wijzigen, is een slechte primaire sleutel.** Iemand hernoemde
+PassaPadels subaccount 5849461135 in de MC-UI van "PassaPadel|BE" naar "PassaPadel"; de run daarna
+vond niets onder de feednaam en maakte 5849248002 aan — leeg, terwijl de vijf live campagnes op het
+eerste bleven wijzen. Het slot en de hercontrole vangen dit niet, want er is geen race: de sleutel
+is wég. `pa.mc_ids_efficy` wist het juiste antwoord (shop_id + country → 5849461135) de hele tijd
+al, dus dat is nu de tweede sleutel op het create-pad — mét een check dat het account nog echt
+onder de parent staat, want een merchant_id van een verwijderd account faalt alsnog.
+
+**Terzijde, drie WSL/tooling-valkuilen die tijd kostten:**
+- `google.auth.default()` zonder ADC-bestand valt terug op de **GCE metadata-server** en hangt daar
+  tientallen seconden. Check `~/.config/gcloud/application_default_credentials.json` eerst.
+- `pkill -f "auth application-default login"` matcht **zijn eigen commandoregel** en sloopt de
+  shell (exit 144). Gebruik een tekenklasse: `pgrep -f 'gclou[d].py aut[h]'`.
+- Python buffert stdout naar een pipe, dus de OAuth-URL van een achtergrondproces bleef onzichtbaar
+  tot ik `-u` toevoegde. En `| head` slikte hem alsnog op; schrijf naar een bestand.
+
+
 ## Een komma in een waarde en een komma als scheidingsteken (2026-09-08, redirect-tool)
 
 Twee wensen van Joep: de rewire-badge moet de regel noemen die hij omzet, en de Run-view krijgt

@@ -254,6 +254,20 @@ GOOGLE_CLIENT_ID=...apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=GOCSPX-...     # OAuth client secret
 GOOGLE_LOGIN_CUSTOMER_ID=3011145605  # Manager account ID
 
+# Merchant Center (GSD Campaigns). Merchant API v1 wil ÉÉN GCP-project per
+# merchant-account — Google registreert het project waar de credentials bij horen, en
+# een project kan bij maar één account geregistreerd staan. Vandaar een key per markt.
+# De keyfiles staan in backend/service_accounts/ (gitignored: handmatig kopiëren naar
+# prod, nooit via de repo). Zie docs/PROD_FIX_MC_SERVICE_ACCOUNT.md.
+GSD_SERVICE_ACCOUNT_FILE_NL=.../beslist-skippy-*.json         # NL 5592708765
+GSD_SERVICE_ACCOUNT_FILE_BE=.../beslist-pegel-factor-*.json   # BE 5588879919
+GSD_SERVICE_ACCOUNT_FILE_DE=.../beslist-pattas-*.json         # DE 5342886105
+# Terugval voor markten zonder eigen key, én de ENIGE key die de (uitgefaseerde)
+# Content API bereikt — de per-markt-projecten hebben die API niet aanstaan.
+GSD_SERVICE_ACCOUNT_FILE=.../acoustic-racer-258913-*.json
+# Los daarvan: de Sheets-key voor de run-log en reconcile_run_logs (ander project).
+GSD_SHEETS_SERVICE_ACCOUNT_FILE=backend/data/gsd-campaign-creation.json
+
 # Performance Tuning (optional)
 MAX_CONCURRENT_CUSTOMERS=10          # Parallel customer processing
 MAX_CONCURRENT_OPERATIONS=50         # Concurrent operations per customer

@@ -3,6 +3,63 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-08 (5) — GSD Campaigns: van de Content API naar Merchant API v1, en een guard tegen duplicaten
+
+Joeps vraag over de errors in `gsd_run_2026-09-08.xlsx` (24 foutregels, 12 van de 15 shop/land-
+combinaties gesneuveld). Lessen in LEARNINGS, zelfde datum. Twee commits: `3e12bf8` (migratie),
+`a33aa51` (guard).
+
+- [x] **Diagnose: één oorzaak, twee foutteksten.** Content API for Shopping is per 18-08-2026
+      gesunset voor `acoustic-racer-258913`, en Google handhaaft op een **willekeurig deel** van de
+      calls — gemeten 37/40 OK, 3× HTTP 410. `content_api_sunset` (14 rijen) was de lookup;
+      `Resource was not found.` (10 rijen) was diezelfde 410 in `link_to_google_ads`, waarvan de
+      `False` werd weggegooid, zodat 5 labels op RESOURCE_NOT_FOUND op `shopping_setting.merchant_id`
+      stierven. Bewezen via `adsLinks` van vier shops en `product_link` in Ads.
+- [x] **Merchant API v1 als hoofdweg, Content API als vangnet per call.** Vier call sites om:
+      `accounts.list` → `listSubaccounts` (500/pagina), `accounts.insert` → `createAndConfigure`
+      + `homepage.updateHomepage`, en `accounts.get`/`update` voor de adsLinks → **Google Ads**
+      (`product_link` + `ProductLinkService`), want Merchant API kent geen adsLinks.
+- [x] **Eén GCP-project per merchant-account.** Google staat één account per project toe, en het
+      geregistreerde project is dat van de credentials. Drie keys erbij:
+      `GSD_SERVICE_ACCOUNT_FILE_NL/BE/DE` (`beslist-skippy` / `beslist-pegel-factor` /
+      `beslist-pattas`), terugval op de gedeelde key. Joep liet de service accounts + registratie
+      aanmaken; alle drie de markten draaien nu op `merchant_api_v1`.
+- [x] **Pleisters:** de sunset-410 als retryable (`_mc_call`, 8 pogingen), één listing per parent
+      per run in plaats van per shop (was 12 calls voor een NL-shop), en de returnwaarde van
+      `link_to_google_ads` stopt de run bij foutstap `mc_ads_link` in plaats van 10 gedoemde creates.
+- [x] **Gevalideerd op het veld dat de sleutel is:** volledige listing van beide API's gediff'd per
+      parent — identieke set, namen én volgorde (1.451 / 1.006 / 274), Merchant API ~2,5× sneller.
+- [x] **Joybuy.de en Balmuir.com alsnog gekoppeld** (MC 5849222232 → Ads 4192567576, 5849460328 →
+      7938980174), beide kanten bevestigd. Die twee shops kunnen opnieuw gedraaid worden voor hun
+      campagnes.
+- [x] **Guard tegen een hernoemd subaccount** (`a33aa51`): `_mc_id_from_state` raadpleegt vlak voor
+      het aanmaken `pa.mc_ids_efficy` op shop_id + country, en alleen als dat account nog echt onder
+      de parent staat. Aanleiding: PassaPadel 5849461135 werd in de MC-UI hernoemd, waarna een run
+      5849248002 aanmaakte terwijl de campagnes op de eerste bleven wijzen. Joep heeft dat inmiddels
+      zelf opgeruimd (5849248002 weg, naam terug).
+- [x] **39 tests** in `backend/test_gsd_mc_backend.py`; de Merchant API-tak met fakes, omdat die pas
+      halverwege de sessie echt bereikbaar werd. Runbook-sectie in `docs/PROD_FIX_MC_SERVICE_ACCOUNT.md`.
+
+Open:
+
+- [ ] **Prod (win-htz-006) heeft de drie nieuwe keys nog niet.** `backend/service_accounts/` is
+      gitignored, dus een `git pull` levert ze daar niet. Zonder die keys valt prod terug op de
+      gedeelde acoustic-racer-key en draait dus door op de Content API — met retries, maar die loopt
+      naar 100% afwijzing. Originelen: `Downloads\claude\gsd-account-creation`. Kopiëren naar
+      `backend\service_accounts\` plus de drie `GSD_SERVICE_ACCOUNT_FILE_*`-regels in de prod-`.env`.
+- [ ] **Dubbele accountnamen in de parents:** 105 extra accounts in NL (spartoo.nl staat er 3×), 89
+      in BE, 4 in DE. De lookup pakt de eerste — beide API's zijn het over die volgorde eens, dus
+      de migratie verandert er niets aan, maar voor die shops kunnen de campagnes op een ander
+      MC-account hangen dan waar de feed in landt. Aparte opruimklus.
+- [ ] **`gsd-campaign-creator@cla-campaign-creation` opruimen?** Joeps vraag. Als MC-gebruiker op NL
+      en BE mag hij weg (niets gebruikt hem daarvoor), maar het **service account zelf** niet: het is
+      de Sheets-key voor de run-log en `reconcile_run_logs`. En het **project** al helemaal niet —
+      daar hangt de OAuth-client van het hele dashboard aan. Nette weg: Sheets-toegang eerst naar een
+      ander service account verhuizen.
+- [ ] **`test_kopteksten_faq_audit.py::test_faq_delete_route_single_and_clears_url_validation` faalt**
+      — bestond al vóór deze sessie (bevestigd via stash), staat er los van: de live FAQ-delete-route
+      wist `pa.url_validation` niet meer.
+
 ### 2026-09-08 (4) — Redirect-tool: rewire-badge noemt zijn regel, en Retry errors in de Run-view
 
 Twee wensen van Joep, beide in `frontend/redirect-tool.html`. Lessen in LEARNINGS, zelfde datum.
