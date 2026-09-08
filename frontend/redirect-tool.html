@@ -35,13 +35,14 @@
            wit op #fd7e14 haalt maar 2,57:1, zwart 8,17:1. Zelfde silhouet als de
            buur, alleen de tint verschilt. */
         .badge-conflict { background-color: #fd7e14; color: #000; cursor: help; }
-        /* "current: <url>" — de badge die zegt waarheen de oude URL nú
-           doorverwijst. Bootstrap zet `.badge` op `white-space: nowrap`, en een
-           /products/…-pad schoof daarmee de From-kolom voorbij zijn max-width
-           (de reden dat de URL in 2026-08-27 juist naar de tooltip verhuisde).
-           Nu hij weer inline staat: laten afbreken binnen de cel, en links
-           uitlijnen — `.badge` centreert, wat bij twee regels URL scheef leest. */
-        .badge-current {
+        /* Badges met een URL erin: `current: <url>` (waarheen de oude URL nú
+           doorverwijst) en `rewire: <url>` (welke inkomende regel wordt omgezet).
+           Bootstrap zet `.badge` op `white-space: nowrap`, en een /products/…-pad
+           schoof daarmee de From-kolom voorbij zijn max-width (de reden dat de URL
+           in 2026-08-27 juist naar de tooltip verhuisde). Nu hij weer inline staat:
+           laten afbreken binnen de cel, en links uitlijnen — `.badge` centreert,
+           wat bij twee regels URL scheef leest. */
+        .badge-current, .badge-rewire {
             white-space: normal; word-break: break-all; text-align: left;
             font-weight: 500;
         }
@@ -795,10 +796,23 @@
                     // rules on its fromUrl.
                     const newTarget = row.final_new || row.input_new || '';
                     const plural = incomingCount === 1 ? '' : 's';
+                    // De regel zélf in de badge, niet alleen zijn aantal — zelfde
+                    // reden als bij `current: <url>` hierboven: welke regel omgezet
+                    // wordt is het antwoord op "wat gaat hier om", en dat hoort niet
+                    // in een tooltip. Bij meer dan één noemt de badge de eerste met
+                    // `+N` erachter; de volledige lijst blijft in de tooltip, want
+                    // vier URL's onder een rij duwen de tabel uit zijn hoogte.
+                    const rules = (row.incoming_rules || [])
+                        .map(r => r.fromUrl || '').filter(Boolean);
+                    const label = rules.length
+                        ? `⚠ rewire: ${escapeHtml(rules[0])}`
+                          + (rules.length > 1 ? ` +${rules.length - 1}` : '')
+                        : `⚠ ${incomingCount} rewire${plural}`;
                     const tip = escapeHtml(
-                        `will rewire ${incomingCount} incoming rule${plural} to → ${newTarget}`);
-                    skipBadge += `<br><span class="badge badge-conflict" title="${tip}">`
-                               + `⚠ ${incomingCount} rewire${plural}</span>`;
+                        `will rewire ${incomingCount} incoming rule${plural} to → ${newTarget}`
+                        + (rules.length > 1 ? `\n\n${rules.join('\n')}` : ''));
+                    skipBadge += `<br><span class="badge badge-conflict badge-rewire" `
+                               + `title="${tip}">${label}</span>`;
                 }
                 // data-idx carries the ORIGINAL index, so the delegated change
                 // handler stays correct under any sort or filter.
