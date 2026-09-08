@@ -73,12 +73,19 @@ zelfde datum.
       heeft die kolom niet, dus wie op score sorteert ziet een schone 90. Kolom toevoegen of
       de vlag in `reason` opnemen — anders blijft elke V28-waarschuwing onzichtbaar.
 - [ ] **Betere bestemming, niet alleen een lagere score.** V69 raakt per constructie alleen
-      het getal. Voor `caravan` in Woonaccessoires is de bruikbare bestemming vermoedelijk de
-      BRON-subcategorie + `ruimte~Caravan` (het facet heet `ruimte_woonaccessoires`, dus die
-      pagina bestaat waarschijnlijk), of de leider Overgordijnen. Dat is de V65-vorm
-      (`_xbrand_unsupported` breder maken dan merk/winkel) en verandert bestemmingen: op de
-      26-08-run 14 rijen, allemaal fout (o.a. `sonos` → Piano's, `60 x 60` → Schildersdoeken,
-      `draadloos opladen` → Mobiele telefoons). Joeps besluit.
+      het getal. Dat is de V65-vorm (`_xbrand_unsupported` breder maken dan merk/winkel) en
+      verandert bestemmingen: op de 26-08-run 14 rijen, allemaal fout (o.a. `sonos` → Piano's,
+      `60 x 60` → Schildersdoeken, `draadloos opladen` → Mobiele telefoons). Joeps besluit.
+      **Voor de caravan-rij zelf is er geen bestemming om naartoe te sturen** — nagemeten
+      08-09 (correctie op wat hier eerst stond): `ruimte_woonaccessoires~24078346` bestaat in
+      de hele maincat in 6 categorierijen met tellingen 1-5, staat NIET onder de bron
+      (Douchegordijnen, 505061_505308) en geeft 0 onder Overgordijnen, dus "zelfde facet,
+      betere categorie" kan niet en V61 zou het fragment toch prunen. De leider Overgordijnen
+      is een artefact: 13.201 van de 13.203 treffers komen van één winkel (Amazon Partners)
+      met "Keuken Camper Caravan Slaapkamer"-titels. De bronpagina zelf heeft 5 van 5.139
+      producten met caravan. Wie de intentie wél wil dekken, moet de maincat uit
+      (Kampeerartikelen 4.009, Trekhaken 1.365, Aanhangeronderdelen 1.763) — en dat hoort
+      geen tier A te worden voor een eenwoordsquery.
 - [ ] **Geen share-drempel in V69.** V65 eist `dom_share >= 0,5` voor zijn merktest; V69 doet
       het zonder, omdat de bewijslast bij de vloer ligt en de 71 oneens-rijen op élk
       share-niveau rommel zijn. Als de leider ooit te grillig blijkt, is dit de knop.
@@ -125,9 +132,34 @@ Geen repo-code gewijzigd; wijzigingen zitten in Redshift en in de n8n-flow (expo
 - [ ] **Keyfile hosten als verzekering.** Verbetert het rendement niet, maar als de
       BWT-hostregistratie ooit vervalt wordt de 200 stil een 202 en stopt alles ongemerkt.
       Inhoud = alleen de key als platte tekst.
-- [ ] **De echte hefboom is de mix, niet de implementatie.** 68% van het quotum gaat naar `/p/` —
-      juist het type met de láágste reactiegraad — en 0% naar R-urls, die 62% van de
-      Bing-organische entries leveren. Voorstel uitwerken voordat er meer aan de flow gebeurt.
+- [x] **GECORRIGEERD — "0% naar R-urls is het gat" was fout.** Dat stond hier eerder als de
+      grootste hefboom; het klopt niet en de meting weerlegt het. R-urls zijn juist het énige
+      type dat Bing goed vindt: **24,6% dekking** (89.471 unieke URL's in 20 dagen op 363.524 met
+      visits) tegen 9,6% voor C-urls en 8,5% voor P-urls, en met 126.343 hits het grootste deel
+      van bingbots budget. Bing hoeft er niet op gewezen te worden. Ook de aanname "R-urls staan
+      niet in de sitemaps" is onjuist: de browse-sitemap voor computers bevat 205 R-urls op 4.558
+      locs (4,5%). Zend R-urls dus **niet** blanket in — de dedup is een eenrichtingsdeur.
+- [x] **P→C doorgevoerd: één regel in de `ORDER BY` van `fetch_urls_from_redshift`.**
+      `order by 2 desc` → `order by case when SPLIT_PART(dv.url,'?',1) like '%/c/%' then 0 else 1
+      end, 2 desc`. Onderbouwing: /c/ haalt 0,95% same-day fetch tegen 0,45% voor /p/, en dat
+      verschil **houdt stand binnen elke visits-bucket** (1 visit C 0,95% / P 0,43%; 3-5 C 1,48% /
+      P 0,48%; 6-15 C 3,23% / P 0,75%), dus het is geen visits-artefact — de gemiddelde visits in
+      de ingezonden mix waren ook vrijwel gelijk (0,83 vs 1,01). Binnen /c/ blijft visits-desc
+      staan omdat de reactiegraad daar mét visits oploopt. Verwachting: blended 0,58% → ~0,95%,
+      dus ~58 → ~95 fetches/dag. Getest tegen Redshift: de top-10.000 is nu 100% /c/.
+      **Volledig omkeerbaar** — /p/ blijft in de pool, terugdraaien = de ORDER BY terugzetten.
+- [ ] **De C-pool loopt in ~27 dagen leeg** (269.618 oningezonden C-urls à 1-6 visits, gem. 3).
+      Daarna vult /p/ de rest automatisch. Rond 05-10-2026 de mix in `pa.index_now_joep` checken:
+      zakt het C-aandeel, dan is de pool op en is dat verwacht gedrag, geen storing.
+- [ ] **De échte hefboom ligt buiten deze flow: crawl-starvation.** bingbot raakt 0,69% van
+      `pa.urls` per maand en verstookt 26% van zijn budget op `/data/graphql` (dat op `Disallow`
+      staat en dat hij tóch pakt). Er is **geen `User-agent: bingbot`-groep** in robots.txt; wat
+      er staat is `msnbot` met `Crawl-Delay: 20`, en die groep leest bingbot niet. Een
+      bingbot-groep toevoegen (zónder crawl-delay, want die overruled Crawl Control in BWT) doet
+      meer dan welke mixwijziging ook. Zie ook [[bingbot_crawl_starvation]].
+- [ ] **Optioneel: R-urls als gerandomiseerde test**, niet blanket. 50.000 R-urls, helft
+      ingezonden en helft achtergehouden, dan crawl én Bing-entries meten. Kost 14% van de
+      R-pool en houdt de eenrichtingsdeur voor de rest dicht.
 - [ ] **beslist.be krijgt nog niets uit n8n**: de fetch-query filtert op `dv.url like
       '%beslist.nl%'`. BE heeft zijn eigen 10k-quotum en levert 21% van Bing-organisch.
 - [ ] **Optioneel: ruwe runhistorie afleiden** uit `pa.index_now_joep` per `submitted_date`. Niet

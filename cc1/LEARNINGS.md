@@ -135,7 +135,7 @@ laten lezen op importmoment. En let op de kolom `main_category` in de xlsx: die 
 ## IndexNow: een pushkanaal bewijs je op de klok, en een 2xx-range verzwijgt een mislukking (2026-09-08, IndexNow/bothits/Redshift)
 
 Vraag van Joep: "werkt IndexNow, kun je dat bewijzen?" Het kanaal werkt aantoonbaar, de schaal
-niet. Zes lessen, waarvan de meetmethode de meest herbruikbare is.
+niet. Zeven lessen, waarvan de meetmethode de meest herbruikbare is.
 
 **1. Een pushkanaal bewijs je met de klok, niet met een correlatie.** De n8n-flow POST om 18:00
 CEST = 16:00 UTC. Van de bingbot-hits op URL's die diezelfde dag zijn ingezonden valt **71,9% in
@@ -192,6 +192,21 @@ voor een gescrapete request niet geëerd: zowel een echt gecrawlde URL als een v
 mét resultaten, dus die is als detector waardeloos — daar ben ik eerst in getrapt en het gaf een
 schijnbaar schone 0/15-vs-0/15. Zonder BWT-toegang is de indexzijde niet verifieerbaar; de keten
 die je hard kunt maken is submit → crawl, niet submit → index.
+
+**7. "Krijgt het weinig aandacht?" is niet hetzelfde als "heeft het aandacht nodig" — en check je
+rangschikkingsdimensie op confounding vóór je herverdeelt.** Ik stelde eerst voor om quotum naar
+R-urls te schuiven omdat ze 62% van de Bing-entries leveren en 0% van de inzendingen krijgen. Dat
+argument sneuvelde op één meting: R-urls hebben **24,6% bingbot-dekking** (89.471 unieke URL's in
+20 dagen) tegen 9,6% voor C-urls en 8,5% voor P-urls. Ze converteren het best *omdat* Bing ze al
+vindt; er was geen gat, alleen een ontbrekend cijfer in mijn redenering. Les: zet naast "hoeveel
+aandacht krijgt X van ons" altijd "hoeveel krijgt X al van buiten", anders optimaliseer je een
+niet-bestaand tekort. Wat wél overbleef — P→C — heb ik pas doorgevoerd na de confound-check: het
+typeverschil (C 0,95% vs P 0,45%) **houdt stand binnen elke visits-bucket** (1 visit 0,95/0,43;
+3-5 1,48/0,48; 6-15 3,23/0,75) en de gemiddelde visits in de mix waren vrijwel gelijk (0,83 vs
+1,01). Was de reactiegraad door visits gedreven geweest, dan had C-eerst averechts gewerkt, want
+de oningezonden C-pool is een vlakke staart van 1-6 visits. Implementatie is één regel
+`ORDER BY`, en /p/ vult de rest automatisch als de C-pool leegloopt — geen percentages om te
+onderhouden en niets dat verbrand wordt.
 
 **Bestandsvalkuil om te onthouden:** van 1 september bestaan `indexnow_submitter_new.json` (13:08,
 **zonder** de fix) en `indexnow_submitter_fixed.json` (13:10, **met**). De oude aantekening wees
