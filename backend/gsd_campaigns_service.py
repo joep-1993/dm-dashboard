@@ -1160,8 +1160,12 @@ def backfill_campaign_created_dates(days: int = 30, dry_run: bool = False) -> Di
     return result
 
 
-def _get_mc_service():
-    """Build a Merchant Center Content API service using a service account.
+def _mc_credentials(country: Optional[str] = None):
+    """Service-account credentials for the Merchant Center APIs.
+
+    ``country`` selects that market's Merchant API key (GSD_SERVICE_ACCOUNT_FILE_NL/BE/DE)
+    and falls back to the shared GSD_SERVICE_ACCOUNT_FILE when the market has none. Only
+    Merchant API passes a country: the per-market projects have no Content API access.
 
     ONLY ONE of the keys in backend/service_accounts/ has Merchant Center access
     (measured 2026-07-31: acoustic-racer's beslist-index-checker@… reaches NL 5592708765,
@@ -1171,7 +1175,19 @@ def _get_mc_service():
     GSD_SERVICE_ACCOUNT_FILE set could silently pick a key with no access and fail
     mid-run with exactly that message. Sorted now, and the chosen file is logged.
     """
-    sa_file = os.environ.get("GSD_SERVICE_ACCOUNT_FILE", "")
+    sa_file = ""
+    if country:
+        # Merchant API registers the GCP PROJECT the credentials belong to, and a project
+        # can be registered with only one Merchant Center account. Three parents therefore
+        # need three projects, hence three keys. Falls back to the shared key below, which
+        # is all the Content API path ever needed.
+        sa_file = os.environ.get(f"GSD_SERVICE_ACCOUNT_FILE_{country.upper()}", "")
+        if sa_file and not os.path.exists(sa_file):
+            logger.error("GSD_SERVICE_ACCOUNT_FILE_%s points at %s, which does not exist; "
+                         "falling back to the shared key", country.upper(), sa_file)
+            sa_file = ""
+    if not sa_file:
+        sa_file = os.environ.get("GSD_SERVICE_ACCOUNT_FILE", "")
     if not sa_file:
         sa_dir = os.path.join(os.path.dirname(__file__), "service_accounts")
         if os.path.isdir(sa_dir):
@@ -1191,7 +1207,338 @@ def _get_mc_service():
     credentials = service_account.Credentials.from_service_account_file(sa_file, scopes=MC_SCOPES)
     _mc_service_account["file"] = sa_file
     _mc_service_account["email"] = getattr(credentials, "service_account_email", "") or ""
-    return build("content", "v2.1", credentials=credentials, cache_discovery=False)
+    return credentials
+
+
+def _get_mc_service():
+    """Content API for Shopping v2.1 client. Being sunset — see the block below.
+
+    Deliberately NOT per market. The per-market keys exist for Merchant API and their GCP
+    projects do not have the Content API switched on at all (403 accessNotConfigured), so
+    handing them to this client turns the fallback — the thing that keeps runs alive while
+    a market is still migrating — into a hard failure. Only the shared
+    GSD_SERVICE_ACCOUNT_FILE reaches the Content API.
+    """
+    return build("content", "v2.1", credentials=_mc_credentials(), cache_discovery=False)
+
+
+# ---------------------------------------------------------------------------
+# Merchant Center backend: Merchant API v1, with the Content API as fallback
+# ---------------------------------------------------------------------------
+# Google sunset the Content API for Shopping on 2026-08-18 for GCP project
+# acoustic-racer-258913 (909970840068) -- the only project whose service account has
+# Merchant Center access. Enforcement is RAMPED, not a hard cut-off: measured 2026-09-08,
+# ~8% of otherwise identical accounts.list calls came back HTTP 410 `content_api_sunset`
+# and the other 92% succeeded. That is why the run of that morning created campaigns for
+# two shops and failed for twelve with two errors that look unrelated -- the 410 is a
+# per-HTTP-call lottery, and a shop draws one ticket per listing page. The share of
+# rejected calls goes to 100%.
+#
+# Merchant API v1 is the replacement, but it needs merchantapi.googleapis.com ENABLED on
+# the GCP project, which is a Cloud-console action (the project has the Service Usage API
+# switched off too, so it cannot be done over gcloud/API either). Until then every
+# Merchant API call returns 403 SERVICE_DISABLED. So: try Merchant API, fall back to the
+# Content API, remember the answer for the process. The day someone enables the API the
+# tool switches over on its own, no deploy needed -- and _mc_backend_status() reports
+# which of the two is actually carrying the run.
+
+MERCHANT_API_VERSION = "accounts_v1"
+
+# Merchant Center parent -> market, so the callers that only know a parent id can pick
+# that market's key. Several ACCOUNTS entries share one parent (NL_CPR and NL_CPC both
+# point at 5592708765); they agree on the country, so last-one-wins is harmless.
+_MC_PARENT_COUNTRY = {a["mc_id"]: a["country"] for a in ACCOUNTS.values()}
+
+
+def _country_for_parent(mc_parent_id: str) -> str:
+    """Market owning this Merchant Center parent, or "" for an unknown one (which then
+    gets the shared key — the pre-existing behaviour)."""
+    return _MC_PARENT_COUNTRY.get(str(mc_parent_id), "")
+
+# Merchant API requires a time zone and a language when an account is created; the
+# Content API did not. One entry per GSD country.
+MC_ACCOUNT_LOCALE = {
+    "NL": {"timeZone": {"id": "Europe/Amsterdam"}, "languageCode": "nl-NL"},
+    "BE": {"timeZone": {"id": "Europe/Brussels"}, "languageCode": "nl-BE"},
+    "DE": {"timeZone": {"id": "Europe/Berlin"}, "languageCode": "de-DE"},
+}
+
+# Availability is PER MARKET, not global: each market authenticates with its own GCP
+# project, so one can be enabled and registered while another is not.
+_merchant_api_state: Dict[str, Dict[str, Any]] = {}
+_merchant_api_logged: set = set()
+_merchant_service_cache: Dict[str, Any] = {}
+
+
+def _mc_state(country: Optional[str]) -> Dict[str, Any]:
+    """Mutable Merchant API state for one market ("" = the shared-key default)."""
+    return _merchant_api_state.setdefault(country or "", {"available": None, "reason": None})
+
+
+def _get_merchant_service(country: Optional[str] = None):
+    """Merchant API v1 `accounts` client for one market. Discovery-based: there is no
+    pinned Merchant API client library in the venv, and the OAuth scope is the same
+    `content` scope the Content API uses, so the service-account keys cover it."""
+    cache_key = f"{MERCHANT_API_VERSION}:{country or ''}"
+    svc = _merchant_service_cache.get(cache_key)
+    if svc is None:
+        svc = build("merchantapi", MERCHANT_API_VERSION,
+                    credentials=_mc_credentials(country), cache_discovery=False)
+        _merchant_service_cache[cache_key] = svc
+    return svc
+
+
+def _is_service_disabled(ex) -> bool:
+    """True when a Merchant API call failed because the API is not switched on for this
+    GCP project (403 SERVICE_DISABLED) or the project is not registered as a Merchant
+    Center developer -- i.e. "not available here", not "this request was wrong". Only
+    these justify falling back to the Content API; a genuine 400/404 must surface."""
+    for d in (getattr(ex, "error_details", None) or []):
+        if isinstance(d, dict) and d.get("reason") in (
+            "SERVICE_DISABLED", "accessNotConfigured", "DEVELOPER_REGISTRATION_REQUIRED",
+        ):
+            return True
+    msg = str(ex).lower()
+    return "has not been used in project" in msg or "developer registration" in msg
+
+
+def _is_sunset_error(ex) -> bool:
+    """True for the ramped Content-API-sunset rejection: HTTP 410, reason
+    `content_api_sunset`. It is random per call, so it is worth retrying."""
+    for d in (getattr(ex, "error_details", None) or []):
+        if isinstance(d, dict) and d.get("reason") == "content_api_sunset":
+            return True
+    if getattr(getattr(ex, "resp", None), "status", None) != 410:
+        return False
+    return "sunset" in str(ex).lower()
+
+
+# The sunset 410 is a coin flip per HTTP call, not a rate limit, so retry fast and often
+# rather than slowly and twice: at the ~8% rejection rate measured on 2026-09-08, eight
+# attempts put a single call's odds of failing below one in a billion, and the retries
+# cost nothing at all on the calls that succeed first time.
+_MC_SUNSET_ATTEMPTS = 8
+_MC_SUNSET_DELAY = 0.75
+
+
+def _mc_call(what: str, fn):
+    """Run one Merchant-Center HTTP call, retrying the ramped sunset 410 and genuinely
+    transient failures (read timeout, HTTP 500/503). Anything else propagates."""
+    sunset = 0
+    transient = 0
+    while True:
+        try:
+            return fn()
+        except Exception as ex:
+            if _is_sunset_error(ex) and sunset < _MC_SUNSET_ATTEMPTS:
+                sunset += 1
+                logger.info("%s hit the Content API sunset 410; retry %d/%d",
+                            what, sunset, _MC_SUNSET_ATTEMPTS)
+                time.sleep(_MC_SUNSET_DELAY)
+                continue
+            if _is_transient_mc_error(ex) and transient < 3:
+                transient += 1
+                logger.warning("%s failed transiently; retry %d/3: %s", what, transient, ex)
+                time.sleep(2 * transient)
+                continue
+            raise
+
+
+def _merchant_api_unavailable(country: Optional[str], ex) -> None:
+    """Record that Merchant API is not usable for one market and say so once, loudly."""
+    state = _mc_state(country)
+    state["available"] = False
+    state["reason"] = str(ex)[:300]
+    if (country or "") not in _merchant_api_logged:
+        _merchant_api_logged.add(country or "")
+        logger.error(
+            "Merchant API v1 is unavailable for %s (%s). Falling back to the Content API "
+            "for Shopping, which Google is sunsetting and which already rejects a growing "
+            "share of calls with HTTP 410. FIX: on that market's GCP project, enable "
+            "merchantapi.googleapis.com and register it with the Merchant Center account "
+            "(see docs/PROD_FIX_MC_SERVICE_ACCOUNT.md).",
+            country or "the shared key", state["reason"],
+        )
+
+
+def _mc_backend_status() -> Dict[str, Any]:
+    """Which Merchant Center API this process used, per market, for the run result.
+
+    ``backend`` is the worst case across the markets actually touched, so a single market
+    still on the sunsetting API cannot hide behind two that migrated.
+    """
+    per_market = {
+        country or "shared": (
+            "merchant_api_v1" if st["available"]
+            else ("content_api_v2.1" if st["available"] is False else "unknown")
+        )
+        for country, st in _merchant_api_state.items()
+    }
+    used = set(per_market.values())
+    backend = ("content_api_v2.1" if "content_api_v2.1" in used
+               else "merchant_api_v1" if used == {"merchant_api_v1"}
+               else "unknown")
+    return {
+        "backend": backend,
+        "per_market": per_market,
+        "merchant_api_errors": {c or "shared": st["reason"]
+                                for c, st in _merchant_api_state.items() if st["reason"]},
+    }
+
+
+def _list_subaccounts(mc_parent_id: str) -> List[Dict[str, str]]:
+    """Every Merchant Center sub-account under ``mc_parent_id`` as ``{"id", "name"}``.
+
+    Merchant API first (500 per page), Content API second (250 per page). Raises on
+    failure -- the caller must be able to tell a genuine "not found" from a lookup that
+    never completed, because creating on a failed lookup is how duplicate sub-accounts
+    are born (2026-09-01: Bouwlampkoning.nl and Vergewallet.nl each ended up with two).
+    """
+    country = _country_for_parent(mc_parent_id)
+    if _mc_state(country)["available"] is not False:
+        try:
+            svc = _get_merchant_service(country)
+            out: List[Dict[str, str]] = []
+            token = None
+            while True:
+                kwargs: Dict[str, Any] = {"provider": f"accounts/{mc_parent_id}", "pageSize": 500}
+                if token:
+                    kwargs["pageToken"] = token
+                resp = _mc_call(
+                    f"Merchant API listSubaccounts({mc_parent_id})",
+                    lambda k=dict(kwargs): svc.accounts().listSubaccounts(**k).execute(),
+                )
+                for a in resp.get("accounts", []):
+                    acc_id = a.get("accountId") or a.get("name", "").rsplit("/", 1)[-1]
+                    out.append({"id": str(acc_id), "name": a.get("accountName", "")})
+                token = resp.get("nextPageToken")
+                if not token:
+                    break
+            _mc_state(country)["available"] = True
+            return out
+        except Exception as ex:
+            if not _is_service_disabled(ex):
+                raise
+            _merchant_api_unavailable(country, ex)
+
+    service = _get_mc_service()
+    out = []
+    token = None
+    while True:
+        kwargs = {"merchantId": mc_parent_id, "maxResults": 250}
+        if token:
+            kwargs["pageToken"] = token
+        resp = _mc_call(
+            f"Content API accounts.list({mc_parent_id})",
+            lambda k=dict(kwargs): service.accounts().list(**k).execute(),
+        )
+        for a in resp.get("resources", []):
+            out.append({"id": str(a["id"]), "name": a.get("name", "")})
+        token = resp.get("nextPageToken")
+        if not token:
+            break
+    return out
+
+
+def _create_subaccount(
+    mc_parent_id: str, shop_name: str, website_url: str, country: Optional[str] = None
+) -> str:
+    """Create one Merchant Center sub-account under ``mc_parent_id`` and return its ID.
+
+    The account NAME must come back out of _list_subaccounts unchanged, because that name
+    is the only key the lookup has -- a normalised name reads as "absent" on the next run
+    and earns the shop a second sub-account.
+    """
+    country = country or _country_for_parent(mc_parent_id)
+    if _mc_state(country)["available"] is not False:
+        try:
+            svc = _get_merchant_service(country)
+            locale = MC_ACCOUNT_LOCALE.get((country or "").upper(), MC_ACCOUNT_LOCALE["NL"])
+            body = {
+                "account": dict(accountName=shop_name, **locale),
+                # The aggregation service is what makes this a SUB-account of our parent.
+                # Without it createAndConfigure makes a standalone account that the parent
+                # cannot see -- invisible to every lookup, and impossible to spot in the UI.
+                "service": [{"accountAggregation": {}, "provider": f"accounts/{mc_parent_id}"}],
+            }
+            acc = _mc_call(
+                f"Merchant API createAndConfigure({shop_name})",
+                lambda: svc.accounts().createAndConfigure(body=body).execute(),
+            )
+            new_id = str(acc.get("accountId") or acc.get("name", "").rsplit("/", 1)[-1])
+            _mc_state(country)["available"] = True
+            # The online-store URL ("Uw online winkel") is its own resource in Merchant
+            # API, not a field on the account. A failure here still leaves a usable
+            # account, so it is logged rather than raised.
+            try:
+                _mc_call(
+                    f"Merchant API updateHomepage({new_id})",
+                    lambda: svc.accounts().homepage().updateHomepage(
+                        name=f"accounts/{new_id}/homepage",
+                        updateMask="uri",
+                        body={"uri": website_url},
+                    ).execute(),
+                )
+            except Exception as ex:
+                logger.warning("MC %s was created but its homepage URI could not be set "
+                               "to %s: %s", new_id, website_url, ex)
+            return new_id
+        except Exception as ex:
+            if not _is_service_disabled(ex):
+                raise
+            _merchant_api_unavailable(country, ex)
+
+    service = _get_mc_service()
+    body = {"name": shop_name, "kind": "content#account", "websiteUrl": website_url}
+    resp = _mc_call(
+        f"Content API accounts.insert({shop_name})",
+        lambda: service.accounts().insert(merchantId=mc_parent_id, body=body).execute(),
+    )
+    return str(resp["id"])
+
+
+# One listing per Merchant Center parent per run instead of a full pagination per shop.
+# get_mc_id used to page the whole parent on EVERY call, and _get_or_create_mc_account
+# calls it twice per shop: 12 HTTP calls for one NL shop against a 1,448-account parent.
+# At the ~8% per-call sunset rejection rate that alone made an NL shop about 60% likely
+# to fail, and it is the single biggest reason the 2026-09-08 run lost 7 of its 8 NL
+# shops. Cleared per run by _reset_mc_caches().
+_mc_listing_cache: Dict[str, Dict[str, str]] = {}
+
+
+def _reset_mc_caches() -> None:
+    """Drop the per-run Merchant Center listing cache, so a sub-account created by an
+    earlier run or by a colleague in the MC UI is picked up.
+
+    Also forgets which markets Merchant API was unavailable for, so a market that gets
+    enabled or registered between runs is retried instead of staying on the fallback
+    until the backend is restarted.
+    """
+    _mc_listing_cache.clear()
+    _merchant_api_state.clear()
+    _merchant_api_logged.clear()
+
+
+def _mc_name_index(mc_parent_id: str, refresh: bool = False) -> Dict[str, str]:
+    """``{lowercased account name: account id}`` for one parent, cached per run.
+
+    First match wins on a duplicate name, matching what the old sequential scan did.
+    """
+    if refresh or mc_parent_id not in _mc_listing_cache:
+        index: Dict[str, str] = {}
+        for acc in _list_subaccounts(mc_parent_id):
+            index.setdefault((acc["name"] or "").lower(), acc["id"])
+        _mc_listing_cache[mc_parent_id] = index
+    return _mc_listing_cache[mc_parent_id]
+
+
+def _remember_mc_account(mc_parent_id: str, shop_name: str, mc_id: str) -> None:
+    """Add a just-created sub-account to the cached listing. Both APIs are eventually
+    consistent -- a fresh sub-account is missing from the listing for a while -- so
+    without this a second lookup in the same run would read it as absent and create a
+    duplicate."""
+    if mc_parent_id in _mc_listing_cache:
+        _mc_listing_cache[mc_parent_id][(shop_name or "").lower()] = str(mc_id)
 
 
 # ---------------------------------------------------------------------------
@@ -2143,33 +2490,20 @@ def check_campaign(client: GoogleAdsClient, customer_id: str, campaign_name: str
 # ---------------------------------------------------------------------------
 
 
-def get_mc_id(mc_parent_id: str, shop_name: str) -> Optional[str]:
+def get_mc_id(mc_parent_id: str, shop_name: str, refresh: bool = False) -> Optional[str]:
     """
-    Look up a Merchant Center sub-account by name.
-    Paginates through all sub-accounts (Content API returns them in
-    the ``resources`` key, max 250 per page).
-    Returns the account ID if found, else None.
+    Look up a Merchant Center sub-account by name. Returns the account ID, else None.
+
+    Served from the per-run listing cache (_mc_name_index), so repeat lookups inside one
+    run cost nothing. Pass ``refresh=True`` for the duplicate-safety re-check inside the
+    create lock, where a cached "absent" is exactly the wrong answer.
 
     Raises on API error rather than returning None: the caller must be able to
     tell a genuine "shop not found" (safe to create) apart from a transient
     lookup failure (creating would spawn a DUPLICATE sub-account for a shop that
     may already have one).
     """
-    service = _get_mc_service()
-    target = shop_name.lower()
-    page_token = None
-    while True:
-        kwargs: Dict[str, Any] = {"merchantId": mc_parent_id, "maxResults": 250}
-        if page_token:
-            kwargs["pageToken"] = page_token
-        response = service.accounts().list(**kwargs).execute()
-        for account in response.get("resources", []):
-            if account.get("name", "").lower() == target:
-                return str(account["id"])
-        page_token = response.get("nextPageToken")
-        if not page_token:
-            break
-    return None
+    return _mc_name_index(mc_parent_id, refresh=refresh).get(shop_name.lower())
 
 
 def _shop_website_url(shop_name: str, country: Optional[str] = None) -> str:
@@ -2189,49 +2523,91 @@ def _shop_website_url(shop_name: str, country: Optional[str] = None) -> str:
 
 
 def create_merchant_id(
-    mc_parent_id: str, shop_name: str, website_url: Optional[str] = None
+    mc_parent_id: str,
+    shop_name: str,
+    website_url: Optional[str] = None,
+    country: Optional[str] = None,
 ) -> Optional[str]:
     """
-    Create a new Merchant Center sub-account.
-    Returns the new account ID.
+    Create a new Merchant Center sub-account. Returns the new account ID, or None.
 
-    ``website_url`` populates the account's online-store URL ("Uw online winkel"
-    in Merchant Center). When omitted it is derived from the shop name.
+    ``website_url`` populates the account's online-store URL ("Uw online winkel" in
+    Merchant Center). When omitted it is derived from the shop name. ``country`` picks
+    the time zone and language Merchant API requires on creation.
     """
-    service = _get_mc_service()
-    body = {
-        "name": shop_name,
-        "kind": "content#account",
-    }
-    body["websiteUrl"] = website_url or _shop_website_url(shop_name)
+    url = website_url or _shop_website_url(shop_name, country)
     try:
-        response = service.accounts().insert(merchantId=mc_parent_id, body=body).execute()
-        return str(response["id"])
+        mc_id = _create_subaccount(mc_parent_id, shop_name, url, country)
+        _remember_mc_account(mc_parent_id, shop_name, mc_id)
+        return mc_id
     except Exception as ex:
         logger.error("Error creating MC sub-account for '%s': %s", shop_name, ex)
         _last_mc_error["msg"] = _mc_err(ex)
         return None
 
 
-def link_to_google_ads(mc_parent_id: str, mc_account_id: str, ads_customer_id: str) -> bool:
+def _ads_product_link_exists(ads_customer_id: str, mc_account_id: int) -> bool:
+    """Does Google Ads already hold a product link to this Merchant Center account?
+
+    This is the question the old code asked the Content API (`accounts.get`, read the
+    `adsLinks` array) -- i.e. one more ticket in the sunset-410 lottery on every single
+    shop. Google Ads answers it for free and has no sunset. Raises on a query failure so
+    the caller can tell "not linked" from "could not find out"; concluding "not linked"
+    from a failed read is how you end up creating a link that already exists.
     """
-    Link a Merchant Center account to a Google Ads account.
+    client = _get_client()
+    ga_service = client.get_service("GoogleAdsService")
+    rows = ga_service.search(customer_id=ads_customer_id, query=(
+        "SELECT product_link.resource_name, "
+        "product_link.merchant_center.merchant_center_id FROM product_link "
+        f"WHERE product_link.merchant_center.merchant_center_id = {mc_account_id}"))
+    return any(True for _ in rows)
 
-    Two-step process:
-    1. MC side: add an adsLink on the sub-account (creates a pending invitation).
-    2. Ads side: accept the pending ProductLinkInvitation so campaigns can
-       reference the merchant_id.
 
-    When the MC-side link is newly created, step 2 polls with retries
-    (_INVITATION_ACCEPT_DELAYS) until the invitation becomes visible on the
-    Ads side. Without this, campaign creation fails with RESOURCE_NOT_FOUND
-    because the link was never actually accepted.
+def _create_ads_product_link(ads_customer_id: str, mc_account_id: int) -> bool:
+    """Create the MC->Ads link from the GOOGLE ADS side (ProductLinkService).
+
+    When the caller has admin access to both accounts Google links them immediately,
+    with no invitation to accept; otherwise it files a request the Merchant Center side
+    has to approve. Either way this touches no Merchant Center API at all. Returns
+    whether the call itself went through -- the caller verifies the link really landed.
+    """
+    try:
+        client = _get_client()
+        service = client.get_service("ProductLinkService")
+        request = client.get_type("CreateProductLinkRequest")
+        request.customer_id = ads_customer_id
+        request.product_link.merchant_center.merchant_center_id = mc_account_id
+        service.create_product_link(request=request)
+        return True
+    except GoogleAdsException as ex:
+        logger.info("Ads-side product link for MC %s in %s was refused (%s); trying the "
+                    "Merchant Center route", mc_account_id, ads_customer_id, _gads_err(ex))
+        return False
+    except Exception as ex:
+        logger.info("Ads-side product link for MC %s in %s failed (%s); trying the "
+                    "Merchant Center route", mc_account_id, ads_customer_id, str(ex)[:300])
+        return False
+
+
+def _link_via_merchant_center(
+    mc_parent_id: str, mc_account_id: str, ads_customer_id: str, mc_id_int: int
+) -> bool:
+    """The original route: write `adsLinks` on the Merchant Center account, which raises
+    a ProductLinkInvitation on the Ads side, then accept it there.
+
+    Content-API-only: Merchant API v1 has no adsLinks field on the account, so once the
+    Content API is fully switched off this path stops working and the Ads-side route
+    above is the only one left. Kept as a fallback for as long as it still functions.
     """
     service = _get_mc_service()
     newly_linked = False
     try:
-        # Get current account info
-        account = service.accounts().get(merchantId=mc_parent_id, accountId=mc_account_id).execute()
+        account = _mc_call(
+            f"Content API accounts.get({mc_account_id})",
+            lambda: service.accounts().get(
+                merchantId=mc_parent_id, accountId=mc_account_id).execute(),
+        )
 
         # Add Google Ads link if not already present
         ads_links = account.get("adsLinks", [])
@@ -2252,13 +2628,17 @@ def link_to_google_ads(mc_parent_id: str, mc_account_id: str, ads_customer_id: s
                 "status": "active",
             })
             account["adsLinks"] = ads_links
-            service.accounts().update(
-                merchantId=mc_parent_id, accountId=mc_account_id, body=account
-            ).execute()
+            _mc_call(
+                f"Content API accounts.update({mc_account_id})",
+                lambda: service.accounts().update(
+                    merchantId=mc_parent_id, accountId=mc_account_id, body=account
+                ).execute(),
+            )
             logger.info("MC side: linked MC %s to Google Ads %s", mc_account_id, ads_customer_id)
             newly_linked = True
     except Exception as ex:
         logger.error("Error linking MC %s to Ads %s (MC side): %s", mc_account_id, ads_customer_id, ex)
+        _last_mc_error["msg"] = _mc_err(ex)
         return False
 
     # Step 2: accept the pending invitation from the Google Ads side.
@@ -2266,7 +2646,6 @@ def link_to_google_ads(mc_parent_id: str, mc_account_id: str, ads_customer_id: s
     # immediately (eventual consistency). Poll with retries so the link is
     # actually accepted before campaign creation starts.
     try:
-        mc_id_int = int(mc_account_id)
         accepted = _accept_mc_invitation(ads_customer_id, mc_id_int)
         if not accepted and newly_linked:
             for attempt, delay in enumerate(_INVITATION_ACCEPT_DELAYS, 1):
@@ -2282,16 +2661,66 @@ def link_to_google_ads(mc_parent_id: str, mc_account_id: str, ads_customer_id: s
                     break
         if not accepted:
             logger.warning(
-                "No PENDING_APPROVAL ProductLinkInvitation found%s for MC %s in "
-                "Ads %s; campaign create will retry with RESOURCE_NOT_FOUND.",
-                " after retries" if newly_linked else "",
-                mc_account_id, ads_customer_id,
+                "No PENDING_APPROVAL ProductLinkInvitation found%s for MC %s in Ads %s",
+                " after retries" if newly_linked else "", mc_account_id, ads_customer_id,
             )
+            return _ads_link_confirmed(ads_customer_id, mc_id_int)
     except Exception as ex:
         logger.error("Error accepting MC invitation for %s in Ads %s: %s", mc_account_id, ads_customer_id, ex)
         return False
 
     return True
+
+
+def _ads_link_confirmed(ads_customer_id: str, mc_id_int: int) -> bool:
+    """Re-read the link state from Google Ads, treating a failed read as "not linked".
+
+    Used to VERIFY a link we just tried to make, so "could not tell" must read as "no":
+    reporting linked on a failed read is what puts a doomed campaign create downstream.
+    """
+    try:
+        return _ads_product_link_exists(ads_customer_id, mc_id_int)
+    except Exception:
+        return False
+
+
+def link_to_google_ads(mc_parent_id: str, mc_account_id: str, ads_customer_id: str) -> bool:
+    """
+    Make sure Merchant Center account ``mc_account_id`` is linked to Google Ads account
+    ``ads_customer_id``. Returns True only when the link is verifiably in place.
+
+    Ads-side first, Merchant Center as fallback:
+      1. Ask Google Ads whether the link already exists. This is the common case and
+         costs zero Merchant Center calls -- it used to be a Content API `accounts.get`,
+         one of the calls that randomly returns the sunset 410.
+      2. Create it from the Ads side (ProductLinkService), then verify it landed.
+      3. Only if that did not work, fall back to writing `adsLinks` on the MC account
+         and accepting the resulting invitation from Ads.
+
+    THE RETURN VALUE IS LOAD-BEARING. _get_or_create_mc_account used to discard it, and
+    on 2026-09-08 that turned a silent linking failure for Joybuy.de and Balmuir.com into
+    10 campaign creates that each burned ~2 minutes of retries before reporting the Google
+    Ads error "Resource was not found." -- which points at Google Ads while the real
+    problem was an unlinked merchant_id.
+    """
+    mc_id_int = int(mc_account_id)
+
+    try:
+        if _ads_product_link_exists(ads_customer_id, mc_id_int):
+            return True
+    except Exception as ex:
+        logger.warning("Could not read product_link for MC %s in Ads %s (%s); trying to "
+                       "create the link anyway", mc_account_id, ads_customer_id, str(ex)[:200])
+
+    if _create_ads_product_link(ads_customer_id, mc_id_int):
+        if _ads_link_confirmed(ads_customer_id, mc_id_int):
+            logger.info("Ads side: linked MC %s to Google Ads %s directly",
+                        mc_account_id, ads_customer_id)
+            return True
+        logger.info("Ads side: product link for MC %s in %s is not active yet; it may be "
+                    "waiting for Merchant Center approval", mc_account_id, ads_customer_id)
+
+    return _link_via_merchant_center(mc_parent_id, mc_account_id, ads_customer_id, mc_id_int)
 
 
 def _accept_mc_invitation(ads_customer_id: str, mc_account_id: int) -> bool:
@@ -2329,9 +2758,9 @@ def _accept_mc_invitation(ads_customer_id: str, mc_account_id: int) -> bool:
             )
             return True
 
+    logger.info("No pending MC invitation found for MC %s in Ads %s",
+                mc_account_id, ads_customer_id)
     return False
-
-    logger.info("No pending MC invitation found for MC %s in Ads %s", mc_account_id, ads_customer_id)
 
 
 # ---------------------------------------------------------------------------
@@ -3079,7 +3508,16 @@ def _pause_customer_ids(country: str, primary_customer_id: str) -> List[str]:
 
 def _is_transient_mc_error(ex: Exception) -> bool:
     """Return True if the Merchant Center API error is transient (worth retrying):
-    read timeouts and HTTP 500/503. Permanent errors (403 quota, 404, etc.) are not."""
+    read timeouts, HTTP 500/503, and the ramped Content-API sunset 410. Permanent errors
+    (403 quota, 404, etc.) are not.
+
+    The 410 belongs here even though "Gone" reads permanent: Google enforces the sunset on
+    a random share of calls (~8% on 2026-09-08), so the very same request succeeds on the
+    next attempt. Classifying it as permanent is what let one unlucky listing page drop a
+    whole shop out of the 2026-09-08 run.
+    """
+    if _is_sunset_error(ex):
+        return True
     ex_str = str(ex)
     # Read timeouts (requests.exceptions.ReadTimeout / socket.timeout)
     if "timed out" in ex_str.lower():
@@ -3141,15 +3579,20 @@ def _mc_account_lock(mc_parent_id: str, shop_name: str):
                                    shop_name, ex)
 
 
-def _lookup_mc_id_with_retry(mc_parent_id: str, shop_name: str) -> tuple[Optional[str], bool]:
+def _lookup_mc_id_with_retry(
+    mc_parent_id: str, shop_name: str, refresh: bool = False
+) -> tuple[Optional[str], bool]:
     """``(mc_id, lookup_ok)``. Retries transient MC API errors (read timeout, HTTP
-    500/503). A lookup that returns None (shop not found) is NOT an error and does not
-    retry; a permanent error (403 quota, 404, ...) returns ``(None, False)`` so the caller
-    aborts instead of creating a duplicate for a shop that may already have one."""
+    500/503, sunset 410). A lookup that returns None (shop not found) is NOT an error and
+    does not retry; a permanent error (403 quota, 404, ...) returns ``(None, False)`` so
+    the caller aborts instead of creating a duplicate for a shop that may already have one.
+
+    ``refresh`` forces a fresh listing instead of the per-run cache -- required for the
+    re-check inside the create lock, and only there."""
     max_retries = 2
     for attempt in range(max_retries + 1):
         try:
-            return get_mc_id(mc_parent_id, shop_name), True
+            return get_mc_id(mc_parent_id, shop_name, refresh=refresh), True
         except Exception as ex:
             if _is_transient_mc_error(ex) and attempt < max_retries:
                 logger.warning("MC lookup for '%s' failed (attempt %d/%d), retrying in 5s: %s",
@@ -3165,12 +3608,17 @@ def _lookup_mc_id_with_retry(mc_parent_id: str, shop_name: str) -> tuple[Optiona
 
 def _get_or_create_mc_account(
     mc_parent_id: str, shop_name: str, ads_customer_id: str, country: Optional[str] = None
-) -> tuple[Optional[str], bool]:
+) -> tuple[Optional[str], bool, bool]:
     """Find or create a Merchant Center sub-account and link to Google Ads.
 
-    Returns ``(mc_id, created)`` where ``created`` is True only when a NEW
-    sub-account was created (vs. an existing one being reused). On failure
-    returns ``(None, False)``.
+    Returns ``(mc_id, created, linked)``: ``created`` is True only when a NEW sub-account
+    was created (vs. an existing one being reused), and ``linked`` says whether the
+    MC->Ads link is verifiably in place. On a lookup/create failure returns
+    ``(None, False, False)``.
+
+    ``linked`` is reported rather than ignored. Campaigns reference the merchant_id
+    directly, so creating them for an unlinked account cannot work -- see
+    link_to_google_ads for what that cost on 2026-09-08.
 
     LOOKUP AND CREATE ARE ONE CRITICAL SECTION. This used to be a bare
     check-then-create, and on 2026-09-01 two concurrent runs both read "absent" for the
@@ -3185,30 +3633,38 @@ def _get_or_create_mc_account(
     _last_mc_error["msg"] = None  # cleared per attempt; set on failure below
     mc_id, lookup_ok = _lookup_mc_id_with_retry(mc_parent_id, shop_name)
     if not lookup_ok:
-        return None, False
+        return None, False, False
 
     created = False
     if mc_id is None:
         with _mc_account_lock(mc_parent_id, shop_name) as locked:
             if locked:
                 # Whoever held the lock before us may have created it. Ask again — this is
-                # the check that the old code was missing.
-                mc_id, lookup_ok = _lookup_mc_id_with_retry(mc_parent_id, shop_name)
+                # the check that the old code was missing. refresh=True on purpose: the
+                # per-run listing cache is exactly what must NOT answer this one.
+                mc_id, lookup_ok = _lookup_mc_id_with_retry(mc_parent_id, shop_name, refresh=True)
                 if not lookup_ok:
-                    return None, False
+                    return None, False, False
                 if mc_id is not None:
                     logger.info("MC sub-account for '%s' appeared while waiting for the "
                                 "lock (%s) — reusing it instead of creating a second one",
                                 shop_name, mc_id)
             if mc_id is None:
                 website_url = _shop_website_url(shop_name, country)
-                mc_id = create_merchant_id(mc_parent_id, shop_name, website_url)
+                mc_id = create_merchant_id(mc_parent_id, shop_name, website_url, country)
                 if mc_id is None:
-                    return None, False
+                    return None, False, False
                 created = True
 
-    link_to_google_ads(mc_parent_id, mc_id, ads_customer_id)
-    return mc_id, created
+    linked = link_to_google_ads(mc_parent_id, mc_id, ads_customer_id)
+    if not linked:
+        _last_mc_error["msg"] = _last_mc_error["msg"] or (
+            f"mc_ads_link_failed: Merchant Center {mc_id} is not linked to Google Ads "
+            f"{ads_customer_id}"
+        )
+        logger.error("MC %s (%s) is not linked to Ads %s — not creating campaigns for it",
+                     mc_id, shop_name, ads_customer_id)
+    return mc_id, created, linked
 
 
 def _set_campaign_status_by_resource(
@@ -4296,6 +4752,7 @@ def _run_gsd_script_unlocked(
     run_date = datetime.strptime(overall_results["date"], "%Y-%m-%d").strftime("%d-%m-%Y")  # dd-mm-yyyy from the change date, not "now"
     date_ymd = overall_results["date"].replace("-", "")     # YYYYMMDD from the change date, not "now"
     _run_cancel["cancel"] = False  # fresh run
+    _reset_mc_caches()             # a sub-account made since the last run must be visible
     _run_progress.update({"current": 0, "total": 0, "running": True})
 
     # Get shop changes from Redshift
@@ -4387,7 +4844,8 @@ def _run_gsd_script_unlocked(
                             continue
 
                         # Get or create MC sub-account and link
-                        mc_id, mc_was_created = _get_or_create_mc_account(mc_parent_id, shop_name, customer_id, country)
+                        mc_id, mc_was_created, mc_linked = _get_or_create_mc_account(
+                            mc_parent_id, shop_name, customer_id, country)
                         if mc_id is None:
                             overall_results["errors"].append({
                                 "shop_name": shop_name,
@@ -4408,6 +4866,25 @@ def _run_gsd_script_unlocked(
                             mc_created_rows.append(
                                 (shop_name, shop_id, _mc_id_int, country, date_ymd)
                             )
+
+                        # Without an MC->Ads link every campaign below is guaranteed to fail
+                        # with RESOURCE_NOT_FOUND on shopping_setting.merchant_id — five
+                        # labels x ~2 minutes of retries, ending in an error that points at
+                        # Google Ads instead of at the link. Stop here and say what is
+                        # actually wrong. (2026-09-08: Joybuy.de and Balmuir.com, 10 rows.)
+                        # Deliberately after the mc_created_rows block: an account we really
+                        # did create must still be recorded in pa.mc_ids_efficy.
+                        if not mc_linked:
+                            overall_results["errors"].append({
+                                "shop_name": shop_name,
+                                "country": country,
+                                "step": "mc_ads_link",
+                                "error": _last_mc_error["msg"] or (
+                                    f"mc_ads_link_failed: Merchant Center {mc_id} is not "
+                                    f"linked to Google Ads {customer_id}"
+                                ),
+                            })
+                            continue
 
                         # Create campaigns
                         campaign_results = _create_campaigns_for_shop(
@@ -4592,6 +5069,11 @@ def _run_gsd_script_unlocked(
         except Exception as ex:
             logger.error("Post-run verification failed: %s", ex)
             overall_results["verification"] = {"error": str(ex)}
+
+    # Which Merchant Center API actually carried this run. While merchantapi.googleapis.com
+    # is still switched off on the GCP project this reads content_api_v2.1, i.e. the run
+    # leaned on an API Google is actively turning off.
+    overall_results["mc_backend"] = _mc_backend_status()
 
     _run_progress["running"] = False
     return overall_results

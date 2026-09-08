@@ -168,3 +168,103 @@ all three ids.
   permission, and the Ads side is unrelated.
 * Do not delete or reorder files in `backend/service_accounts/` to "make the fallback
   pick the right one". Set the env var; the fallback is a safety net, not the mechanism.
+
+---
+
+# 2026-09-08 — the Content API sunset (separate problem, same key)
+
+## Symptom
+
+Run rows like `content_api_sunset: Content API for Shopping was sunset on August 18, 2026
+for GCP project with id acoustic-racer-258913 …`, **and** rows of `Resource was not
+found.` for every label of a shop. Both come from the same cause, so do not chase them
+separately. The run panel now shows an orange banner saying which Merchant Center API
+carried the run.
+
+## Cause
+
+Google sunset the Content API for Shopping on **2026-08-18** for GCP project
+`acoustic-racer-258913` (909970840068) — the project of the only key with Merchant Center
+access. Enforcement is **ramped, not a hard cut-off**: measured on 2026-09-08, ~8% of
+otherwise identical `accounts.list` calls returned **HTTP 410 `content_api_sunset`** and
+the rest succeeded. It is a lottery per HTTP call, and it goes to 100%.
+
+That is why a run creates campaigns for some shops and not others:
+
+* a shop that loses the draw during its sub-account lookup fails at step `mc_account`;
+* a shop that loses it during the MC→Ads link ends up with a Merchant Center account that
+  has **no** `adsLinks`, and every campaign then fails with the Google Ads error
+  `Resource was not found.` (RESOURCE_NOT_FOUND on `shopping_setting.merchant_id`) — which
+  points at Google Ads while the actual gap is the link.
+
+## What the code does about it now
+
+`gsd_campaigns_service.py` prefers **Merchant API v1** and falls back to the Content API
+per call, retries the sunset 410 (`_mc_call`), lists each Merchant Center parent **once
+per run** instead of once per shop, checks the MC→Ads link from the **Google Ads** side
+(`product_link`) instead of the Content API, and refuses to create campaigns for an
+unlinked account (error step `mc_ads_link`). Tests: `backend/test_gsd_mc_backend.py`.
+
+## One GCP project per Merchant Center account
+
+Merchant API does not work the way the Content API did. Two rules together decide
+everything:
+
+* *"Each Google Cloud project can only be registered with a single Merchant Center
+  account at any given time"* — a second one returns `ALREADY_REGISTERED`;
+* the project that gets registered is the project the **credentials** belong to. You
+  cannot pass it in the call.
+
+Three parents therefore need three GCP projects, and `acoustic-racer-258913` could never
+have covered more than one of them. Set up on 2026-09-08:
+
+| market | GCP project | service account | key |
+|---|---|---|---|
+| NL 5592708765 | `beslist-skippy` | `gsd-account-creation@beslist-skippy…` | `GSD_SERVICE_ACCOUNT_FILE_NL` |
+| BE 5588879919 | `beslist-pegel-factor` | `gsd-account-creation@beslist-pegel-factor…` | `GSD_SERVICE_ACCOUNT_FILE_BE` |
+| DE 5342886105 | `beslist-pattas` | `gsd-account-creation@beslist-pattas…` | `GSD_SERVICE_ACCOUNT_FILE_DE` |
+
+Verified the same day against both APIs: identical account sets, identical names, identical
+order, and Merchant API is ~2.5x faster. Names matter more than they look — the account
+name is the only key the sub-account lookup has.
+
+**The per-market keys are Merchant-API-only.** Their projects do not have the Content API
+switched on (403 `accessNotConfigured`), so the Content API fallback deliberately keeps
+using the shared `GSD_SERVICE_ACCOUNT_FILE` (acoustic-racer). Do not "tidy that up" by
+routing the fallback through the per-market keys; that turns the safety net into a hard
+failure.
+
+## Adding a market, or replacing a key
+
+1. A GCP project of its own, with `merchantapi.googleapis.com` enabled.
+2. A service account in that project, **Admin** on the Merchant Center account.
+3. The project registered with that account:
+   `./venv/bin/python scripts/gsd_register_merchant_api.py --only NL --commit`
+   The developer email must be a **human** — Google rejects a service-account address with
+   `PERMISSION_DENIED_TO_REGISTER_GCP_WITH_SERVICE_ACCOUNT`. The identity that *authorises*
+   the call may be a service account, as long as it has Admin.
+4. The key in `backend/service_accounts/` (gitignored — copy it across, never through the
+   repo) and `GSD_SERVICE_ACCOUNT_FILE_<CC>` in `.env`.
+
+A market with no key of its own silently uses the shared key, which reaches Merchant API
+for no account at all — so it lands on the Content API fallback. The run result says which:
+
+```bash
+./venv/bin/python -c "
+import sys; sys.path.insert(0,'.')
+from dotenv import load_dotenv; load_dotenv('.env')
+import backend.gsd_campaigns_service as g
+[g._list_subaccounts(p) for p in ('5592708765','5588879919','5342886105')]
+print(g._mc_backend_status())"
+```
+
+Expect `{"backend": "merchant_api_v1", "per_market": {"NL": …, "BE": …, "DE": …}}`. Any
+`content_api_v2.1` in there is a market still riding the sunsetting API, and the run panel
+shows an orange banner naming it.
+
+## Do not
+
+* Do not treat `Resource was not found.` as a Google Ads problem. Check
+  `product_link` for the shop's Merchant Center id first.
+* Do not "fix" the 410 by lowering the retry count because runs feel slow — the retries
+  are the only reason runs still complete at all.

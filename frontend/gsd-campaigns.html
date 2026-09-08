@@ -2259,8 +2259,24 @@
             const heading = d.cancelled
                 ? '<div class="fw-bold mb-2 text-warning">Cancelled — stopped early.</div>'
                 : '<div class="fw-bold mb-2 text-success">Done!</div>';
+            // Which Merchant Center API carried the run. Google is sunsetting the Content
+            // API and already rejects a random share of calls with HTTP 410, so a run that
+            // fell back to it is one bad draw away from losing shops — say so rather than
+            // leaving it in the backend log.
+            const mcb = d.mc_backend || {};
+            const stale = Object.entries(mcb.per_market || {})
+                .filter(([, api]) => api === 'content_api_v2.1').map(([m]) => m);
+            const mcWarning = mcb.backend === 'content_api_v2.1'
+                ? `<div class="alert alert-warning py-2 px-3 mb-2" style="font-size:0.8rem;">
+                        <strong>${stale.length ? escapeHtml(stale.join(', ')) + ' ran' : 'Ran'} on the Content API for Shopping</strong>,
+                        which Google sunset on 18-08-2026 and which now rejects a growing share of calls with
+                        HTTP 410. Retries absorb that for now. Every market needs its own GCP project, registered
+                        with its Merchant Center account — see <code>docs/PROD_FIX_MC_SERVICE_ACCOUNT.md</code>.
+                   </div>`
+                : '';
             return `
                 ${heading}
+                ${mcWarning}
                 <div class="d-flex flex-wrap gap-3 mb-2">
                     <div id="runTile-all" data-border="#adb5bd" class="p-2 px-3 rounded" style="background:#f1f3f5; border:1px solid #adb5bd; cursor:pointer;${allActive ? ' box-shadow:0 0 0 2px #adb5bd inset;' : ''}" onclick="selectRunTile('all')" title="Show all rows">
                         <div style="font-size:1.5rem; font-weight:700; color:#495057;">${counts.created + counts.activated + counts.repaired + counts.paused + counts.skipped + counts.error}</div>
