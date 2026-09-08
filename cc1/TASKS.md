@@ -157,12 +157,16 @@ Geen repo-code gewijzigd; wijzigingen zitten in Redshift en in de n8n-flow (expo
 - [ ] **De C-pool loopt in ~27 dagen leeg** (269.618 oningezonden C-urls à 1-6 visits, gem. 3).
       Daarna vult /p/ de rest automatisch. Rond 05-10-2026 de mix in `pa.index_now_joep` checken:
       zakt het C-aandeel, dan is de pool op en is dat verwacht gedrag, geen storing.
-- [ ] **De échte hefboom ligt buiten deze flow: crawl-starvation.** bingbot raakt 0,69% van
-      `pa.urls` per maand en verstookt 26% van zijn budget op `/data/graphql` (dat op `Disallow`
-      staat en dat hij tóch pakt). Er is **geen `User-agent: bingbot`-groep** in robots.txt; wat
-      er staat is `msnbot` met `Crawl-Delay: 20`, en die groep leest bingbot niet. Een
-      bingbot-groep toevoegen (zónder crawl-delay, want die overruled Crawl Control in BWT) doet
-      meer dan welke mixwijziging ook. Zie ook [[bingbot_crawl_starvation]].
+- [x] **Crawl-starvation → TICKET INGESCHOTEN (08-09-2026), van de backlog af.** Dit is de
+      grootste hefboom en hij ligt buiten deze flow: bingbot raakt 0,69% van `pa.urls` per maand
+      en verstookt 26% van zijn budget op `/data/graphql` (dat op `Disallow` staat en dat hij
+      tóch pakt). Er is **geen `User-agent: bingbot`-groep** in robots.txt; wat er staat is
+      `msnbot` met `Crawl-Delay: 20`, en die groep leest bingbot niet — bingbot zoekt zijn eigen
+      token en valt anders terug op `*`.
+      **Voor wie het ticket oppakt, één valkuil:** zet in die nieuwe bingbot-groep **géén**
+      `Crawl-Delay`. Een crawl-delay in robots.txt overrúled Crawl Control in Bing Webmaster
+      Tools, dus je zou het plafond dat je wilt weghalen juist vastzetten. Achtergrond en de
+      volledige meting staan in LEARNINGS onder de bingbot-nulmeting van 01-09-2026.
 - [ ] **Optioneel: R-urls als gerandomiseerde test**, niet blanket. 50.000 R-urls, helft
       ingezonden en helft achtergehouden, dan crawl én Bing-entries meten. Kost 14% van de
       R-pool en houdt de eenrichtingsdeur voor de rest dicht.
