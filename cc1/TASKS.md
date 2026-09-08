@@ -3,6 +3,39 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-08 (3) — Run van 07-09 ontbrak in Recent runs, en de vinkkolom stond scheef
+
+Joeps melding: laatste run in Auto-Redirects is 28-08 11:53:39, terwijl hij op 07-09 een Tier-A-run
+van 500 draaide (`redirects_2a716e94_20260907_154627.xlsx`). Lessen in LEARNINGS, zelfde datum.
+
+- [x] **Diagnose: de run is met Remove verwijderd, niet mislukt.** Compleet: run `2a716e94`
+      voltooide 07-09 19:54:19 met 500 tier-A uit 16.843 URL's (`output_in_db: true`, uit Chrome's
+      gecachte status-response), Joep downloadde het xlsx 08-09 01:03:55, en daarna zijn
+      historie-rij + `rurl_run_output`-rij + in-memory task weg. `delete_history_entry` is het
+      enige pad dat dat doet. Vier runs geraakt: 28-08 13:36, 02-09, 04-09, 07-09.
+- [x] **Vastgesteld dat Joep op prod :3003 werkt, niet op :8003** (Chrome `downloads.tab_url` +
+      prod's `facets.csv`-mtime van 07-09 14:48). De twee instances hebben een eigen JSON-historie.
+- [x] **Verwijdermoment ingeklemd op 08-09 01:03:55 → 12:21** uit de browsercache; exact staat het
+      alleen op prod (zie LEARNINGS voor de twee PowerShell-regels).
+- [x] **Vinkkolom in Recent runs uitgelijnd** (`bf179a0`): kop en rij dragen nu dezelfde
+      `col-check`, gecentreerd. Gecontroleerd met een headless-screenshot.
+- [x] **Twee memories geschreven** (`rurl_runs_live_on_prod_3003`, `rurl_remove_deletes_three_things`).
+
+Open:
+
+- [ ] **Prod pullen + herstarten.** Joep kijkt op :3003, dus de uitlijning van `bf179a0` ziet hij
+      daar nog niet — en prod's proces loopt achter op de werkkopie. Niet doen tijdens een actieve
+      Tier-A-run (de orchestrator zit in het uvicorn-proces).
+- [ ] **Remove veiliger maken — Joeps keuze, aangeboden en niet gedaan.** De bevestiging zegt nu
+      "Remove N run(s) from the history?" en verzwijgt dat de opgeslagen output óók weg gaat. Opties:
+      de tekst benoemen wat er sneuvelt, of de rij laten staan en alleen de output droppen. Een
+      derde: Export en Remove niet meer naast elkaar zetten (met de selectie die ná Export blijft
+      staan, is het één knop mis).
+- [ ] **De vier weggeklikte runs reconstrueren, als Joep dat wil.** Het werk staat er nog: prod's
+      `redirects_2a716e94_tierA_1..3.csv` (alle 16.843 URL's incl. B/C/D) en `rurl_processed`
+      (07-09: 526 tier A, 894 B, 1.762 C, 13.661 D). Het xlsx zelf is door Remove van prod's schijf
+      gehaald; Joeps gedownloade kopie in `Downloads\claude` is er nog (500 rijen, op de limiet gekapt).
+
 ### 2026-09-08 (2) — V69: de value≡query-vloer trok een tier A uit een categoriesprong
 
 Joeps melding: `/huis_tuin/huis_tuin_505061_505308/r/caravan/` → Binnenverlichting

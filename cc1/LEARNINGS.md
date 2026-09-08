@@ -1,6 +1,71 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een verdwenen run is weggeklikt, niet gecrasht (2026-09-08, auto-redirects)
+
+Joep: "de laatste run in Auto-redirects is van 28-8, maar ik heb gisteren een run gedraaid met
+Tier A limit 500." Die run (`2a716e94`, 07-09 15:46) stond niet in Recent runs, niet in
+`rurl_run_output`, en `/status/2a716e94` gaf 404.
+
+**"De laatste run" is de historie van de machine waarop je draait.** Joep werkt de tool op
+**prod, win-htz-006.colo.beslist.net:3003**, niet op :8003. Beide instances hebben een **eigen**
+`backend/data/rurl_optimizer_v2_history.json` (een deque die alleen bij import van schijf leest)
+en een eigen output-map; gedeeld zijn alleen `rurl_processed` en `rurl_run_output` in de Postgres.
+Prod's bovenste rij was 28-08 11:53:39, die van :8003 26-08 15:08:05 — twee verschillende
+antwoorden op dezelfde vraag. Zoek dus eerst de machine, niet de bug.
+
+**Drie manieren om die machine aan te wijzen, zonder toegang tot prod's schijf.** (1) Chrome's
+downloadgeschiedenis: `AppData/Local/Google/Chrome/User Data/Default/History`, tabel `downloads`,
+kolom `tab_url` geeft de host — kopieer het bestand eerst (Chrome lockt het) en let op dat de
+tijden **UTC** zijn (epoch 1601, microseconden). (2) `GET /api/rurl-v2/refresh-facets/status`
+geeft de mtime van `facets.csv`; "Refresh facets" vlak vóór een run verraadt de machine (prod:
+07-09 14:48, een uur voor de run). (3) Lokaal `grep "POST /api/rurl-v2/optimize"` in
+`logs/uvicorn-8003.log` — nul treffers sinds 26-08 sloot :8003 uit.
+
+**Remove wist drie dingen in één klik.** `delete_history_entry()` haalt de historie-rij (+ het
+outputbestand op schijf) weg, verwijdert **de bytes in `rurl_run_output`**, én doet
+`_TASKS.pop(task_id)`. Vandaar de 404 op /status en een dode Export-knop. Het is het **enige**
+pad dat `rurl_run_output` leegt: er is geen retentiejob, en `_sweep_stale_tasks` voegt alleen toe.
+
+**Het bewijs dat de rij bestond, zit in het download-endpoint.** `/download/{task_id}` leest
+uitsluitend uit `rurl_run_output` — in élke versie sinds de tabel bestaat, ook de oude. Joep had
+het xlsx om 01:03 opgehaald, dus die DB-rij bestond toen; en omdat `_history_append` in hetzelfde
+blok vóór `pers.save_run_output` staat (zelfde thread), stond de historie-rij er ook. Een run die
+door een uvicorn-herstart sterft laat het omgekeerde patroon achter (geen output, geen rij).
+Vier runs troffen dit: 28-08 13:36, 02-09 18:00, 04-09 10:49, 07-09 15:46 — alle vier eerst
+gedownload. In de UI van vóór 03-09 stonden Export en Remove **4px naast elkaar per rij**,
+zelfde formaat, 0,75rem; in de bulk-balk blijft de selectie ná Export staan met Remove ernaast.
+
+**Chrome's cache is een forensische bron als de server niets bewaart.** Het verwijdermoment wordt
+nergens gelogd, maar in `Cache/Cache_Data` lag `f_00d2fb` (mtime 07-09 19:54): de complete laatste
+`/status/2a716e94`-response, met `status: completed`, "500 Tier A redirects (target reached);
+16.843 URLs processed", `output_in_db: true`, pid 34076 en het chunk-log. En in `data_3` lag de
+gecachte `/history`-body van prod (5.948 bytes, 10 rijen, top `e44794bb`) — de toestand ná de
+verwijdering. Daarmee klemt het venster op **08-09 01:03:55 → 12:21**. Recept: grep de
+cachebestanden op het task-id, en zoek gzip-streams (`\x1f\x8b\x08`) die decomprimeren naar
+`[{"task_id"` voor de JSON-responses. Exact wordt het alleen op prod: de `LastWriteTime` van
+prod's history-json (sinds 28-08 is er geen run bij gekomen, dus dat ís de verwijdering), of
+`Select-String -Pattern 'DELETE /api/rurl-v2/history' -Context 60,5` in `logs\service.log` —
+uvicorn's access-regels hebben geen eigen tijdstempel, dus lees de dichtstbijzijnde
+`2026-...`-regel eromheen.
+
+**Prod serveert de frontend van schijf, de backend uit het geheugen van het proces.** Een pull
+zonder herstart geeft dus een nieuwe pagina op oude backend-code. Om te daten wat prod's *proces*
+draait, probeer een route die in een bekende commit is toegevoegd: `/api/rurl-v2/results/{id}`
+antwoordde met `{"detail":"No output for this task"}` (app-404, niet route-404), en die route
+kwam in `0a5658c` van 02-09.
+
+**Een kolomklasse die alleen op de `<th>` staat, laat de body-cel scheef staan.** `.tool-table th`
+geeft 14px horizontale padding, een `.table-sm` td krijgt er 4 van Bootstrap: elk rijvinkje in
+Recent runs stond 10px links van select-all. Kop en rij moeten dezelfde `col-check` dragen (zoals
+DMA+ en Healthscore). Centreren, niet links uitlijnen: `.form-check-input` is `1em`, en de kop
+staat op 1rem tegen 0,9rem in de body, dus de twee vinkjes zijn niet even groot — op hun midden
+vallen ze samen, op hun linkerrand niet. Commit `bf179a0`.
+
+**En één aanname die niet klopte, voor de volgende keer:** `Path("x.json").with_suffix(".json.tmp")`
+is géén ValueError — dat werkt (`x.json.tmp`), dus de atomaire write van V61 is niet de reden dat
+een historie-bestand stil ophoudt met groeien. Getest voordat het een bevinding werd.
+
 ## Een score die precies op een vloer landt, is geen berekening (2026-09-08, rurl)
 
 Joep: "auto-redirects gaf deze redirect 90, dat is veel te hoog — zou ongeveer 60 moeten
