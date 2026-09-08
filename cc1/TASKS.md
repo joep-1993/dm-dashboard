@@ -3,6 +3,40 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-08 (8) — Zoektermenrapport SHOP-campagnes + keywords doorgevoerd
+
+Joep vroeg het search-term rapport van de branded SHOP-campagnes en een voorstel voor toe te voegen
+zoektermen; daarna het voorstel laten doorvoeren. Geen repo-code geraakt — analyse en mutaties via
+eigen scripts in de scratchpad, op de Google Ads API. Lessen in LEARNINGS, zelfde datum.
+
+- [x] **Scope bepaald**: 96 ENABLED `SHOP_CAMPAIGN`-campagnes (van 186 gelabeld) in 26 accounts
+      onder MCC 3011145605. Zoektermen 24-06 t/m 07-09: 4.372 uniek, 3.610 nog geen keyword.
+- [x] **Volume-diagnose**: impressie-aandeel 10,0%, rank-verlies 89,6%, budgetverlies 2,2%;
+      37 campagnes met 0 impressies in 21 dagen. Gerapporteerd als hoofdbevinding — keywords zijn
+      hier niet het knelpunt.
+- [x] **Voorstel opgeleverd** in `Downloads\claude\SHOP_campagnes_zoektermen_voorstel_2026-09-08_v2.xlsx`
+      (8 tabs: A1/A2 toevoegen, drie negatieven-tabs, watchlist, alle 4.608 term-rijen).
+- [x] **Shopnaam-controle op verzoek van Joep**: 69/69 A-termen bevatten de shopnaam letterlijk,
+      0 mixed-brand, 0 typefout-varianten weggelekt. Legde wél twee fouten in de matchregel bloot
+      (`harman kardon`; kieskeurig/lidl/aldi als concurrent) — A-lijst bleef na reparatie identiek.
+- [x] **Doorgevoerd na goedkeuring** (validate_only → live, 0 fouten, alles teruggelezen):
+      61 EXACT keywords, 61 MB_PH exact negatives, 22 lijsten `SHOP_CAMPAIGN | Concurrenten &
+      eigen merk` à 30 phrase-termen, 71 koppelingen, 750 campagne-negatieven in de 4 volle
+      accounts. Verificatie: 0 afwijkingen.
+- [x] **Bestaande gedeelde lijsten bewust NIET gekoppeld** — zouden 57/66 keywords en 598
+      conversies blokkeren. Zie LEARNINGS.
+
+**Open:**
+- [ ] **3 keywords staan nog open in account 6511658729 (Meubels)**: `banken intratuin` (9 conv),
+      `praxis bijzettafel tuin` (6), `praxis slaapkamerkasten` (3). Het account zit op de
+      criterialimiet (~9 mln keywords) en weigert elk nieuw criterium; vraagt eerst opruiming daar.
+- [ ] **De `beslist`-uitsluiting snijdt 79 conversies / EUR 14,72 weg.** Bedoeld — eigen merk hoort
+      in een merkcampagne — maar alleen zinnig als daar ook echt op geboden wordt. Nagaan.
+- [ ] **Het echte knelpunt blijft bod/kwaliteit.** Zolang de ROAS_CPR-portfolio niet gekoppeld is
+      (UI-only, zie de blocker), blijft het impressie-aandeel rond 10%.
+- [ ] **Herhaalmeting na het seizoen.** De meetperiode was zomer (ventilator/airco); 18 van de 69
+      A-termen zijn seizoensgebonden en maar 19 hadden clicks in de laatste 21 dagen.
+
 ### 2026-09-08 (7) — SEO title blueprints voor de `opties_kast`-familie in de Kasten-tak
 
 Joep vroeg blueprints voor key `f_meubel~materiaal~opties_kast` in alle children onder Kasten

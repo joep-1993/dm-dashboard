@@ -1,6 +1,62 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Uitsluitingslijsten die je juist NIET moet koppelen (2026-09-08, SHOP-campagnes zoektermen)
+
+Joep vroeg het zoektermenrapport van de branded SHOP-campagnes plus een voorstel voor toe te voegen
+zoektermen. Doorgevoerd: 61 EXACT keywords, 61 MB_PH exact negatives en een eigen uitsluitingslijst
+op alle 96 campagnes. De interessante lessen zaten in wat ik *niet* gedaan heb.
+
+**1. De 178 campagnes staan aan, en het knelpunt is rank, niet dekking.** 96 van de 186
+`SHOP_CAMPAIGN`-gelabelde campagnes zijn ENABLED (90 REMOVED); ze draaien sinds 24-06-2026. Volume
+is minuscuul: EUR 157,63 / 1.684 clicks over 76 dagen. Impressie-gewogen over 18-08 t/m 07-09:
+**impressie-aandeel 10,0%, verloren op RANK 89,6%, verloren op BUDGET 2,2%**, met EUR 694 dagbudget
+beschikbaar tegen ~EUR 2/dag besteed. 37 van de 96 hadden 0 impressies in 21 dagen. Zoektermen of
+budget toevoegen verandert daar niets aan — dat zit in bod/kwaliteit, en dus in de nog altijd
+niet-gekoppelde ROAS_CPR-portfolio (zie de blocker-entry van 2026-08-31).
+
+**2. Dat geen enkele gedeelde uitsluitingslijst aan een SHOP-campagne hangt, is opzet.** Dezelfde
+accounts hebben 83.300 koppelingen op hun andere campagnes, dus het zag er eerst uit als een
+vergeten stap bij de bouw. Het tegendeel: `Winkels & Merken incl. Nextail` bevat `decathlon`,
+`praxis` en de rest als PHRASE-negative, bedoeld om shopnamen uit de *generieke* campagnes te
+houden. De SHOP-campagnes bieden er juist op. Gemeten voordat ik iets koppelde: die ene lijst zou
+**57 van de 66 nieuwe keywords en 116 converterende zoektermen (598 conv / EUR 154)** blokkeren.
+`Algemene Negatives` (`be`, `hoe`, `open`) en `Woonplaatsen Phrase` (`urk`, `olst`, `erp`) zijn even
+grof. Daarom een eigen, smalle lijst `SHOP_CAMPAIGN | Concurrenten & eigen merk` gemaakt.
+`Merknaam (beslist.nl)` helpt hier trouwens niet: 161 termen, allemaal **EXACT**, dus
+"ventilator beslist nl" glipt erlangs — daarvoor is een phrase-negative nodig.
+
+**3. Twee harde limieten.** **34 shared sets per account** is het plafond; vier accounts
+(4761604080, 6511658729, 8755979133, 9525057729) zaten er precies op, daar is uitgeweken naar
+campagne-niveau negatieven. En **account 6511658729 (Meubels) zit op de criterialimiet** (~9 mln
+keywords) en weigert *elk* nieuw ad-group-criterium — ook één los, getest. Drie keywords staan daar
+nog open. De foutcode is in beide gevallen `RESOURCE_LIMIT`, wat niets zegt over welke limiet; los
+testen wijst het aan.
+
+**4. "Staat de shopnaam in de zoekterm?" is twee keer misgegaan.** Substring zonder woordgrens laat
+`EP.nl` matchen op "di**ep**vrieskisten"; korte namen dus alleen op woordgrens, aaneengeschreven pas
+vanaf ~6 tekens (`decathlonfietstassen` moet wél matchen). Andersom mist een aaneengeschreven basis
+de samengestelde merknaam: `Harmankardon.nl` matcht niet op "harman kardon speakers" (17 rijen naar
+de verkeerde bak). Zelfde soort gat in een handgemaakte concurrentenlijst: **kieskeurig** (zelf een
+vergelijkingssite), **lidl** en **aldi** ontbraken. Productmerken (Philips, Inventum, Duux, Haier)
+zijn géén concurrent in een shopcampagne.
+
+**5. Toets phrase-negatieven met woordgrenzen, niet met substring.** Een substring-toets meldde dat
+`Algemene Negatives` 214 conversies zou blokkeren via `hoe` in "golfsc**hoe**nen"; met correcte
+woordreeks-semantiek was het 115 via echte woorden. Overdrijving in de gevarenanalyse is net zo
+schadelijk als onderschatting — je laat er de verkeerde beslissing op nemen.
+
+**Drie kleinere notities.** Schrijven kan niet met de `ai-read-only` service-account uit
+`google-ads.yaml`; dat vraagt `GOOGLE_ADS_REFRESH_TOKEN`/`_DEVELOPER_TOKEN` uit
+`~/projects/dma_script/.env` plus `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` uit de
+**Windows-omgevingsvariabelen** (`cmd.exe /c echo %VAR%`). `metrics.conversions` is 0 in deze
+accounts — alles zit in `all_conversions` (Floodlight/CPR). En `DURING LAST_90_DAYS` bestaat niet in
+GAQL: alleen `LAST_7_DAYS`/`LAST_30_DAYS` of een expliciete `BETWEEN`.
+
+**Seizoen is hier een valstrik.** De meetperiode zat vol ventilator/airco. De generieke termen
+(zonder shopnaam) leken met EUR 107 conversiewaarde de rijkste groep, maar EUR 69 daarvan kwam van
+één term (`ventilator kopen`, 4 clicks) die in de laatste 21 dagen nul clicks had.
+
 ## Dekking is geen kwaliteit, en een legacy-title kan op de onze lijken (2026-09-08, SEO title blueprints)
 
 Joep vroeg blueprints voor `f_meubel~materiaal~opties_kast` onder Kasten. Bij het narekenen van wat
