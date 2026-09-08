@@ -1271,6 +1271,52 @@
         let runDetailMeta = null;
         let runDetailView = { sortCol: null, sortDir: 'asc', page: 1, perPage: 25 };
 
+        // "Retry errors" — de mislukte rijen van een run als NIEUWE run oppakken.
+        // Ze gaan langs exact dezelfde weg als een gewone plakinvoer (parse-text →
+        // preflight → Submit), en dat is het punt: de retry krijgt een VERSE
+        // preflight, want sinds de vorige poging kan een rij al doorverwezen zijn,
+        // een rewire nodig hebben of een ander conflict opleveren. Deze knop
+        // schrijft dus zelf niets naar productie — Submit doet dat, en die maakt
+        // er een eigen run # van.
+        function retryRunErrors(failedRows, runId, runLabel) {
+            if (!failedRows.length) return;
+            const staged = document.getElementById('textInput').value.trim()
+                || (document.getElementById('fileInput').files || []).length;
+            if (staged && !confirm(
+                    `Dit vervangt de invoer die nu klaarstaat door ${failedRows.length} `
+                    + `mislukte rij(en) uit run #${runId}. Doorgaan?`)) return;
+
+            // TAB-gescheiden, niet komma: /parse-text kiest het scheidingsteken dat
+            // het vaakst op de eerste regel staat, en een country als "nl, be" bevat
+            // zélf een komma — met komma's wordt "be" dan het label van de rij.
+            // Kolomorde is die van EXPECTED_COLUMNS: old, new, statuscode, country,
+            // label. Het label gaat mee zodat de herkansde regel dezelfde naam in de
+            // redirect-API krijgt als de mislukte poging; leeg laten vult de backend
+            // met zijn eigen "JVS Redirects <datum>".
+            document.getElementById('textInput').value = failedRows.map(r => [
+                r.input_old || '',
+                r.final_new || '',
+                r.statusCode || '',
+                r.country || '',
+                r.label || '',
+            ].join('\t')).join('\n');
+
+            document.getElementById('srcManual').checked = true;
+            applyInputMode();
+            // Het label van de nieuwe run verwijst naar de run waar hij uit komt,
+            // zodat Recent results laat zien dat dit een herkansing is.
+            document.getElementById('runLabel').value =
+                `retry run #${runId}` + (runLabel ? ` — ${runLabel}` : '');
+
+            // De oude run is hiermee afgehandeld; hij staat één klik verderop in
+            // Recent results als je hem er weer bij wil hebben.
+            document.getElementById('runDetail').innerHTML = '';
+            runDetailRows = [];
+            runDetailMeta = null;
+            document.getElementById('paneText').scrollIntoView({ behavior: 'smooth', block: 'center' });
+            runPreview();
+        }
+
         async function viewRun(id) {
             const out = document.getElementById('runDetail');
             // Canonieke inline spinner (UI_BLUEPRINT Spinners) in plaats van het
@@ -1287,12 +1333,24 @@
                 runDetailMeta = run;
                 runDetailView = { sortCol: null, sortDir: 'asc', page: 1, perPage: 25 };
 
+                // Alleen `fail` is te herkansen. Een `warning`-rij (hoofdregel
+                // geplaatst, maar een inkomende rewire mislukt) HEEFT zijn regel
+                // gekregen: preflight ziet die bij een retry als bestaand en zet
+                // hem op skip, dus die meenemen levert alleen ruis op. `skipped`
+                // is per definitie geen fout.
+                const failedRows = runDetailRows.filter(r => r.status === 'fail');
+
                 // Shell — table rows + pagination are populated by renderRunDetailTable.
                 out.innerHTML = `
                     <div class="card mb-3">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <h5 class="mb-0">Run #${run.id}${run.label ? ' — ' + escapeHtml(run.label) : ''}</h5>
-                            <button class="btn btn-sm btn-purple-outline" onclick="document.getElementById('runDetail').innerHTML=''">Close</button>
+                            <div class="d-flex gap-2">
+                                ${failedRows.length ? `<button class="btn btn-sm btn-outline-orange" id="btnRetryErrors"
+                                    title="Zet de ${failedRows.length} mislukte rij(en) in de invoer en draait Preview opnieuw. Submit maakt er een nieuwe run van; deze knop schrijft zelf niets.">
+                                    Retry errors (${failedRows.length})</button>` : ''}
+                                <button class="btn btn-sm btn-purple-outline" id="btnCloseRun">Close</button>
+                            </div>
                         </div>
                         <div class="card-body">
                             <div class="table-responsive" style="max-height: 480px; overflow-y:auto;">
@@ -1331,6 +1389,16 @@
                     </div>`;
 
                 // Wire interactions inside the freshly-rendered shell.
+                document.getElementById('btnCloseRun').addEventListener('click', () => {
+                    out.innerHTML = '';
+                    runDetailRows = [];
+                    runDetailMeta = null;
+                });
+                const retryBtn = document.getElementById('btnRetryErrors');
+                if (retryBtn) {
+                    retryBtn.addEventListener('click', () =>
+                        retryRunErrors(failedRows, run.id, run.label || ''));
+                }
                 document.querySelectorAll('#runDetail .preview-table thead th.sortable').forEach((th) => {
                     th.addEventListener('click', () => {
                         const col = th.getAttribute('data-sort');
