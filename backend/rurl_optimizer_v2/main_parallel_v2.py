@@ -1080,6 +1080,12 @@ V64_LOW_COVERAGE_CAP = 45
 V64_LOW_COVERAGE_SHARE = 0.25
 V64_LOW_COVERAGE_MIN_WORDS = 3
 
+# V69: withdraw RC5's value≡query floor of 90 when the row jumped to another
+# category and the Search API's leader for the query is not that category. A
+# module flag so an A/B can toggle it off and compare against the prior
+# behaviour, like V38_GENERIC_ONLY_REJECT and V39_BRAND_GUARD.
+V69_WITHDRAW_UNBACKED_VALUE_FLOOR = True
+
 
 # V65: units that appear as their own token in retail queries. Single letters
 # ('l', 'v', 'w') are absent on purpose - _tokens_not_represented already skips
@@ -1760,7 +1766,11 @@ def _finalize_redirect(row, ctx):
          destination still leaves most of the query unrepresented. MUST precede
          the cap: it can RAISE the score back to the scorer's own number, and the
          cap is then still the last word on it.
-      4. V64 low-coverage cap — a destination that accounts for a quarter of the
+      4. V69 value≡query floor withdrawal — RC5's floor of 90 reads the query's
+         tokens only, so across a category change it vouches for a category it
+         never looked at. Withdrawn when the search leader puts the query's
+         products somewhere else.
+      5. V64 low-coverage cap — a destination that accounts for a quarter of the
          query or less is not a moderate-confidence answer, whoever scored it.
 
     Deliberately NOT included: the V61 last resort (`build_category_only`), which
@@ -1875,7 +1885,77 @@ def _finalize_redirect(row, ctx):
                         ctx.get('matched_keywords'), ctx.get('unmatched_keywords'),
                         match_type=row.get('match_type')) or '')
 
-    # --- 4. V64: cap a destination that accounts for a quarter of the query --
+    # --- 4. V69: withdraw a value≡query floor the category jump never earned --
+    # RC5 floors a single-facet row at 90 when the facet VALUE is the query
+    # ("watertafel" -> Watertafels). That reads the query's own tokens and nothing
+    # else, so it is blind to the second half of a /c/ page's subject: the
+    # category. Inside the source category the blind spot is harmless — the
+    # searcher was already on that subject and the facet only narrows it. Across a
+    # category change the floor claims something it has not measured, and it
+    # manufactures a tier A out of it: "/huis_tuin_505061_505308/r/caravan/"
+    # (Woonaccessoires) shipped Binnenverlichting /c/ruimte~'Caravan' at 90, an
+    # attribute page for a product type the query never named. Note the number is
+    # the floor exactly — every component said less (60 base + 10 exact - 10 for
+    # the [maincat] jump - 10 for H1 50 = 50).
+    #
+    # The discriminating question is the one V65 already asks of a brand jump:
+    # do the query's PRODUCTS live where we are sending them? A facet value that
+    # carries the whole query is a claim about the product, so when the Search
+    # API's leader for that query is a different category than the destination,
+    # the value is a filter and not a destination. Measured over the 100
+    # cross-category value≡query rows of the 4.998-row run of 2026-08-26: the
+    # leader agrees on 29 (squishy -> Fidgets, airfryer -> Airfryers, ferrero
+    # rocher -> Bonbons, beterschap -> Beterschapskaarten) and disagrees on 71
+    # (koel -> LED Strips 'Koel wit', wifi -> Videocamera's, glas -> Waterkokers,
+    # '25 cm' -> Pannen, teer -> Shampoo). Dropping the floor for every
+    # cross-category row instead was tried and is far too blunt — it sinks
+    # airfryer -> Airfryers from 96 to 36.
+    #
+    # Deliberately narrow, on V64's reasoning: it runs in the tail, so it can only
+    # change the NUMBER, never the destination — the `>= 50` gates mid-cascade
+    # have all been decided by now. It also acts only when the floor is still what
+    # the row's score IS: a later branch's own constant (V31's 60, V65's 60/45, a
+    # search-derived base) is not RC5's doing and carries its own justification.
+    # No evidence at all (a shop-only query never reaches the search probe) leaves
+    # the floor standing — absence of support is not the same as contradiction
+    # when we never asked.
+    _v69_floored = ctx.get('value_floor_score')
+    _v69_bare = ctx.get('score_without_value_floor')
+    if (V69_WITHDRAW_UNBACKED_VALUE_FLOOR
+            and _v69_floored is not None and _v69_bare is not None
+            and row['reliability_score'] == _v69_floored
+            and _v69_bare < _v69_floored):
+        _v69_src = str(getattr(parsed, 'subcategory_name', '') or '')
+        _v69_seg = (row['redirect_url'].split('/c/')[0].strip('/').split('/products/')[-1]
+                    .split('/'))
+        _v69_dest = _v69_seg[-1] if _v69_seg else ''
+        # The leader comes from a probe scoped to the SOURCE maincat, so it is
+        # evidence about categories inside that maincat and nothing else — the
+        # same limit V45 puts on cross_maincat_fallback. A destination in another
+        # maincat is judged by its own branch, not by this leader.
+        _v69_same_mc = bool(_v69_seg) and _v69_seg[0] == (
+            getattr(parsed, 'main_category', '') or '')
+        # A descent into a child of the source is a narrowing of the same
+        # subject, not a substitution — the floor keeps its ground there.
+        _v69_in_subtree = bool(_v69_src) and (
+            _v69_dest == _v69_src or _v69_dest.startswith(_v69_src + '_'))
+        _v69_leader = ctx.get('search_leader_slug') or ''
+        _v69_backed = bool(_v69_leader and _v69_dest) and (
+            _v69_leader == _v69_dest
+            or _v69_leader.startswith(_v69_dest + '_')
+            or _v69_dest.startswith(_v69_leader + '_'))
+        if (_v69_leader and _v69_same_mc and not _v69_in_subtree and not _v69_backed
+                and not _bridge64(parsed.keyword, row.get('redirect_category') or '')):
+            row['reliability_score'] = _v69_bare
+            row['reliability_tier'] = _tier(row['reliability_score'])
+            row['reason'] = ((row.get('reason') or '')
+                             + f"; [V69] value≡query floor withdrawn "
+                             + f"({_v69_floored} -> {_v69_bare}) — the facet value "
+                             + f"carries the query but the destination category does "
+                             + f"not, and search puts the query's products in "
+                             + f"'{ctx.get('search_leader_name') or _v69_leader}'")
+
+    # --- 5. V64: cap a destination that accounts for a quarter of the query --
     # V64: a destination that accounts for a quarter of the query or less is not
     # a moderate-confidence answer, whoever put the score there. V62 makes
     # exactly this measurement, but only re-tests rows the V31 guard restored:
@@ -3177,6 +3257,11 @@ def process_url_v2(args):
     # V21: Calculate reliability score WITH match_coverage
     reliability_score = 0
     reliability_tier = 'D'
+    # V69: the same number without RC5's value≡query floor. Computed here, next
+    # to the score it belongs to, because the tail needs both to tell whether a
+    # 90 is the row's own arithmetic or just the floor — and the scorer is a pure
+    # function, so asking it twice costs nothing.
+    score_without_value_floor = 0
     if r.success and not _brand_spurious:
         reliability_score = calculate_reliability_score(
             match_score=r.match_score,
@@ -3192,6 +3277,20 @@ def process_url_v2(args):
             unmatched_keywords=unmatched_keywords,
         )
         reliability_tier = get_reliability_tier(reliability_score)
+        score_without_value_floor = calculate_reliability_score(
+            match_score=r.match_score,
+            facet_count=r.facet_count,
+            match_type=r.match_type,
+            is_cross_category=is_cross_category,
+            facet_value_names=r.facet_value_names,
+            keyword=r.keyword,
+            reason=r.reason,
+            match_coverage=match_coverage,
+            h1_similarity=h1_similarity,
+            matched_keywords=matched_keywords,
+            unmatched_keywords=unmatched_keywords,
+            value_eq_floor=False,  # V69
+        )
     # V27: Only surface the rejection reason when the scorer actually
     # acted on it (score dropped to 0). V32: the subcategory_name branch now
     # also runs V27, so this correctly surfaces long-unmatched rejections for
@@ -5021,6 +5120,12 @@ def process_url_v2(args):
         'fallback_score': reliability_score,
         'matched_keywords': matched_keywords,
         'unmatched_keywords': unmatched_keywords,
+        # V69: the floored number, the bare one, and where the Search API says
+        # this query's products live.
+        'value_floor_score': reliability_score,
+        'score_without_value_floor': score_without_value_floor,
+        'search_leader_slug': derived.get('dom_cat_url_slug') or '',
+        'search_leader_name': search_derived_dom_cat,
     })
     final_redirect_url = _fin['redirect_url']
     final_score = _fin['reliability_score']

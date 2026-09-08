@@ -301,6 +301,7 @@ def calculate_reliability_score(
     h1_similarity: Optional[int] = None,  # V26: synthetic H1 similarity (0-100)
     matched_keywords: Optional[list] = None,  # V27: tokens that actually matched
     unmatched_keywords: Optional[list] = None,  # V27: tokens that did NOT match
+    value_eq_floor: bool = True,  # V69: apply RC5's value≡query floor of 90
 ) -> int:
     """
     Calculate reliability score for a redirect.
@@ -314,6 +315,10 @@ def calculate_reliability_score(
         keyword: Het originele keyword uit de R-URL
         reason: Reden/beschrijving van de match
         match_coverage: V21 - Percentage van keyword dat gematcht is (0-100)
+        value_eq_floor: V69 - False geeft dezelfde score zonder RC5's
+            value≡query-vloer van 90. De staart van de cascade vraagt beide
+            getallen op en trekt de vloer terug als het zoekbewijs de
+            categoriesprong niet steunt.
 
     Returns:
         int: Score from 0-100 where:
@@ -517,10 +522,19 @@ def calculate_reliability_score(
     # queries ("verloop stekker 13 polig…" vs "7-polige stekkers") and for
     # head-noun-dropped matches ("kunststof-hoekprofielen" vs "Kunststof"), so
     # those are NOT lifted.
+    #
+    # V69: `value_eq_floor=False` asks for the same number WITHOUT the value≡query
+    # floor. The floor reads the query's own tokens only, so it cannot see the one
+    # thing a /c/ page adds to them: the category. Across a category change that
+    # blind spot manufactures a tier A — "/huis_tuin_505061_505308/r/caravan/"
+    # (Woonaccessoires) landed on Binnenverlichting /c/ruimte~'Caravan' at 90,
+    # because the VALUE is the query while the destination substitutes a product
+    # type nobody asked for. The tail withdraws the floor when the search evidence
+    # does not back the jump; see _finalize_redirect step 4.
     if (facet_count <= 1 and match_coverage >= 100.0 and not unmatched_keywords):
-        _val_eq = _value_equals_query(keyword, facet_value_names)
-        if _val_eq:
-            base_score = max(base_score, 90)
+        if _value_equals_query(keyword, facet_value_names):
+            if value_eq_floor:
+                base_score = max(base_score, 90)
         elif match_type == 'synonym':
             base_score = max(base_score, 80)
 
