@@ -3,6 +3,41 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-08 (6) — Facetwaarde-seoPriority: 82.719 waarden ingedeeld, en de helft blijkt nergens gelinkt
+
+Vervolg op de cat×facet-opruiming van 07-09, nu op de waarde-vlag (`FacetValue.seoPriority`,
+facet-globaal, geen `categoryId`). Lessen in LEARNINGS, zelfde datum. Read-only: **nul wijzigingen
+doorgevoerd.** Alle scripts stonden in de scratchpad, dus geen repo-code geraakt.
+
+- [x] **Scope gemeten in plaats van geschat.** 550.369 facetwaarden, 223.297 met `seoPriority=true`,
+      82.719 daarvan met minstens één bestaande pagina. Bronnen: taxonomiedump (75s, 181 MB),
+      `pa.urls` (1.020.919 actieve /c/-URL's), de rurl-facetcache voor productaantallen, en een
+      cat×waarde-verkeersmatrix uit Redshift (414.496 rijen, 465s).
+- [x] **Linkbaarheid per categorie gemeten** (3.575 Search API-calls, 95s) en gevalideerd tegen het
+      noscript-blok van een echte pagina, overlap 100%. **44.961 waarden (54%) wordt gelinkt**,
+      37.758 niet.
+- [x] **Leeftijd op drie manieren afgedekt**: expositievenster uit `createdAt` (40% bulkstempel, dus
+      als tweedeling gebruikt), een harde ondergrens van 90 dagen, en het leeftijdsbewijs uit
+      `fct_visits` vanaf 2022 (465s).
+- [x] **Zoekvolume**: 1.279.640 keywords bij Keyword Planner, 99,87% met antwoord, ~36 min, plus
+      16.237 kale categorie- en waardevolumes om generieke combinaties te vlaggen.
+- [x] **Indeling met leegval-guard** (elke categorie×facet houdt ≥ 3 gelinkte waarden over, 494
+      kandidaten daarop geblokkeerd): 4.247 uitzetten A gelinkt/dood/geen vraag (8.941 linkplekken),
+      4.463 uitzetten B, 2.964 repareren (809k zoekvolume), 3.046 kans-niet-gelinkt (807k), 5.864 te
+      jong, 16.601 uitzetten-zonder-effect, 45.040 behouden. De twee echte uitzetgroepen kosten
+      16.054 visits en €1.016 per jaar.
+- [x] **Deliverables**: `Downloads\claude\facetwaarde_seoprio_20260908.xlsx` (9 tabs) en
+      `facetwaarde_seoprio_volledig_20260908.csv` (82.719 rijen, 33 kolommen).
+
+**Open:**
+- [ ] **Top ~200 van de vraag-as met de hand nakijken** voordat er iets op gebeurt —
+      gewone-woordmerken ("quantum computers") glippen door de automatische vlag.
+- [ ] **Tier 1 uitzetten (4.247 gelinkte dode waarden)** wacht op groen licht van Joep; bij
+      doorvoeren de before-state in `pa.seoprio_changes` loggen en `PUT /api/Facets/values/{id}` met
+      een platte body zonder `nameLanguage` gebruiken.
+- [ ] **De 3.046 kans-waarden** zijn de omgekeerde actie: aanzetten of hoger in de facetsortering
+      krijgen. Nog geen mechanisme onderzocht om die sortering te beïnvloeden.
+
 ### 2026-09-08 (5) — GSD Campaigns: van de Content API naar Merchant API v1, en een guard tegen duplicaten
 
 Joeps vraag over de errors in `gsd_run_2026-09-08.xlsx` (24 foutregels, 12 van de 15 shop/land-

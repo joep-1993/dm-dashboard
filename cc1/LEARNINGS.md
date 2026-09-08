@@ -1,6 +1,57 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een vlag die aanstaat en toch niets linkt, en drie manieren om leeftijd te verzinnen (2026-09-08, facetwaarde-seoPriority)
+
+Joep vroeg de opruiming van 07-09 te herhalen op de **tweede** seoPriority — die van de facet
+**waarde** — met zoekvolume als tweede as en met de aanmaakdatum erbij, zodat jonge waarden niet
+worden afgestraft. 82.719 waarden geanalyseerd, nul doorgevoerd. Vijf herbruikbare lessen.
+
+**1. `FacetValue.seoPriority=true` zegt niet dat er ergens een link staat, en dat is meetbaar in
+95 seconden.** Eén ongefilterde Search API-call per categorie geeft per facet `isSeoFacet` én de
+waardenlijst met `crawlable`; 3.575 categorieën op 16 workers, ~48 KB per respons. Een waarde is
+gelinkt als het facet daar SEO-facet is **en** haar id in die lijst zit. Gevalideerd tegen de echte
+pagina (`huis_tuin_6069774`, UA `Beslist script voor SEO`): 83 `merk~`- en 24 `kleur~`-links in het
+noscript-blok tegen 83 en 24 crawlbare waarden in de index, overlap 100%. Geen benadering dus.
+Uitkomst: **44.961 van de 82.719 crawlbare waarden met pagina's (54%) wordt daadwerkelijk gelinkt.**
+Bij 20.634 van de rest valt de waarde in élke categorie buiten de lijst. Dat splitst elke uitzetlijst
+in "opruiming met effect" en "opruiming zonder effect" — zonder die splitsing had ik 16.601 waarden
+voorgesteld waarvan het uitzetten vandaag niets verandert.
+
+**2. `createdAt` op facetwaarden is voor 40% één migratiestempel, en juist daardoor bruikbaar.**
+222.570 van de 550.369 waarden staan op 2026-01-27, en dat is ook de oudste datum in de dump. Als
+absolute leeftijd is het waardeloos; als tweedeling werkt het: jan/feb = bestond al, vanaf maart =
+echte datum. Dat is geen randgeval — **50.908 crawlbare waarden zijn ná 01-06-2026 aangemaakt en 98%
+daarvan heeft nul verkeer.** Wie op 365 dagen verkeer beoordeelt, straft die groep af voor een
+periode waarin ze niet bestonden. Drie maatregelen: verkeer annualiseren over het expositievenster,
+onder 90 dagen niet beoordelen (5.864 waarden, en die hebben samen 578.130 zoekvolume per maand), en
+voor het migratiecohort het leeftijdsbewijs uit `fct_visits` vanaf 2022 halen — 12.245 van de 20.843
+nul-verkeerwaarden hadden verkeer vóór het venster (uitgedoofd, veilig), 3.869 nooit één visit in
+4,7 jaar (onbewijsbaar, laat zoekvolume beslissen).
+
+**3. Een omzetgewogen basislijn discrimineert niet; neem het percentiel.** Eerst de siblings van
+hetzelfde facet in dezelfde categorie samengeteld als `som(omzet)/som(URLs)`: daarop viel **49% van
+de estate onder ratio 0,20**, want die som is kopzwaar en elke staartwaarde ziet er slecht uit. De
+mediaan hielp ook niet — bij 26.591 waarden verdient de mediaan-sibling €0, dus de ratio is dan
+oneindig. Wat werkt is de rangorde: het URL-gewogen percentiel van de waarde binnen haar eigen
+facet in haar eigen categorie, met absolute vloeren erbij (<25 visits, <€10, ≥180 dagen zichtbaar).
+
+**4. Keyword Planner haalt ~1.000 keywords per seconde als je zelf roteert.** 1,28 miljoen keywords
+(waarde + categorie, meervoud én enkelvoud) in ~36 minuten, 99,87% met een antwoord, ~2.700 requests,
+geen dagplafond, €0. Dit corrigeert de bestaande notitie "na ~3 calls van 500 komt een 429": op een
+verse customer-id gingen er **9** door, en de 429 is een korte rate limit die **binnen 30 seconden**
+herstelt. Recept: eigen rotatie over de 35 `CUSTOMER_IDS` met 75s cooldown per id in plaats van
+lineair doorschuiven, want doorschuiven verbrandt je accounts en stopt bij de laatste.
+
+**5. De keywordvorm is een keuze, niet een detail.** Op 400 paren gaf woordvolgorde in 67 gevallen
+een ánder volume, en enkelvoud van de categorie ("… stofzuiger") haalde 19% dekking tegen 16% voor
+het meervoud. Vraag twee vormen op en neem het maximum; de kosten zijn lineair en de API is snel
+genoeg. Over de hele set heeft **17,9% van de keywords volume > 0** — zoekvolume is dus een
+kopsignaal, en voor de staart moet GSC-impressies het gat vullen. Let op de generieke val: "quantum
+computers" is natuurkunde en niet het merk Quantum in Computers. Detecteerbaar zijn alleen de dubbele
+woorden ("ginkgo ginkgo biloba") en volume ≈ kale categorie; dat vlagt 31 rijen, de rest is handwerk
+op de top van de lijst.
+
 ## Een sunset die op een percentage van de calls slaat, en een migratie die je architectuur herschrijft (2026-09-08, GSD Campaigns / Merchant API)
 
 Joeps vraag was "kijk eens naar de errors in `gsd_run_2026-09-08.xlsx`": 24 foutregels in twee
