@@ -3,6 +3,43 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-09 (2) — IndexNow: beslist.be aangezet, plus historie/export per domein
+
+Joep leverde de .be-key aan met keylocatie `https://www.beslist.be/c09a371458704e499c7867d93dee6426.txt`
+en vroeg om een domein-dropdown in de tool. Die dropdown bleek er al te zitten (gebouwd 01-09, zie
+`2026-09-01 (3)`) — hij wachtte alleen op een key. Lessen in LEARNINGS, zelfde datum. Commit `ebc3da6`.
+
+- [x] **Key ingeregeld**: `INDEXNOW_KEY_BE` in `.env` (gitignored), plus dezelfde waarde als fallback
+      in `DOMAINS` in `backend/indexnow_service.py` — prod (win-htz-006) draait op een eigen `.env`
+      en zou anders elke .be-submit vooraf weigeren. Geen lek: een IndexNow-key is publiek van
+      ontwerp, hij staat als .txt op de site-root.
+- [x] **Keyfile geverifieerd** vóór de eerste submit: HTTP 200, `text/plain`, inhoud gelijk aan de
+      bestandsnaam.
+- [x] **Live getest**: eerste POST → 202 (key validation pending), na Bings keyfile-fetch → 200 op
+      beide endpoints. Twee echte .be-URL's ingezonden en gelogd.
+- [x] **Hele pad getest**: dedup (2e keer 0 nieuw), guard die .nl-URL's onder .be weigert (422
+      vóór de request), teller per domein (.nl 0 / .be 2), alias `beslist.be` → `www.beslist.be`,
+      en onbekend domein → nette 400.
+- [x] **Historie splitst nu per domein** — `SPLIT_PART(url,'/',3)`, want er is geen domeinkolom.
+      Domein-kolom in de tabel, en de Export-knop geeft `?domain=` mee zodat hij de rij volgt.
+- [x] **Export-bug gefixt**: `/api/indexnow/export/{date}` las de PostgreSQL-kopie van
+      `pa.index_now_joep` (sinds 27-03-2026 niet meer gevuld) en gaf voor élke datum een lege xlsx.
+      Staat nu op Redshift; geverifieerd met 2 rijen terug voor 09-09.
+- [x] **Backend herstart** (draait zonder `--reload`) en de pagina visueel gecontroleerd.
+
+**Open:**
+- [ ] **De n8n-flow `indexnow_submitter` doet nog uitsluitend .nl** — de fetch-query filtert op
+      `dv.url like '%beslist.nl%'`. Voor .be is de tool nu de enige route, dus het eigen .be-quotum
+      van 10k/dag blijft dagelijks onbenut. Eigen tak nodig; basis is
+      `indexnow_submitter_reflog.json` (zie `2026-09-08 (1)`).
+- [ ] **Keyfile voor .nl hosten** blijft open: .nl leunt op de BWT-hostregistratie en heeft geen
+      bestand op de root. Vervalt die registratie ooit, dan wordt 200 stil een 202 en stopt alles
+      ongemerkt — precies het scenario dat .be nu níet heeft.
+- [ ] **Eerste-202-alarm**: een nieuwe host levert per definitie één 🚨-Slack-melding op. Overwegen
+      of een 202 op een host die vandaag zijn eerste submit doet het alarm mag overslaan.
+- [ ] **R-urls blijven buiten IndexNow** (0% van het quotum, terwijl ze 62% van de Bing-organische
+      entries leveren) — staat al open sinds `2026-09-08 (1)`, geldt nu ook voor .be.
+
 ### 2026-09-09 (1) — Koptekst- vs FAQ-dekking uitgezocht, `no_valid_links`-cohort terug op pending
 
 Joep vroeg waarom de koptekst-dekking (46,7%) zoveel lager is dan de FAQ-dekking (56,4%) op dezelfde

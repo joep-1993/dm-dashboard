@@ -557,9 +557,10 @@ gotchas are in `backend/faq_v2_publisher.py`'s docstring.
 - `GET /api/indexnow/domains` - Domains the tool can submit to + whether each has a key configured
 - `POST /api/indexnow/submit` - Submit URLs to IndexNow API (JSON: `{"urls": [...], "domain": "www.beslist.nl"}`)
 - `POST /api/indexnow/upload-excel` - Upload Excel with URL column, deduplicate, submit (form field `domain`)
-- `GET /api/indexnow/history` - Recent submission history from Redshift
+- `GET /api/indexnow/history` - Recent submission history from Redshift, grouped per date **and domain** (host via `SPLIT_PART(url,'/',3)` — there is no domain column)
+- `GET /api/indexnow/export/{date}?domain=` - Submitted URLs for one date as XLSX, optionally one host. Reads **Redshift**; it used to read the PostgreSQL copy, which stopped being fed on 2026-03-27 and returned an empty workbook for every date
 - `GET /api/indexnow/today-count?domain=` - URLs submitted today + daily limit, per domain
-  - Bing allocates the 10K/day PER DOMAIN, so .be has its own budget; the key is per host too (the .nl key answers 202 on a .be URL). Keys come from `INDEXNOW_KEY_NL` / `INDEXNOW_KEY_BE`; without one the tool refuses that domain up front. Only HTTP **200** is logged — a 202 or error writes nothing, because dedup keys on `url` alone and a logged failure would retire those URLs forever. See `docs/indexnow_n8n_fix.md`.
+  - Bing allocates the 10K/day PER DOMAIN, so .be has its own budget; the key is per host too (the .nl key answers 202 on a .be URL). Keys come from `INDEXNOW_KEY_NL` / `INDEXNOW_KEY_BE`, with the same values as fallback in `DOMAINS` so a host with a stale `.env` still submits. Only HTTP **200** is logged — a 202 or error writes nothing, because dedup keys on `url` alone and a logged failure would retire those URLs forever. A brand-new host answers **202 once** while Bing fetches the key file, then 200; that first 202 does fire the Slack alarm. .nl is registered at host level in BWT (no key file); .be validates purely through `https://www.beslist.be/c09a371458704e499c7867d93dee6426.txt`. See `docs/indexnow_n8n_fix.md`.
 
 ### SEO Index Checker
 - `POST /api/index-checker/check` - Check index status via Google Search Console (JSON: `{"urls": [...]}`, max 8,000)

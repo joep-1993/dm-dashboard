@@ -1,6 +1,43 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een nieuwe IndexNow-host antwoordt één keer 202, en dat is geen storing (2026-09-09, IndexNow beslist.be)
+
+beslist.be aangezet met een eigen key (`c09a371458704e499c7867d93dee6426`) en een **wél bestaand**
+key-bestand op de root. Drie dingen om te onthouden.
+
+**1. De eerste submit geeft 202, daarna 200 — de 202 is de validatiestap zelf.** Eerste POST naar
+`api.indexnow.org` → **202** "key validation pending". Binnen ~2 minuten haalde Bing
+`https://www.beslist.be/c09a371458704e499c7867d93dee6426.txt` op, en sindsdien antwoordt élke POST
+**200** (getoetst op `api.indexnow.org/IndexNow` én `www.bing.com/indexnow`). Wie een nieuwe host
+aanzet moet die ene 202 dus verwachten en gewoon opnieuw inzenden. Onze code doet daarin precies
+het goede: 202 telt niet als succes, die URLs worden **niet gelogd**, dus de dedup laat ze de
+volgende run vanzelf terugkomen. Bijwerking om te weten: die eerste 202 vuurt wél het 🚨-Slack-alarm
+af, dus één valse melding per nieuwe host hoort erbij.
+
+**2. Onze twee hosts valideren langs verschillende routes.** .nl is op hostniveau geregistreerd in
+BWT en accepteert daarom zelfs met een 404'ende `keyLocation` (zie de learnings van 01-09 en 08-09);
+.be heeft géén hostregistratie en leunt volledig op het keyfile. Gevolg: voor .be is dat bestand
+geen "goedkope verzekering" maar de enige validatie — verdwijnt het, dan zakt .be stil terug naar
+202 en stopt alles. Voor .nl staat het hosten van het bestand nog steeds open.
+
+**3. Twee kopieën van één tabel verstoppen een kapotte knop tot iemand hem indrukt.**
+`/api/indexnow/export/{date}` gebruikte `get_db_connection()` (**PostgreSQL**) terwijl de rest van
+de IndexNow-tool `get_redshift_connection()` gebruikt. De PostgreSQL-kopie van
+`pa.index_now_joep` wordt sinds 27-03-2026 niet meer gevuld, dus de Export-knop gaf voor **elke**
+datum een xlsx met alleen de kopregel terug — HTTP 200, keurig bestand, nul rijen. Niets in de UI
+verraadt dat: de historie ernaast (Redshift) toonde gewoon 10.000. Als een tool twee kopieën van
+dezelfde tabel kent, is "welke connectie pakt dit endpoint?" een expliciete controle waard bij elk
+endpoint apart — één afwijker blijft anders onzichtbaar tot iemand klikt.
+
+**4. Een historierij zonder domein is niet te lezen tegen een quotum dat per domein geldt.**
+`pa.index_now_joep` heeft geen domeinkolom, dus de host komt uit de URL zelf:
+`SPLIT_PART(url, '/', 3)` op `https://host/path`. Zonder die split zou een dag waarop .nl en .be
+allebei draaiden als één regel verschijnen, terwijl de 10k/dag per domein wordt toegekend.
+
+Zie ook de eerdere IndexNow-learnings van 01-09 (fallback die succes verzint) en 08-09 (het kanaal
+op de klok bewezen).
+
 ## De koptekst-dekking loopt 10pp achter op FAQ door één alles-of-niets-linkcheck (2026-09-09, kopteksten vs FAQ)
 
 Joep vroeg waarom maar 46,7% van de URL's een koptekst heeft en 56,4% een FAQ, terwijl beide
