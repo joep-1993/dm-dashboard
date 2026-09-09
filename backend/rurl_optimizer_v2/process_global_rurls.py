@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from main_parallel_v2 import (
     preload_data, save_data_cache, load_data_cache,
-    extract_subcategory_id_from_url
+    extract_subcategory_id_from_url, _v70_brand_page, _v70_fold
 )
 
 CACHE_FILE = '/tmp/r_url_optimizer_cache.pkl'
@@ -165,6 +165,73 @@ def process_global_url(args):
 
     result = None
     HIGH_SUBCAT_THRESHOLD = 95
+
+    # V70 (2026-09-09): a bare BRAND query goes to that brand's page at MAIN
+    # CATEGORY level. Same rule as main_parallel_v2's short-circuit, one step
+    # harder: a global r-url names no category at all, so the main category
+    # holding the most of the brand's products is the one we pick, and the
+    # score says how safe that pick was. 'Pokémon' is 651 products of
+    # speelgoed against 64 of huis_tuin — settled; 'Sol de Janeiro' is 45 of
+    # parfumerie against 36 of drogisterij — a coin toss that ships as tier B
+    # so a reviewer looks at it.
+    _kw70 = [w for w in keyword.split()
+             if len(w) >= 2 and w not in STOPWORDS and w not in SHOP_NAMES]
+    _v70 = None
+    if _kw70:
+        from src.validation_rules import (GENERIC_ADJECTIVES as _GA70,
+                                          GENERIC_NOUNS as _GN70)
+        if not all(w in _GA70 or w in _GN70 for w in _kw70):
+            _v70 = _v70_brand_page(facet_filter, _v70_fold(keyword))
+    if _v70:
+        # A query that also NAMES a subcategory is not a bare brand query, and
+        # that subcategory page is the better answer — brand match or not.
+        # Equality, not the >= 95 fuzzy score main_parallel_v2's version can
+        # afford: that one is scoped to the r-url's OWN main category, this one
+        # would have the whole taxonomy to be nearly-right in. 'jack daniels'
+        # scores over 95 against the Jacks subcategory in mode, which is the
+        # kind of answer V70 exists to replace.
+        _named = matcher.match_subcategory_name(keyword, categories_df,
+                                                main_category=None)
+        if (_named and _named.get('score', 0) >= HIGH_SUBCAT_THRESHOLD
+                and _v70_fold(_named.get('matched_category')) == _v70_fold(keyword)):
+            _v70 = None
+    if _v70:
+        _mc70, _vid70, _bname70, _mcname70, _share70 = _v70
+        _h1_70 = compute_h1_similarity(
+            keyword=keyword, original_cat_name=None,
+            redirect_cat_name=_mcname70, facet_value_names=_bname70)
+        # 95 when the main category is beyond argument, 75 (tier B, "review")
+        # when the brand's products are spread thin over several of them.
+        _score70 = 95 if _share70 >= 0.7 else 75
+        row70 = dict(empty)
+        row70.update({
+            'main_category': _mc70,
+            'redirect_url': (f"https://www.beslist.nl/products/{_mc70}"
+                             f"/c/merk~{_vid70}"),
+            'redirect_category': _mcname70,
+            'is_cross_category': True,
+            'facet_fragment': f"merk~{_vid70}",
+            'facet_names': 'merk',
+            'facet_value_names': _bname70,
+            'facet_count': 1,
+            'match_score': 100,
+            'match_type': 'maincat_brand_page',
+            'reliability_score': _score70,
+            'reliability_tier': get_reliability_tier(_score70),
+            'h1_similarity': _h1_70,
+            'h1_overlap': 0,
+            'h1_query_coverage': 0,
+            'reject_reason': '',
+            'matched_keywords': keyword,
+            'match_coverage': 100.0,
+            'keyword_type': 'brand_only',
+            'success': True,
+            'reason': (f"V70: keyword '{keyword}' is the brand '{_bname70}' and "
+                       f"nothing else — redirected to the brand facet at "
+                       f"main-category level ('{_mcname70}', "
+                       f"{int(round(100 * _share70))}% of the brand's products)"),
+        })
+        return row70
 
     # ======================================================================
     # MATCHING (geen categorie context - alles is cross-category)

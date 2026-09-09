@@ -134,6 +134,151 @@ def _facet_value_name_lookup(facet_filter):
     return _FACET_VALUE_NAME_LOOKUP
 
 
+# V70: main-category BRAND index — {main_cat_slug: {folded name: (value_id,
+# display_name, main_cat_display_name, product_count, subcategory_count)}}.
+# Memoized per worker process like the V55 lookup above, off the same frame.
+_MAINCAT_BRAND_INDEX = None
+
+_V70_APOSTROPHES = str.maketrans('', '', "'\u2019\u02bc\u00b4`")
+_V70_FOLD_RE = re.compile(r'[^a-z0-9]+')
+
+
+def _v70_fold(s: str) -> str:
+    """V70: fold a brand name — or a query — to one comparable key: lowercased,
+    diacritics stripped, every run of non-alphanumerics collapsed to a single
+    space. The facet value 'Lilo & Stitch' and the r-url's 'lilo--stitch' both
+    land on 'lilo stitch'.
+
+    Apostrophes are DELETED rather than collapsed, because a possessive is not a
+    word boundary: an r-url writes the brand as 'jack-daniels', the catalogue
+    writes it "Jack Daniel's", and splitting on the apostrophe would leave
+    'jack daniel s' to miss it — and then match the OTHER, near-empty
+    'Jack Daniels' value id that sits beside it in the same main category.
+    """
+    import unicodedata as _ud
+    s = _ud.normalize('NFKD', str(s or '').lower())
+    s = ''.join(c for c in s if not _ud.combining(c))
+    return ' '.join(_V70_FOLD_RE.sub(' ', s.translate(_V70_APOSTROPHES)).split())
+
+
+def _maincat_brand_index(facet_filter):
+    """V70: the `merk` facet values of each main category, keyed by folded name.
+
+    Only `merk`: a bare-brand query is the one query where the main category's
+    BRAND page is the whole answer, and `winkel` is excluded from matching
+    everywhere else in the engine too.
+
+    Per (main category, brand) it keeps the value id, both display names, the
+    product count summed over the subcategories the value appears in, and how
+    many subcategories that is — `_v70_brand_page` needs the spread, the count
+    settles which of two value ids that fold to the same name wins. The fold is
+    deliberately lossy, so that collision is a real possibility, and the busier
+    brand is the one a bare query means.
+    """
+    global _MAINCAT_BRAND_INDEX
+    if _MAINCAT_BRAND_INDEX is not None:
+        return _MAINCAT_BRAND_INDEX
+    index: dict = {}
+    try:
+        _fdf = facet_filter.facets_df
+        # Through col_mapping like every other consumer — see the V61 note on
+        # _facet_value_name_lookup for what hardcoding the names costs.
+        _cm = getattr(facet_filter, 'col_mapping', {}) or {}
+        _c_fname = _cm.get('facet_name') or 'facet_name'
+        _c_vid = _cm.get('facet_value_id') or 'facet_value_id'
+        _c_vname = _cm.get('facet_value_name') or 'facet_value_name'
+        _c_url = _cm.get('url') or 'url'
+        _c_mc = _cm.get('main_category_name')
+        _c_cnt = _cm.get('count')
+        _merk = _fdf[_fdf[_c_fname].astype(str).str.lower() == 'merk']
+        # The main category is the first path segment of the facet url; the
+        # catalogue never carries a main-category-level url of its own.
+        _slugs = _merk[_c_url].astype(str).str.extract(r'^/products/([^/]+)/',
+                                                       expand=False)
+        _mcnames = (_merk[_c_mc].astype(str)
+                    if _c_mc and _c_mc in _merk.columns else _slugs)
+        _counts = (pd.to_numeric(_merk[_c_cnt], errors='coerce').fillna(0)
+                   if _c_cnt and _c_cnt in _merk.columns
+                   else pd.Series(0.0, index=_merk.index))
+        # (slug, folded, vid) -> [display_name, mc_name, count, {subcat slugs}]
+        _totals: dict = {}
+        for _url, _slug, _vid, _vname, _mcname, _cnt in zip(
+                _merk[_c_url], _slugs, _merk[_c_vid], _merk[_c_vname],
+                _mcnames, _counts):
+            if not _slug or _vname is None or str(_vname) == 'nan':
+                continue          # 13 values in the snapshot carry no label
+            _key = _v70_fold(_vname)
+            if not _key:
+                continue
+            # a NaN anywhere in the column makes it float dtype, and
+            # str(23796649.0) would never match a url fragment's '23796649'
+            try:
+                _vid = str(int(_vid))
+            except (TypeError, ValueError):
+                _vid = str(_vid)
+            _e = _totals.get((_slug, _key, _vid))
+            if _e is None:
+                _e = _totals[(_slug, _key, _vid)] = [str(_vname), str(_mcname),
+                                                     0.0, set()]
+            _sub = str(_url).split('/c/', 1)[0].rstrip('/').rsplit('/', 1)[-1]
+            if _sub in _e[3]:
+                continue          # same value, same subcategory, twice
+            _e[3].add(_sub)
+            _e[2] += float(_cnt)
+        for (_slug, _key, _vid), (_vname, _mcname, _cnt, _subs) in _totals.items():
+            _bucket = index.setdefault(_slug, {})
+            _cur = _bucket.get(_key)
+            if _cur is None or _cnt > _cur[3]:
+                _bucket[_key] = (_vid, _vname, _mcname, _cnt, len(_subs))
+    except Exception as _e:
+        # An empty dict is a valid cache entry, so this worker never retries —
+        # say so once instead of silently switching V70 off for the whole run.
+        logging.getLogger(__name__).warning(
+            "V70 main-category brand index unavailable (%s); bare-brand queries "
+            "on main-category r-urls keep their subcategory destination", _e)
+    _MAINCAT_BRAND_INDEX = index
+    return _MAINCAT_BRAND_INDEX
+
+
+def _v70_brand_page(facet_filter, folded, main_category=None):
+    """V70: the main-category BRAND page for a bare-brand query, or None.
+
+    `main_category` pins the main category — a main-category r-url already names
+    one. Without it (a global /products/r/<kw>/ carries no category at all) the
+    main category holding the most products of that brand wins.
+
+    In both cases the brand has to be spread over MORE THAN ONE subcategory of
+    that main category (Joeps besluit, 2026-09-09). With only one, the
+    subcategory page holds exactly the same products and its H1 says more —
+    'Culterra Tuinmest' over 'Culterra tuinartikelen' — so there is nothing to
+    win by going up a level, and the engine's own choice is left alone.
+
+    Returns (main_cat_slug, value_id, brand_name, main_cat_display_name, share),
+    where `share` is the winner's part of the brand's products across ALL main
+    categories — 1.0 when the r-url pinned one, because then the choice was not
+    ours to make. A thin share is a thin claim and the caller should score it as
+    one: 'Sol de Janeiro' is 45 products of parfumerie against 36 of drogisterij.
+    """
+    if not folded:
+        return None
+    index = _maincat_brand_index(facet_filter)
+    if main_category:
+        _hit = index.get(main_category, {}).get(folded)
+        _cands = [(main_category, _hit)] if _hit else []
+    else:
+        _cands = [(_slug, _b[folded]) for _slug, _b in index.items() if folded in _b]
+    _total = sum(c[1][3] for c in _cands) if not main_category else 0.0
+    # More than one subcategory, then most products first; the slug only to keep
+    # the pick stable across runs.
+    _cands = [c for c in _cands if c[1][4] > 1]
+    if not _cands:
+        return None
+    _slug, (_vid, _name, _mcname, _cnt, _nsub) = max(
+        _cands, key=lambda c: (c[1][3], c[0]))
+    _share = 1.0 if main_category else (_cnt / _total if _total else 1.0)
+    return _slug, _vid, _name, _mcname, _share
+
+
 # V34: when True, the multi-facet rescue appends an explicit query size
 # (XL, 122-128) onto the assembled /c/ URL. ON by default (2026-06-06) — the
 # size match is always COLLECTED in the probe cache and is now emitted unless
@@ -1825,11 +1970,20 @@ def _finalize_redirect(row, ctx):
             _pinned = ({x for x in (parsed.existing_facet or '').split('~~') if '~' in x}
                        if _pbase == (parsed.full_category_path or '').rstrip('/')
                        else set())
+            # V70: pieces built at MAIN CATEGORY level are exempt too. The
+            # catalogue lists facet urls per subcategory only — there is not a
+            # single /products/<maincat>/c/... row in it — so this membership
+            # test would delete the very fragment V70 just put there, even
+            # though the page is live and holds MORE products than any of the
+            # subcategory urls that are in the set. Only the caller that built
+            # such a url passes them, so no other path is affected.
+            _mc_exempt = set(ctx.get('maincat_pieces') or ())
             _keep, _drop = [], []
             for _piece in _pfrag.split('~~'):
                 if '~' not in _piece:
                     continue
-                if _piece in _pinned or f"{_pbase}/c/{_piece}" in _us:
+                if (_piece in _pinned or _piece in _mc_exempt
+                        or f"{_pbase}/c/{_piece}" in _us):
                     _keep.append(_piece)
                 else:
                     _drop.append(_piece)
@@ -2468,6 +2622,80 @@ def process_url_v2(args):
             'merk_of_shop_missing': '',
             'success': False,
             'reason': 'shop_name detected',
+        }
+
+    # V70 (2026-09-09): a BARE BRAND query on a main-category R-URL belongs on
+    # that brand's page IN THAT MAIN CATEGORY — not in whichever subcategory
+    # happens to hold most of the brand's stock. /products/klussen/r/parkside/
+    # shipped Stofzuigerzakken /c/merk~'PARKSIDE' (462 products, H1 "Parkside
+    # Stofzuigerzakken") for a query that names no product type at all;
+    # /products/klussen/c/merk~23796649 is the SAME facet one level up — 759
+    # products, H1 "PARKSIDE Klussen". The narrowing is an artefact of the
+    # catalogue rather than a decision: it lists facet urls per subcategory only
+    # (measured: zero main-category-level rows), so step 4's count-leader dedup
+    # has no choice but to pick one of them.
+    #
+    # Fires only when the query IS the brand and nothing else, the R-URL pins no
+    # subcategory of its own, and the query does not ALSO name a subcategory —
+    # a query that names a product type is not a bare brand query, and that
+    # subcategory page is the better answer whether or not a brand matches.
+    # Skipped when the source url pins its own /c/ facet: facet VALUE ids are
+    # category-scoped, so that selection cannot be carried up a level unchecked.
+    # _v70_brand_page holds the rest of the rule, incl. the >1-subcategory test.
+    _v70_brand = None
+    if (parsed.main_category and not parsed.subcategory_id
+            and not (getattr(parsed, 'existing_facet', '') or '')
+            and _non_stop_non_shop):
+        from src.validation_rules import (GENERIC_ADJECTIVES as _GA70,
+                                          GENERIC_NOUNS as _GN70)
+        if not all(w in _GA70 or w in _GN70 for w in _non_stop_non_shop):
+            _v70_brand = _v70_brand_page(facet_filter, _v70_fold(parsed.keyword),
+                                         main_category=parsed.main_category)
+    if _v70_brand and not _has_strong_subcat_name_match(
+            parsed, d.get('categories_df'), matcher):
+        _, _vid70, _bname70, _mcname70, _ = _v70_brand
+        _piece70 = f"merk~{_vid70}"
+        _fin70 = _finalize_redirect({
+            'redirect_url': (f"https://www.beslist.nl/products/"
+                             f"{parsed.main_category}/c/{_piece70}"),
+            'redirect_category': _mcname70,
+            # The query is the brand, exactly, and the destination is that brand
+            # inside the category the R-URL already lived in: nothing is dropped
+            # and nothing is invented. A notch below V27's 99 because this one
+            # does make a claim ("the brand page answers the query") where the
+            # stopwords-only case is a tautology.
+            'reliability_score': 95,
+            'match_type': 'maincat_brand_page',
+            'facet_fragment': _piece70,
+            'facet_names': 'merk',
+            'facet_value_names': _bname70,
+            'facet_count': 1,
+            'reason': (f"V70: keyword '{parsed.keyword}' is the brand "
+                       f"'{_bname70}' and nothing else — redirected to the brand "
+                       f"facet at main-category level "
+                       f"('{_mcname70}'), not to a subcategory"),
+        }, {'keyword': parsed.keyword, 'parsed': parsed,
+            'facet_filter': facet_filter, 'maincat_pieces': {_piece70}})
+        return {
+            'original_url': url,
+            'main_category': parsed.main_category or '',
+            'original_category': '',
+            'keyword': parsed.keyword,
+            'is_cross_category': False,
+            **_fin70,
+            'match_score': 100,
+            'h1_similarity': compute_h1_similarity(
+                parsed.keyword, '', _mcname70, _bname70),
+            'matched_keywords': parsed.keyword,
+            'unmatched_keywords': '',
+            'match_coverage': 100.0,
+            'has_stopwords': False,
+            'stopwords_found': '',
+            'shop_in_keyword': '',
+            'keyword_type': 'brand_only',
+            'has_dimensions': False,
+            'merk_of_shop_missing': '',
+            'success': True,
         }
 
     result = None
