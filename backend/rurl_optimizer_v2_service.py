@@ -852,6 +852,7 @@ def _run_tier_a_loop(task_id: str, ts: str, output_path: Path, tier_a_limit: int
     from backend import rurl_optimizer_persistence as pers
 
     _set(task_id, {"status": "running", "progress": 1,
+                   "started_at": datetime.now().isoformat(),
                    "message": f"Tier A 0/{tier_a_limit:,} (0 URLs processed)"})
     # V61: schrijf de historie-rij METEEN. _history_append vuurde alleen op een
     # eindstatus, dus een run die door een uvicorn-restart verdween liet geen
