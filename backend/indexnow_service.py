@@ -30,13 +30,18 @@ log = logging.getLogger("indexnow")
 # The key is per host as well. The .nl key is registered with Bing at host level
 # (a submit returns 200 even with a wrong or absent keyLocation), but the SAME key
 # on a .be URL returns 202 — "key validation pending" — because Bing then goes
-# looking for the key file on www.beslist.be, where it 404s. So .be needs either
-# its own key from Bing Webmaster Tools or that key file hosted on the .be root.
-# Drop it in via INDEXNOW_KEY_BE; until then .be submissions are refused up front
-# instead of being fired into the void.
+# looking for the key file on www.beslist.be, where it 404s. So .be has its own key,
+# validated by the key file on the .be root:
+#     https://www.beslist.be/c09a371458704e499c7867d93dee6426.txt
+# That file is what makes .be submissions answer 200; if it ever disappears Bing
+# falls back to 202 and silently drops the batch, so the submit path treats a 202
+# as a failure (see submit_urls) rather than logging those URLs as done.
+#
+# The env vars are the source of truth; the literals are the fallback so a host
+# whose .env has not been updated still submits instead of refusing every URL.
 DOMAINS = {
-    "www.beslist.nl": os.getenv("INDEXNOW_KEY_NL", "2e11f87f415a492294eaf378a8a52004"),
-    "www.beslist.be": os.getenv("INDEXNOW_KEY_BE", ""),
+    "www.beslist.nl": os.getenv("INDEXNOW_KEY_NL") or "2e11f87f415a492294eaf378a8a52004",
+    "www.beslist.be": os.getenv("INDEXNOW_KEY_BE") or "c09a371458704e499c7867d93dee6426",
 }
 DEFAULT_DOMAIN = "www.beslist.nl"
 BATCH_SIZE = 10000
@@ -412,7 +417,7 @@ def submit_urls(urls: List[str], domain: str = DEFAULT_DOMAIN) -> Dict:
 
 
 def get_submission_history(limit: int = 100) -> List[Dict]:
-    """Get recent submission history.
+    """Get recent submission history, split per domain.
 
     Reads from the Redshift copy of pa.index_now_joep — that is where the
     daily n8n `indexnow_submitter` flow logs its runs (it fetches candidate
@@ -420,15 +425,24 @@ def get_submission_history(limit: int = 100) -> List[Dict]:
     The PostgreSQL copy that the manual submit path writes to stopped being
     fed on 2026-03-27, so history must come from Redshift to reflect the live
     (n8n-driven) submissions.
+
+    The table holds more than one host since beslist.be went live, and the
+    10k/day quota is per domain, so a row that merged .nl and .be would be
+    unreadable against that limit. The host comes out of the URL itself
+    (SPLIT_PART on the third `/`-segment of `https://host/path`) — there is no
+    domain column to group on.
     """
     conn = get_redshift_connection()
     try:
         cur = conn.cursor()
         cur.execute(f"""
-            SELECT submitted_date, response_code, COUNT(*) as url_count
+            SELECT SPLIT_PART(url, '/', 3) AS domain,
+                   submitted_date,
+                   response_code,
+                   COUNT(*) as url_count
             FROM {TABLE}
-            GROUP BY submitted_date, response_code
-            ORDER BY submitted_date DESC
+            GROUP BY 1, 2, 3
+            ORDER BY submitted_date DESC, 1
             LIMIT %s
         """, (limit,))
         rows = cur.fetchall()
@@ -436,6 +450,7 @@ def get_submission_history(limit: int = 100) -> List[Dict]:
         return [
             {
                 "date": str(row["submitted_date"]),
+                "domain": row["domain"],
                 "response_code": row["response_code"],
                 "url_count": row["url_count"],
             }

@@ -5303,9 +5303,19 @@ async def indexnow_history(limit: int = 100):
 
 
 @app.get("/api/indexnow/export/{date}")
-async def indexnow_export_by_date(date: str):
-    """Export submitted URLs for a specific date as XLSX."""
-    from backend.database import get_db_connection, return_db_connection
+async def indexnow_export_by_date(date: str, domain: str = None):
+    """Export submitted URLs for a specific date as XLSX, optionally one domain.
+
+    Reads Redshift, like every other IndexNow path. There are two
+    pa.index_now_joep tables and the PostgreSQL one stopped being fed on
+    2026-03-27, so this endpoint used to hand back an empty workbook for every
+    date since — the submits it was meant to export live on Redshift.
+
+    `domain` matches the history rows, which are grouped per host: without it an
+    export of a day on which both .nl and .be ran would mix the two.
+    """
+    from backend.database import get_redshift_connection, return_redshift_connection
+    from backend.indexnow_service import _resolve_domain, TABLE
     from openpyxl import Workbook
 
     # Validate date format
@@ -5315,17 +5325,36 @@ async def indexnow_export_by_date(date: str):
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
 
     try:
-        conn = get_db_connection()
+        resolved = _resolve_domain(domain) if domain else None
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    conn = None
+    try:
+        conn = get_redshift_connection()
         cur = conn.cursor()
-        cur.execute("""
-            SELECT url, submitted_date, response_code
-            FROM pa.index_now_joep
-            WHERE submitted_date = %s
-            ORDER BY url
-        """, (date,))
+        if resolved:
+            cur.execute(
+                f"""
+                SELECT url, submitted_date, response_code
+                FROM {TABLE}
+                WHERE submitted_date = %s AND url LIKE %s
+                ORDER BY url
+                """,
+                (date, f"https://{resolved}/%"),
+            )
+        else:
+            cur.execute(
+                f"""
+                SELECT url, submitted_date, response_code
+                FROM {TABLE}
+                WHERE submitted_date = %s
+                ORDER BY url
+                """,
+                (date,),
+            )
         rows = cur.fetchall()
         cur.close()
-        return_db_connection(conn)
 
         wb = Workbook()
         ws = wb.active
@@ -5338,13 +5367,19 @@ async def indexnow_export_by_date(date: str):
         wb.save(output)
         output.seek(0)
 
+        suffix = f"_{resolved}" if resolved else ""
         return StreamingResponse(
             output,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f"attachment; filename=indexnow_{date}.xlsx"}
+            headers={"Content-Disposition": f"attachment; filename=indexnow_{date}{suffix}.xlsx"}
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn is not None:
+            return_redshift_connection(conn)
 
 
 @app.get("/api/indexnow/today-count")

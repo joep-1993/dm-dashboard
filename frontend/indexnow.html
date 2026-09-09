@@ -33,10 +33,11 @@
            apart across ~1180px. The percentage column widths below now divide 800px. */
         #historyContent .tool-table-wrap { max-width: 800px; margin-left: auto; margin-right: auto; }
         #historyContent .tool-table { table-layout: fixed; width: 100%; }
-        #historyContent .col-date { width: 30%; }
-        #historyContent .col-resp { width: 20%; }
-        #historyContent .col-urls { width: 20%; }
-        #historyContent .col-export { width: 30%; }
+        #historyContent .col-date { width: 22%; }
+        #historyContent .col-domain { width: 26%; }
+        #historyContent .col-resp { width: 16%; }
+        #historyContent .col-urls { width: 16%; }
+        #historyContent .col-export { width: 20%; }
         .batch-row td { vertical-align: middle; }
         /* Sits on the info-coloured card header, so it needs its own contrast. */
         .domain-select { width: auto; min-width: 11rem; }
@@ -233,6 +234,9 @@
                                     <thead class="table-light">
                                         <tr>
                                             <th class="sortable col-date" data-sort="date" onclick="sortHistory('date')">Date</th>
+                                            <!-- The quota is per domain, so a row that did not say which host it
+                                                 belonged to could not be read against the 10k/day limit. -->
+                                            <th class="sortable col-domain" data-sort="domain" onclick="sortHistory('domain')">Domein</th>
                                             <th class="sortable col-center col-resp" data-sort="response_code" onclick="sortHistory('response_code')">Response</th>
                                             <th class="sortable col-center col-urls" data-sort="url_count" onclick="sortHistory('url_count')">URLs</th>
                                             <th class="col-center col-export">Export</th>
@@ -476,9 +480,9 @@
         let historySortDir = 'desc';   // newest submission first
 
         function historySkeletonRows(n = 10) {
-            // 4 columns: Date, Response, URLs, Export
+            // 5 columns: Date, Domein, Response, URLs, Export
             const cell = '<td><span class="skel-bar"></span></td>';
-            return ('<tr class="skel-row">' + cell.repeat(4) + '</tr>').repeat(n);
+            return ('<tr class="skel-row">' + cell.repeat(5) + '</tr>').repeat(n);
         }
 
         function setHistoryMessage(html, cls = 'text-muted') {
@@ -513,9 +517,14 @@
                 else if (h.response_code >= 400 && h.response_code < 500) badgeStyle = 'border: 1px solid #e0a800; color: #e0a800;';
                 else badgeStyle = 'border: 1px solid #d63031; color: #d63031;';
                 const badge = `<span class="badge" style="${badgeStyle} background: transparent;">${h.response_code}</span>`;
-                const exportBtn = `<a href="${API_BASE}/api/indexnow/export/${h.date}" class="btn btn-sm btn-outline-purple" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">Export</a>`;
+                // The export follows the row: history is grouped per domain, so an
+                // export without ?domain would hand back both hosts for that date.
+                const exportUrl = `${API_BASE}/api/indexnow/export/${h.date}`
+                    + (h.domain ? `?domain=${encodeURIComponent(h.domain)}` : '');
+                const exportBtn = `<a href="${exportUrl}" class="btn btn-sm btn-outline-purple" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">Export</a>`;
                 return `<tr>
                     <td>${escapeHtml(String(h.date))}</td>
+                    <td>${escapeHtml(h.domain || '')}</td>
                     <td class="col-center">${badge}</td>
                     <td class="col-center">${(h.url_count || 0).toLocaleString()}</td>
                     <td class="col-center">${exportBtn}</td>
