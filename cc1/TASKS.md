@@ -28,10 +28,24 @@ en vroeg om een domein-dropdown in de tool. Die dropdown bleek er al te zitten (
 - [x] **Backend herstart** (draait zonder `--reload`) en de pagina visueel gecontroleerd.
 
 **Open:**
-- [ ] **De n8n-flow `indexnow_submitter` doet nog uitsluitend .nl** — de fetch-query filtert op
-      `dv.url like '%beslist.nl%'`. Voor .be is de tool nu de enige route, dus het eigen .be-quotum
-      van 10k/dag blijft dagelijks onbenut. Eigen tak nodig; basis is
-      `indexnow_submitter_reflog.json` (zie `2026-09-08 (1)`).
+- [x] **n8n-flow uitgebreid met een .be-tak** — `Downloads/claude/indexnow_submitter_IMPORT_2026-09-09_be.json`
+      (22 nodes; basis `..._IMPORT_2026-09-08.json`, 12 nodes). Parallelle keten met eigen `*_be`-nodes
+      achter dezelfde trigger; de 12 .nl-nodes zijn byte-identiek gebleven. Bewust GEEN gedeelde keten
+      met een item per domein: `build_tracking_insert` koppelt de API-response aan de URL-lijst, en die
+      koppeling op itemvolgorde is precies waar deze flow al twee keer stil is misgegaan. Toelichting in
+      `docs/indexnow_n8n_be.md`.
+      Vooraf nagemeten: 245.362 nieuwe .be-URL's; ES-index `product_search_v4_be-nl_*` bestaat met 32
+      timestamp-loze aliassen; `pimId` is óók in de be-index `nl-nl-gold-<ean>`; en een simulatie van
+      `validate_suppliers_be` op 300 echte URL's valideerde er 243 (81%) — zonder die toets was "alle
+      `/p/` stil afgekeurd" een reeel scenario.
+- [ ] **Importeren en activeren in n8n** — kan hier niet: n8n's eigen opslag zit niet in
+      `n8n-vector-db` en er is geen API-key. Na import controleren: twee regels per dag in
+      `pa.index_now_joep_runs`, de .be-regel op 200 (niet 202), en twee Slack-berichten per dag
+      (bewust gescheiden, zodat een .be-storing het .nl-rapport niet onderdrukt).
+- [ ] **`/p/`-uitsluitlijst is niet dood, maar mikt op de legacy-vorm** — `/p/<maincat-slug>/nl-nl-gold-<ean>/`
+      kan `parseUrl` niet parsen (maincat is geen cijferreeks), dus die URL's zouden toch allemaal
+      afvallen; de lijst bespaart quotum. 59.595 al ingezonden .nl-URL's matchen hem nog, van voor de
+      lijst bestond. Voor .be letterlijk overgenomen.
 - [ ] **Keyfile voor .nl hosten** blijft open: .nl leunt op de BWT-hostregistratie en heeft geen
       bestand op de root. Vervalt die registratie ooit, dan wordt 200 stil een 202 en stopt alles
       ongemerkt — precies het scenario dat .be nu níet heeft.
