@@ -1,6 +1,49 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een be-index draagt nog steeds nl-nl-sleutels, en een try/catch maakt van een kapotte ES-call "alles afgekeurd" (2026-09-09, n8n IndexNow .be-tak)
+
+De dagelijkse flow uitgebreid naar beslist.be. Vier dingen die je bij elke .be-variant van
+iets .nl-achtigs opnieuw tegenkomt.
+
+**1. De marktprefix in de indexnaam zegt niets over de velden erin.** De ES-index heet
+`product_search_v4_be-nl_<maincat>`, maar het `pimId`-veld daarin is nog gewoon
+`nl-nl-gold-<ean>` (geverifieerd op `product_search_v4_be-nl_165`: `id` = de kale EAN,
+`pimId` = `nl-nl-gold-<ean>`). Wie de sleutelopbouw "logisch" meeverhuist naar
+`be-nl-gold-` krijgt nul hits — en dat ziet er precies zo uit als een leeg assortiment.
+Alleen `INDEX_PREFIX` verschilt dus tussen de markten. Let op: dit is iets anders dan de
+Taxonomy/Search API's, waar de locale wél `be-nl` heet.
+
+**2. De node bevraagt de index zonder wildcard, dus hij leunt op aliassen.**
+`validate_suppliers` doet `${ES_URL}/${INDEX_PREFIX}${maincat}/_search` terwijl de echte
+indices `..._165_2026.09.09_04.00.51` heten. Dat werkt alleen omdat er per markt
+timestamp-loze aliassen bestaan — 32 voor `be-nl`, 32 voor `nl-nl`. Controleer die vóór je
+een markt aanzet; zonder alias krijg je een 404 per maincat.
+
+**3. Die 404 zou je niet zien.** Beide ES-lussen zitten in een `try/catch` die alleen naar
+`console.log` schrijft en doorloopt. Een kapotte index, een verkeerde sleutelvorm of een
+mis-parsende host-strip leidt daardoor niet tot een fout maar tot **"elke `/p/`-URL
+afgekeurd"** — een uitkomst die niet te onderscheiden is van een streng assortiment. Daarom
+vóór het uitrollen de node nagebouwd in Python en op 300 echte .be-URL's gedraaid: 243
+gevalideerd (81%), 12 niet te parsen, 3 niet in ES. Dat is de enige manier om te weten dat
+de tak werkt zonder hem in productie te zetten.
+
+**4. De `/p/`-uitsluitlijst in de fetch-query is geen dode code.** Beslist heeft twee
+`/p/`-vormen: legacy `/p/<maincat-slug>/nl-nl-gold-<ean>/` en nieuw
+`/p/<product-slug>/<maincat-cijfers>/<ean>/`. `parseUrl` eist dat het op-een-na-laatste
+pad-segment een cijferreeks is, dus de legacy-vorm geeft altijd `null` en zou sowieso
+worden afgekeurd. De ~31 `not like '%/p/<maincat>/%'`-regels gooien die vorm er al in SQL
+uit en besparen zo quotum dat anders aan gegarandeerde afkeuringen opgaat. 59.595 al
+ingezonden .nl-URL's matchen de lijst nog — die zijn van vóór hij bestond.
+
+**Ontwerpkeuze, expliciet vastgelegd:** de .be-tak is een parallelle keten, geen gedeelde
+keten met een item per domein. `build_tracking_insert` koppelt de API-response aan de
+URL-lijst via `$('has_urls?1').first()`; met meerdere domeinen wordt dat een koppeling op
+itemvolgorde. Verkeerd gekoppeld schrijf je de URL's van het ene domein weg als ingezonden
+voor het andere, en omdat de dedup alleen op `url` matcht bereiken die Bing daarna nooit
+meer — dezelfde klasse fout als 01-09 en 08-09. Negen gedupliceerde nodes is daarvoor een
+acceptabele prijs. Zie `docs/indexnow_n8n_be.md`.
+
 ## Een nieuwe IndexNow-host antwoordt één keer 202, en dat is geen storing (2026-09-09, IndexNow beslist.be)
 
 beslist.be aangezet met een eigen key (`c09a371458704e499c7867d93dee6426`) en een **wél bestaand**
