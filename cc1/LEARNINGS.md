@@ -1,6 +1,41 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een UI-poort die strenger is dan de backend-poort zet een knop uit zonder iets te zeggen (2026-09-09, Redirect-tool → Replace existing)
+
+Joep vinkte "Replace existing redirects" aan om een bestaande regel te overschrijven, en
+Submit bleef grijs. Geen melding, geen rode rij — vanuit de UI gezien klopte alles.
+
+**1. De feature was al die tijd dood, niet stuk voor deze ene URL.** `isReplaceableRow()` in
+`frontend/redirect-tool.html` eiste `row.existing_id` náást de `skip_reason`. Die id is er
+nooit: de preflight resolvet een bron-URL met `GET /api/redirect?searchterm=`, en dat endpoint
+geeft alleen `{url, statusCode}` terug. Live nagemeten op
+`/products/fietsen/r/snelbinders_voor_fiets/`: `existing_target` gezet,
+`existing_statusCode` 301, **`existing_id` null**. De voorwaarde was dus vals voor élke rij.
+De ketting daarna is stil: `effectiveSkipReason()` blijft "source has existing rule" geven →
+`isSelectableRow()` false → nul selectie → `updateSelectionUi()` zet de knop op `disabled`.
+Precies wat je ook ziet als je gewoon niets geselecteerd hebt.
+
+**2. De backend wist het al, en dat is de eigenlijke les.** `submit_rows()` poort bewust op
+`existing_target` en niet op `existing_id`, mét een comment erbij dat de singular-resolver
+geen id teruggeeft en dat de replace toch per `fromUrl` (`input_old`) verwijdert. Dezelfde
+poort staat in `_will_submit()` voor de stats. Drie kopieën van dezelfde regel, twee zijn
+bijgewerkt, de derde niet — en het comment bij die derde wáárschuwde er letterlijk voor
+("Any drift here silently disables the toggle"). Een comment is geen test.
+
+**3. Diagnostisch patroon.** Zodra een knop grijs blijft terwijl de rijen er goed uitzien:
+draai de preflight zelf (`POST /api/redirect-tool/preview` + pollen op
+`/preview-status/{task_id}`) en kijk naar de **velden** in `processed[]`, niet naar het
+scherm. Het verschil tussen "geen rij voldoet" en "de gebruiker heeft niets aangeklikt" is in
+de UI niet zichtbaar, in de JSON in één oogopslag. Voor een toggle die rijen herclassificeert
+geldt bovendien: de UI-poort hoort *identiek* te zijn aan de poort die de backend gebruikt om
+te beslissen of hij schrijft — niet strenger "voor de zekerheid", want strenger betekent hier
+een functie die niets doet.
+
+**Redirect-API-feitje om te onthouden**: `GET /api/redirect?searchterm=` (de resolver) geeft
+géén id; alleen de lijst-index `GET /api/redirects` (het pad boven `PREFETCH_THRESHOLD`) draagt
+ids. Bouw dus nooit iets op `existing_id` in het normale pad.
+
 ## Een poll-timeout in de browser zegt niets over de taak op de server (2026-09-09, Auto-Redirects → doorvoeren)
 
 Joep kreeg een timeout bij het doorpushen van 500 URL's. Twee onafhankelijke oorzaken, en de

@@ -3,6 +3,34 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-09 (10) — Redirect-tool: "Replace existing redirects" deed niets
+
+Joeps melding: `/products/fietsen/r/snelbinders_voor_fiets/` → `/products/fietsen/fietsen_484519_484531/`
+gaf "current: …/c/geschikt_voor_helm~24074374", en met de replace-toggle aan bleef Submit
+grijs. Fix `334e4eb`. Les in LEARNINGS, zelfde datum.
+
+- [x] **Oorzaak: `isReplaceableRow()` poortte op `row.existing_id`**, en die is altijd `null` —
+      de preflight-resolver `GET /api/redirect?searchterm=` geeft alleen `{url, statusCode}`.
+      De toggle was daarmee dood voor *alle* rijen, niet alleen deze.
+- [x] **Frontend gelijkgetrokken met `submit_rows()`**: poort nu op `existing_target` +
+      `skip_reason === 'source has existing rule'`, exact dezelfde voorwaarde als de backend
+      gebruikt om te DELETE+POST'en. Docstring van `submit_rows` meegecorrigeerd (noemde nog
+      `existing_id`).
+- [x] **Live geverifieerd** met een echte preflight-call op de gemelde URL: `existing_target`
+      gezet, `existing_id` null — oude predicaat vals, nieuwe waar.
+
+Open:
+
+- [ ] **Joep laat het overschrijven zelf nog draaien** op de fietsen-URL: harde Ctrl+Shift+R
+      (de pagina is statisch, de fix zit in de HTML), toggle aan, Submit — en daarna in Recent
+      Results controleren dat de oude regel weg is en de nieuwe staat.
+- [ ] **Uitrollen op prod `win-htz-006:3003`** als Joep de Redirect-tool daar ook gebruikt; de
+      HTML komt mee met een `git pull`, een herstart is er niet voor nodig (alleen de
+      docstring zit in Python).
+- [ ] **Overweeg een zichtbare reden bij een grijze Submit-knop** — "0 van de N rijen
+      selecteerbaar" naast de knop had dit in seconden verklaard in plaats van in een
+      code-duik.
+
 ### 2026-09-09 (9) — Auto-Redirects: 500 URL's doorpushen gaf een timeout
 
 Joeps melding. Twee losse oorzaken: een poll-lus in de browser die na 5 minuten hard opgaf
