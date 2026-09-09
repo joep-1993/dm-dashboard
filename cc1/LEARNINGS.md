@@ -1,6 +1,47 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een poll-timeout in de browser zegt niets over de taak op de server (2026-09-09, Auto-Redirects → doorvoeren)
+
+Joep kreeg een timeout bij het doorpushen van 500 URL's. Twee onafhankelijke oorzaken, en de
+gevaarlijkste was niet de trage kant maar de manier waarop we opgaven.
+
+**1. De frontend gaf op, de backend niet — en dat is een dubbele-inzending-risico.**
+`_pollTask` in `frontend/rurl-optimizer.html` deed 600 polls van 500ms en gooide daarna
+"Timed out waiting for the task to finish". Maar `start_submit` draait in een daemon-thread
+die niets van die poll weet: die schreef vrolijk door naar productie terwijl het scherm een
+rode balk liet zien. Een gebruiker die dan opnieuw indient, dient dus **dubbel** in. Elke
+poll-lus over werk dat op de server doorloopt hoort daarom af te breken op **stilstand**, niet
+op verstreken tijd — geen beweging in de voortgangstellers gedurende zes minuten, met een
+harde bovengrens ver daarachter, en een foutmelding die eerst naar Recent Results wijst
+voordat je iets opnieuw doet. Een mislukte poll is geen mislukte taak: pas vijf op rij breekt
+af.
+
+**2. Vijf minuten was sowieso geen realistische bovengrens.** `submit_rows` POST **per rij**,
+en dat is een bewuste keuze: per-rij pass/fail, de incoming-rewire (DELETE + re-POST van
+iedere regel die naar de oude URL wees) en het herstel als die re-POST faalt. Dat pad
+parallelliseren zou de `url_UNIQUE`-volgorde en het herstelpad kapotmaken — dus niet doen; de
+doorlooptijd is de prijs en de UI hoort zich daarnaar te voegen.
+
+**3. De echte traagheid zat in preflight, en de drempel stond verkeerd.**
+`PREFETCH_THRESHOLD` stond op 2000, dus 500 rijen liepen nog over het per-rij-pad. Dat pad
+stelt per rij twee keer de `check_url_incoming`-vraag, en bij verse redirects is het antwoord
+elke keer "nee" — precies de `urlContains`-scan die de hele tabel van ~820k rijen doorloopt
+(2,4–15s per stuk, `LIST_CONCURRENCY = 6` tegelijk). Kosten dus ≈ `rijen × 2 / 6 × scantijd`:
+bij 500 rijen en een bescheiden 4s is dat **elf minuten**. De prefetch-route is een vlakke
+~164 pagina-calls van 15–20s, **ongeacht** de batchgrootte, en wint daarmee al rond de 15–25
+rijen. Drempel naar 250.
+
+**De les achter de misafstelling:** de drempel was ooit op 5000 gezet en in juni op 2000, en
+beide keren geredeneerd vanuit "hoeveel HTTP-calls" — maar het per-rij-pad heeft een
+*semafoor* van 6 en een responstijd van seconden, terwijl de prefetch 8-wijd en vlak is. Bij
+een gedeelde-resource-limiet is het aantal calls niet de kostenfunctie; de wachtrij ervoor
+wel. Reken dat expliciet uit voordat je zo'n drempel kiest.
+
+**Waar het draait:** Joep gebruikt Auto-Redirects op **prod win-htz-006:3003**, niet op :8003.
+Een fix in deze repo doet daar pas iets na een pull + herstart van die instance — en die
+herstart sloopt een lopende Tier-A-run, dus tussen runs door.
+
 ## De GSC-cijfers komen uit een gesamplede extract, en dat sloopt elke CTR-conclusie (2026-09-09, bt.search_console)
 
 Begonnen als "schrijf een verhaal bij de SEO-grafieken van augustus", geëindigd bij de

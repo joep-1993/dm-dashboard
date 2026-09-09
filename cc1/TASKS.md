@@ -3,6 +3,33 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-09 (9) — Auto-Redirects: 500 URL's doorpushen gaf een timeout
+
+Joeps melding. Twee losse oorzaken: een poll-lus in de browser die na 5 minuten hard opgaf
+terwijl de backend doorschreef, en een preflight-drempel die een batch van 500 over het trage
+per-rij-pad stuurde. Fix `2989fd0`. Lessen in LEARNINGS, zelfde datum.
+
+- [x] **`_pollTask` herschreven** (`frontend/rurl-optimizer.html`): breekt af op stilstand
+      (geen beweging in fase/`processed`/`prefetch_rows` gedurende 6 min) in plaats van op
+      verstreken tijd, met een uur als harde bovengrens. Poll-fouten tellen niet meer als
+      mislukte push (pas 5 op rij), interval loopt na 30s van 500ms naar 2s, en beide modals
+      tonen voortgang + verstreken tijd. Foutteksten wijzen naar Recent Results vóór een
+      nieuwe poging — de oude tekst nodigde uit tot dubbel indienen.
+- [x] **`PREFETCH_THRESHOLD` 2000 → 250** (`backend/redirect_tool_service.py`). Bij 500 rijen
+      gaat preflight van ~11 min per-rij-scans naar de vlakke ~15–20s bulk-index.
+- [x] **Submit bewust NIET geparallelliseerd** — per-rij POST draagt de incoming-rewire en het
+      herstelpad; parallel breekt de `url_UNIQUE`-volgorde.
+
+Open:
+
+- [ ] **Uitrollen op prod `win-htz-006:3003`** — daar draait Joep de tool, en de Python-kant
+      pakt de wijziging pas na een herstart (geen `--reload`). Tussen runs door: een herstart
+      sloopt een lopende Tier-A-run.
+- [ ] **Verifiëren met een echte push van ~500 rijen** en de doorlooptijd van beide fasen
+      noteren, zodat we weten of `STALL_MS` (6 min) ruim genoeg staat voor de submit-fase.
+- [ ] **Geheugen bij prefetch nagaan op prod** — de index kost ~200MB zolang de preflight
+      loopt, en die route wordt nu veel vaker geraakt. Twee gelijktijdige preflights = ~400MB.
+
 ### 2026-09-09 (8) — SEO-verhaal augustus: bron bleek gesampled, analyse herbouwd op eigen data
 
 Joep vroeg een verhaal bij de SEO-grafieken van het DM Review, met de Google-CTR-daling en de
