@@ -3,6 +3,28 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-09 (3) — Twee onverklaarde kanaalsprongen uit de SEO-analyse van 8 sept
+
+Bij het doorlichten van dinsdag 08-09 (analyse-only, geen code) sprongen twee kanalen eruit die
+niets met SEO-performance te maken hebben maar wel elk totaal vertekenen waar ze in meelopen.
+Beide nog onverklaard. Achtergrond + de Carrousel-bevindingen staan in LEARNINGS, zelfde datum.
+
+**Open:**
+- [ ] **AI-kanaal verdrievoudigde op 03-09-2026 en zakt sindsdien terug.** Van ~750 visits/dag naar
+      1.900-2.100 op 3-7 sept, 8 sept 1.331 (nog ~1,8x de augustusbasislijn). Zit **volledig in
+      `aff_id 915` (ChatGPT) met `referer_source='Overig'`**: 494 -> 1.090 visits. De andere
+      AI-bronnen (919 Gemini, 917 Perplexity) bewegen niet. Bounce sprong mee van 58% naar 63-73%
+      en outclicks/visit zakte van 0,48 naar 0,31-0,43, maar omzet/visit blijft goed (EUR 0,125 op
+      8 sept, boven SEO). Omdat de sprong precies op één referer-bucket zit: **eerst een
+      tagging-/referrer-wijziging verdenken, pas daarna echte groei.** Uit te zoeken: wat is
+      `referer_source='Overig'` binnen aff 915, en is er op 3 sept iets aan de herkenning veranderd?
+- [ ] **`Overig Kanaal` op recordhoogte: 17.432 visits op 8 sept met 17.021 unieke IP's.** ~+75%
+      boven de ~10k-basislijn; 5 sept (17.177) en 7 sept (15.786) waren ook hoog. Bijna 1 visit per
+      IP, dus **gedistribueerde scrapers**, niet één bron — en `is_real_visit=1` filtert ze niet weg
+      (zie [[overig_kanaal_scraper_is_real_visit]]). Uit te zoeken of dit dezelfde scraper-golf is
+      als sinds 22-08 of een nieuwe, en of er iets aan te doen valt. Raakt SEO niet direct, maar
+      vertekent elk kanaaltotaal waar het in meeloopt.
+
 ### 2026-09-09 (2) — IndexNow: beslist.be aangezet, plus historie/export per domein
 
 Joep leverde de .be-key aan met keylocatie `https://www.beslist.be/c09a371458704e499c7867d93dee6426.txt`

@@ -1,6 +1,62 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Carrousel is Google-verkeer met een affiliate-tag, en het maskeert alleen je volume (2026-09-09, SEO/Redshift)
+
+Vervolg op "De SEO-cut in fct_visits bevat de Carrousel" (2026-09-07) verderop. Toen wisten we
+*dat* aff 908 in de SEO-bucket zit. Nu weten we wat het is en wat het met je conclusies doet.
+
+**1. Het is geen kanaal, het is Google met een tag.** Op 08-09 (`dim_visit`, `is_real_visit=1`):
+referer **94% `https://www.google.com/`**, `channel_name = "Referer met affiliate ID"`,
+**99,7% landt op `/p/`** met `?aff_id=908` in de URL, 75% mobiel, 78% NL / 16% BE. In
+`chan_deriv` heet aff 908 letterlijk "Carrousel", traffic_type Free, gemapt op SEO sinds
+18-03-2024. Vrijwel zeker de Google Shopping-/populaire-producten-carrousel.
+
+**2. Het maskeert je volume, maar níet je omzet.** wk23 -> wk36 2026:
+
+| | wk23 | wk36 |
+|---|---|---|
+| aff0 visits (organisch) | 420.709 | 368.346 (**-12,4%**) |
+| Carrousel visits | 36.560 | 49.026 (**+34,1%**) |
+| aandeel v/d SEO-bucket | 8,0% | 11,7% |
+
+Blended is dat -8,7%, dus **3,7pp organisch verkeersverlies zit verstopt**. Op omzet gebeurt het
+omgekeerde: Carrousel doet EUR 4.033 -> 2.194 per week (**-45,6%**), harder dan organisch
+(-19,7%). Zeg dus "volume gemaskeerd", niet "omzet verwaterd" — het mix-effect verklaart maar
+8% van de daling in blended omzet/visit.
+
+**3. `/p/` is intrinsiek de goedkoopste paginasoort; Carrousel is geen slecht verkeer.** Op 08-09
+doet aff0's eigen `/p/`-verkeer EUR 0,039/visit en Carrousel EUR 0,042 — praktisch gelijk.
+Tegenover `/c/` EUR 0,076 en `/r/` EUR 0,073. Carrousel verwatert per definitie omdat het 100%
+`/p/` is, niet omdat de bezoeker minder waard is.
+
+**4. De Carrousel-omzetval is een eCPC-stap, geen engagementprobleem.** Outclicks per visit zakt
+maar van 0,424 naar 0,385 (-9%); omzet per outclick zakt EUR 0,259 -> 0,112 (**-57%**), met een
+schone knik tussen wk27 en wk28 = de CPR-switch van **08-07-2026** (cpa_cpc flat -> per-shop
+ROAS). aff0's `/p/`-verkeer laat dezelfde stap zien (EUR 0,33 -> 0,24), `/c/` blijft vlak rond
+EUR 0,11. Handig anker: elke "waarom daalt X per klik"-vraag over juli hoort hier eerst langs.
+
+**5. De omzetdaling zit in `/r/`, niet in `/c/`.** Decompositie van de -EUR 8.788/week (wk23 -> wk36):
+
+| bron | delta omzet/week | aandeel |
+|---|---|---|
+| aff0 `/r/` (termpagina's) | -EUR 5.347 | **61%** |
+| Carrousel (`/p/`) | -EUR 1.829 | 21% |
+| aff0 `/c/` (facetpagina's) | -EUR 1.665 | 19% |
+
+`/r/` verliest 16,3% bezoek **en** 16% waarde per bezoek; `/c/` verliest 12,0% bezoek maar de
+waarde per bezoek is vlak (EUR 0,0902 -> 0,0911). De wk35-knik (24 aug, zie de R-url-stap in
+TASKS) raakt `/r/` 2,4x harder dan `/c/`: -7,1% tegen -2,9%.
+
+**6. Methodische valkuil, en hij kostte een conclusie.** Voor een YoY op een **losse dag** moet je
+op **weekdag** matchen, niet op datum: 365 dagen = 52 weken + 1, dus dezelfde datum vorig jaar is
+een andere weekdag. Ik vergeleek dinsdag 08-09-2026 met 08-09-**2025** (een maandag, en juist de
+zwakste omzetdag) en rapporteerde SEO-omzet YoY als -17,3%. Tegen vijf 2025-**dinsdagen** is het
+-12,2%, en omzet per visit staat YoY op **+15,0%** — de conclusie draait van "omzet zakt hard mee"
+naar "we verliezen volume, geen waarde per bezoeker". Verkeer (-23%) en outclicks (-35%)
+veranderden nauwelijks. Gebruik het gemiddelde van 4-5 gelijke weekdagen, niet één dag; binnen
+hetzelfde jaar zijn stappen van 7 dagen wel automatisch gematcht.
+
 ## Een be-index draagt nog steeds nl-nl-sleutels, en een try/catch maakt van een kapotte ES-call "alles afgekeurd" (2026-09-09, n8n IndexNow .be-tak)
 
 De dagelijkse flow uitgebreid naar beslist.be. Vier dingen die je bij elke .be-variant van
