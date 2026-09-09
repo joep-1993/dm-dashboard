@@ -68,8 +68,15 @@ het bestaande `scripts/analysis/seo_titles_build_gap_combos.py`.
 ### 2026-09-08 (6) — Facetwaarde-seoPriority: 82.719 waarden ingedeeld, en de helft blijkt nergens gelinkt
 
 Vervolg op de cat×facet-opruiming van 07-09, nu op de waarde-vlag (`FacetValue.seoPriority`,
-facet-globaal, geen `categoryId`). Lessen in LEARNINGS, zelfde datum. Read-only: **nul wijzigingen
-doorgevoerd.** Alle scripts stonden in de scratchpad, dus geen repo-code geraakt.
+facet-globaal, geen `categoryId`). Lessen in LEARNINGS, zelfde datum. Alle scripts stonden in de
+scratchpad, dus geen repo-code geraakt.
+
+**Doorgevoerd 08/09-09-2026: 8.685 facetwaarden op `seoPriority=false`** (groep A 4.241 van 4.247,
+groep B 4.444 van 4.463). Nul labelschade over alle 8.710 PUTs, 23.758 linkplekken vrij, kosten
+0 visits en €1.015,77. Logboek: `pa.seoprio_value_changes` (8.710 rijen, before-state per waarde
+inclusief `labels_voor`). De zoekindex volgde direct: 889 van 893 gecontroleerde waarden in 30
+categorie×facet-combinaties zijn niet meer `crawlable`. Groep "Kans" is op verzoek **niet**
+aangeraakt.
 
 - [x] **Scope gemeten in plaats van geschat.** 550.369 facetwaarden, 223.297 met `seoPriority=true`,
       82.719 daarvan met minstens één bestaande pagina. Bronnen: taxonomiedump (75s, 181 MB),
@@ -91,12 +98,17 @@ doorgevoerd.** Alle scripts stonden in de scratchpad, dus geen repo-code geraakt
 - [x] **Deliverables**: `Downloads\claude\facetwaarde_seoprio_20260908.xlsx` (9 tabs) en
       `facetwaarde_seoprio_volledig_20260908.csv` (82.719 rijen, 33 kolommen).
 
+- [x] **25 waarden bleven staan en dat is geen bug**: 9 met een leeg `nameOnDetail` (de API eist
+      een niet-lege waarde; niet ingevuld, want dat is content verzinnen) en 16 met een duplicaatnaam
+      binnen hetzelfde facet+locale, wat elke PUT blokkeert. Lijst in het logboek op `http_status`.
+
 **Open:**
+- [ ] **Effect van A+B meten rond 20-10-2026** (6 weken): join `pa.seoprio_value_changes` op een
+      verse cat×waarde-matrix; verwachting is nul omzeteffect en verschoven crawlbudget.
 - [ ] **Top ~200 van de vraag-as met de hand nakijken** voordat er iets op gebeurt —
       gewone-woordmerken ("quantum computers") glippen door de automatische vlag.
-- [ ] **Tier 1 uitzetten (4.247 gelinkte dode waarden)** wacht op groen licht van Joep; bij
-      doorvoeren de before-state in `pa.seoprio_changes` loggen en `PUT /api/Facets/values/{id}` met
-      een platte body zonder `nameLanguage` gebruiken.
+- [ ] **16 duplicaatnamen opruimen** in de taxonomie (o.a. 9× `Galaxy A** accessoires`, 2× `Everdell`,
+      2× `28 mm`); zolang die er staan is de waarde niet te bewerken.
 - [ ] **De 3.046 kans-waarden** zijn de omgekeerde actie: aanzetten of hoger in de facetsortering
       krijgen. Nog geen mechanisme onderzocht om die sortering te beïnvloeden.
 

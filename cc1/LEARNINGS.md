@@ -94,6 +94,38 @@ uitprobeert. En `tail --pid=$(pgrep -f script.py)` in hetzelfde commando dat dat
 matcht de eigen bash-wrapper (die de scriptnaam in zijn argv heeft) en wacht op zichzelf — 20
 minuten deadlock; wacht op een PID die je uit `$!` hebt, of op de outputfile.
 
+## Een PUT op één facetwaarde hernummert het hele facet, en twee dingen blokkeren hem stil (2026-09-08/09, taxonomie-writes)
+
+8.710 PUTs op `/api/Facets/values/{id}` gedaan om groep A en B uit te zetten. Vier dingen om te
+weten voordat je dit nog eens doet.
+
+**De platte PUT bewaart wél alle locale-labels.** De bestaande waarschuwing gaat over
+`nameLanguage`; zónder dat veld blijven vier locales met verschillende teksten ongemoeid. Getest op
+een waarde met `nl-NL`/`nl-BE` "Captain America Jet-Achtervolging" en `en-US`/`de-DE` "Jet Chase":
+na de PUT alle vier ongewijzigd. Over alle 8.710 writes: **nul labelwijzigingen**. Body is
+`{nameInColumn, nameOnDetail, seoPriority}` uit het `global`- of `nl-NL`-label.
+
+**Maar het hernummert wel de `sequence` van het hele facet.** Na writes in facet 46 was de sequence
+van 178 van 178 steekproefwaarden verschoven — óók van waarden die ik nooit had aangeraakt, tot
+1.901 posities omlaag. Het is **compactie, geen herordening**: 0 inversies in de relatieve orde, en
+elke verschuiving gaat omlaag. De API dicht de gaten in de nummering bij elke write. Niet repareren
+via `/values/reorder` dus, dat zou de gaten alleen terugzetten — en met `sortMode: Smart` is
+`sequence` niet eens de weergavedriver. **Toets je writes daarom op `seoPriority` + labeltekst, niet
+op de sequence**; die vergelijking gaf mij 104 valse alarmen.
+
+**Twee dingen blokkeren de PUT met een 400, en dat is terecht.** Negen waarden hebben een leeg
+`nameOnDetail` ("The NameOnDetail field is required") — die kun je alleen zetten door tekst te
+verzinnen, dus overslaan. En zestien geven *"A facet value with name X already exists for this facet
+in locale Y"*: **duplicaatnamen binnen hetzelfde facet+locale bestaan, en die maken de waarde
+onbewerkbaar** tot iemand de duplicaat opruimt. Negen keer een `Galaxy A** accessoires`, verder
+`Everdell` 2×, `28 mm` 2×, `Melisse`, `Ray-Ban Cockpit`, `36/38`, `38/40`.
+
+**Tempo en effect:** ~3 PUTs/s bij 12 workers, dus 25 minuten per 4.500 waarden. En de zoekindex
+volgt vrijwel direct: 889 van 893 uitgezette waarden in 30 categorie×facet-combinaties waren binnen
+het uur niet meer `crawlable`. Geen wachttijd van dagen zoals bij de CloudFront-cache op pagina's.
+
+Zie ook [[taxonomy_api_gotcha]], [[taxonomy_put_namelanguage_resequences]].
+
 ## Een vlag die aanstaat en toch niets linkt, en drie manieren om leeftijd te verzinnen (2026-09-08, facetwaarde-seoPriority)
 
 Joep vroeg de opruiming van 07-09 te herhalen op de **tweede** seoPriority — die van de facet
