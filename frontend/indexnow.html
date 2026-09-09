@@ -524,7 +524,7 @@
                 const exportBtn = `<a href="${exportUrl}" class="btn btn-sm btn-outline-purple" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">Export</a>`;
                 return `<tr>
                     <td>${escapeHtml(String(h.date))}</td>
-                    <td>${escapeHtml(h.domain || '')}</td>
+                    <td>${escapeHtml((h.domain || '').replace(/^www\./, ''))}</td>
                     <td class="col-center">${badge}</td>
                     <td class="col-center">${(h.url_count || 0).toLocaleString()}</td>
                     <td class="col-center">${exportBtn}</td>
