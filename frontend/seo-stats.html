@@ -160,7 +160,7 @@
            je ziet. Staat zo in UI_BLUEPRINT (de bevinding komt van de All-knop in
            Shop-campagnes, Joep 2026-08-06); shop-campaigns.html en bothits.html hadden hem
            al, deze pagina was de laatste zonder. */
-        .btn-preset { padding: 0.35rem 0.7rem; min-width: 3rem; }
+        .btn-preset { --bs-btn-padding-y: 0.35rem; --bs-btn-padding-x: 0.7rem; min-width: 3rem; }
         /* Alleen breedte en stijl: de KLEUR van deze scheidingslijn komt van de
            knopgroep in style.css (2026-08-14). Stond hier op #d9d4e8, wat tot de
            opruiming door het !important van het thema werd overschreven — dus dit is
@@ -402,7 +402,8 @@
         /* Top-categories toggle: a wide banner-button under the header, not a small
            header control. Colour comes from the canonical .btn-outline-purple; this
            class only sets geometry. */
-        .cat-banner-btn { width: 100%; max-width: 460px; padding: 0.65rem 1.5rem;
+        .cat-banner-btn { width: 100%; max-width: 460px;
+                          --bs-btn-padding-y: 0.65rem; --bs-btn-padding-x: 1.5rem;
                           font-size: 1rem; font-weight: 600; }
         /* De paarse flatpickr-kalender staat sinds 2026-08-14 in css/style.css: dit
            blok van negen regels stond op zes pagina's byte-identiek. Hier iets wijzigen

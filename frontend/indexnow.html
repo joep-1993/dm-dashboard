@@ -521,7 +521,7 @@
                 // export without ?domain would hand back both hosts for that date.
                 const exportUrl = `${API_BASE}/api/indexnow/export/${h.date}`
                     + (h.domain ? `?domain=${encodeURIComponent(h.domain)}` : '');
-                const exportBtn = `<a href="${exportUrl}" class="btn btn-sm btn-outline-purple" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">Export</a>`;
+                const exportBtn = `<a href="${exportUrl}" class="btn btn-sm btn-outline-purple" style="font-size: 0.75rem; --bs-btn-padding-y: 0.15rem; --bs-btn-padding-x: 0.5rem;">Export</a>`;
                 return `<tr>
                     <td>${escapeHtml(String(h.date))}</td>
                     <td>${escapeHtml((h.domain || '').replace(/^www\./, ''))}</td>

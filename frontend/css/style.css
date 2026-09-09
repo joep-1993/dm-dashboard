@@ -39,6 +39,11 @@
     --flat-accent-soft: #eaeef9;     /* chipvulling, rijhover */
     --flat-radius: 6px;
 
+    /* Optische correctie voor knoptekst — zie de .btn-regel verderop voor de
+     * meting. In em, want hij hangt aan de fontgrootte en niet aan de vulling:
+     * dezelfde waarde klopt voor .btn, .btn-sm en .btn-lg. */
+    --btn-text-shift: 0.068em;
+
     /* Eén meting die het hele ontwerp stuurde: wit op --flat-accent haalt maar 2,75:1
      * en zakt door WCAG AA. Daarom is het accent de kleur van lijnen en niet van
      * gevulde knoppen; de CTA blijft --color-button (4,31:1 met wit — genoeg voor
@@ -121,9 +126,44 @@ body {
  * zit in vulling (primair) versus rand (de rest) — zie de drie groepen verderop. De
  * schaduw die hier stond (0 2px 4px rgba(0,0,0,.2)) is bij de restyle weggehaald.
  * De navbarknoppen houden hun eigen schaduw: die staat in .nav-dropdown-toggle. */
+/* KNOPTEKST STAAT ~1px TE LAAG BIJ SYMMETRISCHE VULLING (Joep, 2026-09-09, over
+ * Export/Remove in de Redirect-tool). Zelfde font-metriekprobleem dat in
+ * cc1/UI_BLUEPRINT.md al voor `.badge` staat, en het is dus géén eigenschap van
+ * die twee knoppen: het geldt voor élk knoplabel in de app.
+ *
+ * Waarom het gebeurt: de regeldoos wordt gecentreerd op ascent+descent, maar wat
+ * je ziet is het blok cap-hoogte→basislijn. De descenderruimte onder de basislijn
+ * blijft leeg, dus het zichtbare blok zakt. Analytisch is de afwijking
+ * (ascent − descent − capHoogte) / 2, oftewel 0,064em voor Segoe UI — en die is
+ * ONAFHANKELIJK van line-height, dus `line-height: 1` lost hier niets op.
+ *
+ * Gemeten op 8x-schermshots van de echte knoppen (label tegen een lege kopie
+ * gedift, zodat alleen de letterink overblijft), cap-hoogte→basislijn:
+ *   .btn-sm  (14px): +0,938px te laag  ->  0,067em
+ *   .btn     (16px): +1,125px te laag  ->  0,070em
+ * Vandaar --btn-text-shift: 0.068em, in em zodat één waarde alle maten dekt.
+ *
+ * Fix = padding-top kleiner dan -bottom met de SOM gelijk, precies zoals bij de
+ * badge: de knop houdt zijn hoogte, alleen de regeldoos schuift omhoog. Het gaat
+ * via `--bs-btn-padding-y`, dus `.btn-sm`/`.btn-lg` en elke pagina die die
+ * variabele zet, erven de correctie automatisch. Een pagina die `padding:`
+ * voluit overschrijft, valt er WEL buiten — zet daar de Bootstrap-variabelen in
+ * plaats van de shorthand.
+ *
+ * BEWUST NIET voor icoonknoppen: `.btn-remove-row` (svg), `.btn-page` (chevrons)
+ * en `.btn-close` zetten hun eigen vulling en blijven dus staan waar ze staan.
+ * Daar is de correctie ook verkeerd: een ×- of chevronglyph zit op de mathematische
+ * as en niet op de cap-hoogte, dus die staat mét symmetrische vulling al goed.
+ *
+ * Eén knopvorm voor het hele dashboard: zelfde radius, geen schaduw. Het onderscheid
+ * zit in vulling (primair) versus rand (de rest) — zie de drie groepen verderop. De
+ * schaduw die hier stond (0 2px 4px rgba(0,0,0,.2)) is bij de restyle weggehaald.
+ * De navbarknoppen houden hun eigen schaduw: die staat in .nav-dropdown-toggle. */
 .btn {
     border-radius: var(--flat-radius);
     font-weight: 500;
+    padding-top: calc(var(--bs-btn-padding-y) - var(--btn-text-shift));
+    padding-bottom: calc(var(--bs-btn-padding-y) + var(--btn-text-shift));
 }
 
 /* Navbar dropdown menu system */

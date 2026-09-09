@@ -273,10 +273,10 @@
                             <label class="form-check-label" for="modeInclude">Include only these shops</label>
                         </div>
                         <div class="mt-auto pt-3 d-flex justify-content-end gap-2">
-                            <button class="btn btn-sm btn-outline-purple" style="padding: 0.25rem 0.6rem; min-width: 70px;" onclick="previewScript()" id="previewBtn">
+                            <button class="btn btn-sm btn-outline-purple" style="--bs-btn-padding-y: 0.25rem; --bs-btn-padding-x: 0.6rem; min-width: 70px;" onclick="previewScript()" id="previewBtn">
                                 Preview
                             </button>
-                            <button class="btn btn-sm btn-run" style="padding: 0.25rem 0.6rem; min-width: 70px;" onclick="runScript()" id="runBtn">
+                            <button class="btn btn-sm btn-run" style="--bs-btn-padding-y: 0.25rem; --bs-btn-padding-x: 0.6rem; min-width: 70px;" onclick="runScript()" id="runBtn">
                                 Run
                             </button>
                         </div>
@@ -403,8 +403,8 @@
                             <label class="form-check-label" for="llModeInclude">Include only these shops</label>
                         </div>
                         <div class="mt-auto pt-3 d-flex justify-content-end gap-2">
-                            <button class="btn btn-sm btn-outline-purple" style="padding: 0.25rem 0.6rem; min-width: 70px;" onclick="runLowLinkage(true)" id="llPreviewBtn">Preview</button>
-                            <button class="btn btn-sm btn-run" style="padding: 0.25rem 0.6rem; min-width: 70px;" onclick="runLowLinkage(false)" id="llRunBtn">Run</button>
+                            <button class="btn btn-sm btn-outline-purple" style="--bs-btn-padding-y: 0.25rem; --bs-btn-padding-x: 0.6rem; min-width: 70px;" onclick="runLowLinkage(true)" id="llPreviewBtn">Preview</button>
+                            <button class="btn btn-sm btn-run" style="--bs-btn-padding-y: 0.25rem; --bs-btn-padding-x: 0.6rem; min-width: 70px;" onclick="runLowLinkage(false)" id="llRunBtn">Run</button>
                         </div>
                     </div>
                 </div>
@@ -1277,7 +1277,7 @@
                 const chevL = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>';
                 const chevR = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>';
                 const selInfo = selectable ? '<span class="text-muted" id="llPreviewSelectedInfo" style="font-size: 0.85rem;"></span>' : '';
-                const runSelBtnHtml = selectable ? `<button class="btn btn-sm btn-run" style="padding: 0.25rem 0.6rem; min-width: 70px;" onclick="runSelectedLowLinkage()" id="llRunSelectedBtn">Run selected</button>` : '';
+                const runSelBtnHtml = selectable ? `<button class="btn btn-sm btn-run" style="--bs-btn-padding-y: 0.25rem; --bs-btn-padding-x: 0.6rem; min-width: 70px;" onclick="runSelectedLowLinkage()" id="llRunSelectedBtn">Run selected</button>` : '';
                 const selectAllTh = selectable ? '<th style="width: 2.5rem; text-align: center;"><input class="form-check-input" type="checkbox" id="llPreviewSelectAll" title="Select all (filtered)" onclick="togglePreviewSelectAll(this.checked)"></th>' : '';
                 html += `
                 <div class="filter-row d-flex gap-2 align-items-center mt-2 mb-2">
@@ -2472,7 +2472,7 @@
             const start = perPage === Infinity ? 0 : (activityPage - 1) * perPage;
             const end = perPage === Infinity ? total : start + perPage;
             // Alleen geometrie inline; de kleur komt van btn-outline-purple.
-            const btnStyle = "padding:0.1rem 0.6rem; font-size:0.78rem;";
+            const btnStyle = "--bs-btn-padding-y:0.1rem; --bs-btn-padding-x:0.6rem; font-size:0.78rem;";
             const rows = log.slice(start, end).map(entry => {
                 const time = new Date(entry.time).toLocaleString('nl-NL');
                 const cls = entry.success ? 'log-success' : 'log-error';
@@ -2592,7 +2592,7 @@
                         </table>
                     </div>
                     <div class="mt-2 d-flex gap-2">
-                        <button class="btn btn-sm btn-run" style="padding:0.25rem 1rem;" onclick="applyReconstruct()">Undo these changes</button>
+                        <button class="btn btn-sm btn-run" style="--bs-btn-padding-y:0.25rem; --bs-btn-padding-x:1rem;" onclick="applyReconstruct()">Undo these changes</button>
                         <button class="btn btn-sm btn-outline-secondary" onclick="cancelReconstruct()">Cancel</button>
                     </div>`;
             } catch (err) {
