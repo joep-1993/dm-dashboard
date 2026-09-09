@@ -3,6 +3,44 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-09 (8) — SEO-verhaal augustus: bron bleek gesampled, analyse herbouwd op eigen data
+
+Joep vroeg een verhaal bij de SEO-grafieken van het DM Review, met de Google-CTR-daling en de
+AI Overview-stijging erin. Onderweg bleek `bt.search_console` gesampled (Joep: er ligt een
+ticket voor een completere extract), waardoor de halve analyse omviel en opnieuw is opgebouwd
+op `fct_visits`. Lessen in LEARNINGS, zelfde datum.
+
+- [x] **Artifact gepubliceerd** — https://claude.ai/code/artifact/60fcaf39-963e-4e47-9252-e270076e22f4
+      ("SEO augustus 2026"). Eigen meetdata als ruggengraat; de gesamplede CTR-reeks staat er nog
+      wél in, maar in de meetsectie met een waarschuwing *binnen* het figuur, zodat de
+      kanttekening meereist bij een screenshot.
+- [x] **Sampling aangetoond uit de data zelf**: rijen +0,7% terwijl kliks −29,8% doen en
+      vertoningen −15,7%, tegen eigen SEO-visits −13,3% (week 29 jun → 24 aug).
+- [x] **Device-hypothese weerlegd** — mobiel −8,6% / desktop −11,8% tegen het H1-gemiddelde
+      (breed: −7,7% / −7,5%, aandeel stil op 68,6%). Mijn eerdere "mobiel stort in" kwam van een
+      basislijn op één uitschieterweek. Sluit mobiele techniek, page experience en
+      schermformaat-specifieke SERP-effecten uit als oorzaak van het bezoekverlies.
+- [x] **AIO-effect getoetst, nog niet aanwezig** — 1–6 sep weekdag-tegen-weekdag: CTR +1,5%,
+      top-3 +2,4%, informationeel +4,1%. AIO sprong pas op 1 sep (2–7% → 42%, 9 sep 83%), dus ná
+      de rapportagemaand.
+- [x] **Anonimisatie-hypothese uitgesloten** — elke rij in `bt.search_console` heeft een
+      zoekterm; er is geen geanonimiseerd blok.
+
+Open:
+
+- [ ] **Nieuwe GSC-extract is blokkerend voor alles over Google zelf.** Zolang die er niet is,
+      draagt geen enkele uitspraak over klikkans, posities of zichtbaarheid een besluit. Bij
+      oplevering: de kliks/visits-ratio (nu 48,1%) opnieuw meten als controle dat hij completer
+      is, en nagaan hoeveel historie herbouwd kan worden.
+- [ ] **Bezoekverlies snijden op categorie, URL-type en land.** Device is uitgesloten, dus de
+      oorzaak werkt over de volle breedte. Kan volledig op `fct_visits`, zonder op de extract te
+      wachten.
+- [ ] **Reconciliatie welke definitie "SEO" is** — `aff_id=0 AND channel_id=4` geeft ~1,2M
+      visits/maand, `aff_id=0` zonder kanaalfilter 1,96M, en dat laatste matcht de
+      BO-rapportage. Vastleggen vóór we op niveaus gaan sturen.
+- [ ] **Tripwire inregelen**: GSC-kliks gedeeld door eigen SEO-visits, wekelijks naast de
+      SEO-cijfers.
+
 ### 2026-09-09 (7) — Tier-A runs misten `started_at`, dus Recent runs toonde "—"
 
 Joeps melding met de fix erbij: `_run_tier_a_loop` zet bij de start geen `started_at`, dus

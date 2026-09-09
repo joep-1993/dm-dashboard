@@ -1,6 +1,64 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## De GSC-cijfers komen uit een gesamplede extract, en dat sloopt elke CTR-conclusie (2026-09-09, bt.search_console)
+
+Begonnen als "schrijf een verhaal bij de SEO-grafieken van augustus", geëindigd bij de
+ontdekking dat de bron eronder niet draagt. Joep wist het stuk dat ik niet kon weten — de
+dagelijkse GSC-ophaal gebruikt een verouderde methode die **gesamplede** data teruggeeft, er
+ligt een ticket voor een completere extract — maar de omvang was uit de data zelf af te
+lezen, en die is groot genoeg om een hele analyse ongeldig te maken.
+
+**1. De signatuur: het rijenaantal staat stil terwijl de metrieken weglopen.** Week 29 jun →
+24 aug 2026: rijen in de tabel **+0,7%** (4,845M → 4,877M, negen weken lang binnen ±1,6%),
+vertoningen −15,7%, kliks **−29,8%**. Echte data doet dat niet. Een vast venster op een
+veranderende werkelijkheid betekent dat de *samenstelling* van dat venster bepaalt wat je
+meet — en dus dat een verhouding als CTR meebeweegt met de steekproef, niet met Google.
+
+**2. De vertoningen volgen de werkelijkheid wél, de kliks niet.** Dat is de scherpste toets,
+want hij heeft een externe ijklijn: onze eigen SEO-visits deden −13,3% over dezelfde weken.
+Vertoningen −15,7% zit daar dichtbij; kliks −29,8% is ruim het dubbele. De steekproef
+verliest dus **selectief kliks**, precies wat er gebeurt als een gecapte set steeds dieper in
+de staart met veel vertoningen en weinig kliks belandt. Gevolg: een gemeten CTR-daling van
+15% kan volledig artefact zijn — als kliks en vertoningen in werkelijkheid allebei ~15%
+daalden, was de echte klikkans vlak.
+
+**3. Wat het onderuit haalde.** Een compleet uitgewerkte analyse: CTR per positiebucket
+(top-3 −17%, posities 6–10 vlak), een device-mix-mechanisme, een desktop-klikkansdaling
+vanaf de week van 27 juli, en het ijkpunt "dezelfde CTR vanaf positie 16,6 als vanaf 8,1".
+Dat laatste was de kop van het rapport en tegelijk het onbetrouwbaarst dat er stond: hoe
+langer het venster, hoe meer sampling-drift, en een jaar-op-jaarvergelijking is het langste
+venster dat er is. Korte vensters lijden er het minst onder — de AIO-toets over 1–6 september
+(zes dagen) is daarom de best houdbare uitspraak die het rapport nog doet.
+
+**4. Mijn eigen fout wees dezelfde kant op als de datafout.** Ik nam de week van 29 juni als
+basislijn voor de device-vergelijking. Die lag net ná een uitschieterweek (22 juni, 346k
+mobiele visits tegen ~292k normaal), waardoor mobiel −18,6% leek te doen tegen desktop
+−12,7%. Tegen een fatsoenlijk 26-weeks H1-gemiddelde: mobiel −8,6%, desktop −11,8%, mobiel
+aandeel 69,3% → 70,1%. In de bredere afbakening nog gelijker: −7,7% tegen −7,5%. **Er is geen
+device-verhaal.** Twee fouten die toevallig dezelfde richting op wijzen zijn moeilijker te
+betrappen dan één; een basislijn hoort een gemiddelde over een periode te zijn, geen weekpunt
+dat je uitkomt.
+
+**5. `aff_id=0` zonder `channel_id=4` is geen SEO.** Zonder kanaalfilter sleep je direct
+verkeer mee: 480k visits per week tegen 424k met filter. Dat verklaarde aanvankelijk een deel
+van de kloof met GSC — maar niet alles, en de conclusie hield onder beide definities stand.
+**Open reconciliatie:** met `channel_id=4` komt SEO uit op ~1,2M visits/maand, terwijl het
+SEO-subkanaal in de BO-rapportage 1,96M meldt — dat laatste komt overeen met `aff_id=0`
+zónder kanaalfilter. Voor trendvragen maakt het niet uit, voor niveaus wel.
+
+**6. De tripwire.** GSC-kliks als aandeel van eigen SEO-visits: 58,1% (week 29 jun) → 48,1%
+(week 31 aug). Zakt die verhouding, dan drijft de steekproef weg. Die ratio hoort naast elke
+GSC-uitspraak te staan, ook straks bij de nieuwe extract — dan als controle dat hij écht
+completer is.
+
+**7. Praktisch.** Gebruik `fct_visits` + `dim_visit` (`is_real_visit=1`) als waarheid voor
+volume en kliks. Behandel elke CTR-, positie- of vertoningentrend uit `bt.search_console` als
+voorlopig en zeg dat erbij. Elke rij in die tabel heeft een zoekterm — er is géén
+geanonimiseerd blok, dus wat Google achterhoudt komt simpelweg niet binnen. En 7–8 september
+waren nog half geladen (1,5M vertoningen tegen normaal 3,1M): de verse dagen zijn niet
+bruikbaar, wat de eerder vastgelegde standup-regel bevestigt.
+
 ## Een historie-rij die bij de runstart wordt geschreven, kent de starttijd nog niet (2026-09-09, Auto-Redirects Tier A)
 
 Joep: "`_run_tier_a_loop` zet geen `started_at`, daardoor krijgen Tier-A runs null als
