@@ -1,6 +1,67 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een kale merkquery hoorde nooit in een subcategorie: de catalogus dwong hem daarheen (2026-09-09, Auto-Redirects V70)
+
+Joep zag `/products/klussen/r/parkside/` naar `klussen_486260_488662/c/merk~23796649`
+gaan — Stofzuigerzakken, 462 producten, H1 "Parkside Stofzuigerzakken" — voor een query
+die geen enkel producttype noemt. Code in `9536098`.
+
+**1. De versmalling was geen keuze van de engine maar een gat in de catalogus.**
+`data/cache/facets.csv` kent 627k facetrijen en **nul** urls op maincat-niveau: elke rij
+is `/products/<maincat>/<subcat>/c/<facet>~<id>`. `grep -cP '/products/[a-z_0-9]+/c/'`
+geeft 0. Stap 4 van de cascade (`[maincat] Matched N facet`) matcht dus tegen een pool
+waarin de maincat-pagina niet bestáát, en de count-leader-dedup móét een subcategorie
+kiezen. Terwijl `/products/klussen/c/merk~23796649` gewoon leeft: HTTP 200, H1 **"PARKSIDE
+Klussen"**, en volgens de Search API 759 producten tegen 600 op `klussen_486260` en 462 op
+de gekozen `klussen_486260_488662`. Omhoog gaan is per definitie een superset, dus dit kan
+een bestemming nooit dunner maken.
+
+**2. Diezelfde blinde vlek zit in de V61-pruning en zou de fix meteen ongedaan maken.**
+`_finalize_redirect` gooit elk `/c/`-stuk weg dat niet in `facet_url_set()` staat — en dat
+is precies wat een maincat-url niet doet. Zonder vrijstelling levert V70 `/products/klussen/`
+op, kale categorie, facet weg. De vrijstelling gaat daarom via `ctx['maincat_pieces']`, dus
+alleen de stukken die de aanroeper zelf bouwde, niet een generieke "maincat-urls zijn altijd
+goed"-regel. Twee tests leggen beide kanten vast, inclusief dat een tweede, niet-vrijgesteld
+stuk in dezelfde fragmentstring wél gesnoeid wordt.
+
+**3. Een bezitsapostrof is geen woordgrens, en de prijs was een verkeerde categorie.**
+De vouw (lowercase, diakrieten weg, leestekens → spatie) maakte van `Jack Daniel's`
+`jack daniel s`, terwijl de r-url `jack-daniels` schrijft. Geen match — en dan pakte de
+index de lege buurwaarde `Jack Daniels` (value-id 19274379, 1 subcategorie, 1 product) die
+in dezelfde maincat naast de echte staat (23825193, 3 subcategorieën, 19 producten). De
+r-url ging daardoor niet naar `eten_drinken` maar naar de **Jacks-subcategorie in mode**,
+op 70C. Apostrofs (`'`, `’`, `ʼ`, `´`, `` ` ``) worden nu geschrapt in plaats van vervangen.
+Raakt ook Levi's, L'Oréal, Kellogg's. **Les: bij het vouwen van merknamen is de apostrof de
+enige leesteken-uitzondering — de rest mag wél een spatie worden ("Lilo & Stitch" ↔
+"lilo--stitch").**
+
+**4. Een guard die in de ene pipeline klopt, is in de andere te los.** `_has_strong_subcat_name_match`
+(≥95) is in `main_parallel_v2` veilig omdat hij op de maincat van de r-url gescoped is. In
+`process_global_rurls` is er geen maincat, dus dezelfde test krijgt de héle taxonomie om
+bijna-goed in te zijn: `jack daniels` scoort daar >95 tegen "Jacks". Daar staat de guard nu
+op naamgelijkheid (`_v70_fold(matched_category) == _v70_fold(keyword)`) in plaats van op de
+fuzzy score.
+
+**5. Bij een keuze die wij maken hoort een score die zegt hoe hard hij was.** Een globale
+r-url noemt geen categorie, dus V70 kiest daar zelf de maincat (meeste producten). Dat is
+niet altijd even overtuigend: `pokemon` is 85% speelgoed (651 tegen huis_tuin 64), maar
+`sol de janeiro` is 47% parfumerie tegen 36 producten drogisterij. Vandaar 95 vanaf 70%
+aandeel en 75 (tier B, "review nodig") daaronder, met het percentage in de `reason`. Een
+vlakke score had de munt-opgooi als tier A verkocht.
+
+**6. Bij een enkele subcategorie is omhoog gaan verlies.** Joeps besluit: Culterra zit alleen
+in Tuinmest, dus `tuin_accessoires/c/merk~24219176` toont exact dezelfde producten met een
+vagere H1 ("Culterra tuinartikelen" tegen "Culterra Tuinmest"). De regel eist daarom >1
+subcategorie. Dat houdt op de 5.000-rijen-input van 26-08 vier van de acht kandidaten tegen
+(Culterra, Ferrero Rocher, Lilo & Stitch, Barista) en laat Parkside (11 subcats), Monster
+Energy (12), Bacardi en Tamagotchi door.
+
+**7. Omvang, zodat niemand hem groter maakt dan hij is.** 3 van 1.907 maincat-r-urls en 5
+van 92 globale in die input, samen ~2.600 visits. Alle acht bestemmingen live gecontroleerd
+met de whitelisted UA ([[live_page_fetch_whitelisted_ua]]): HTTP 200, H1 telkens
+"<merk> <maincat>". Suite 181 groen (16 nieuw).
+
 ## Het merktrio op outlined labels: de groene basistint is onleesbaar, en de eerste kleur hoort op de rijen die je ziet (2026-09-09, Redirect-tool)
 
 Joep vroeg de labels in de Source-kolom van Recent results (Redirect Tool) in de drie

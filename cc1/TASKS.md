@@ -3,6 +3,62 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-09 (6) — Auto-Redirects V70: kale merkquery naar de merkpagina op maincat-niveau
+
+Joep meldde dat `/products/klussen/r/parkside/` naar `klussen_486260_488662/c/merk~23796649`
+was gezet en vroeg om `/products/klussen/c/merk~23796649`. Lessen in LEARNINGS, zelfde
+datum. Code in `9536098`.
+
+- [x] **Oorzaak vastgesteld**: `facets.csv` bevat **nul** maincat-niveau urls (627k rijen,
+      allemaal `/products/<maincat>/<subcat>/c/…`), dus stap 4 `[maincat] Matched N facet`
+      kán de maincat-pagina niet kiezen en de count-leader-dedup pakt een subcategorie.
+      De pagina bestaat wél: HTTP 200, H1 "PARKSIDE Klussen", 759 producten tegen 462.
+- [x] **V70 als korte sluiting** in `process_url_v2` (`main_parallel_v2.py`), na de
+      V30-shopguard en vóór de cascade, in dezelfde vorm als V27/V32. Fires alleen als de
+      hele query één merknaam is, de r-url geen subcategorie pint en geen eigen `/c/`-facet
+      draagt. Score 95 (tier A), `match_type='maincat_brand_page'`.
+- [x] **Guards**: geen generieke woorden (`GENERIC_ADJECTIVES`/`GENERIC_NOUNS`), geen
+      winkelnamen (V30 draait ervóór), en niet als de query óók een subcategorie noemt
+      (`_has_strong_subcat_name_match`).
+- [x] **V61-pruning kreeg een vrijstelling** via `ctx['maincat_pieces']` — die gooide het
+      net gezette facet er anders meteen weer uit, want de maincat-url staat niet in
+      `facet_url_set()`. Alleen de stukken die de aanroeper zelf bouwde; geen ander pad
+      merkt er iets van.
+- [x] **>1 subcategorie vereist** (Joeps besluit): bij een enkele houdt de subcategorie
+      exact dezelfde producten en zegt haar H1 meer. Houdt Culterra, Ferrero Rocher,
+      Lilo & Stitch en Barista op hun plek; Parkside (11), Monster Energy (12), Bacardi
+      en Tamagotchi gaan omhoog.
+- [x] **Globale r-urls** (`/products/r/<merk>/`, aparte pipeline `process_global_rurls.py`
+      buiten `process_url_v2` om): maincat met de meeste producten wint (Joeps besluit),
+      score 95 vanaf 70% aandeel en anders 75 zodat een reviewer kijkt, met het percentage
+      in de `reason`. `pokemon` → speelgoed 85% (A), `sol de janeiro` → parfumerie 47% (B).
+- [x] **Apostrof-bug gevonden en gefixt**: `Jack Daniel's` vouwde naar `jack daniel s`,
+      matchte de query `jack-daniels` niet, en de index pakte de lege buurwaarde
+      `Jack Daniels` (1 subcat, 1 product) → de r-url landde in de Jacks-subcategorie van
+      **mode** op 70C. Apostrofs worden nu geschrapt i.p.v. als scheidingsteken gelezen.
+      Nu `eten_drinken/c/merk~23825193`, 95A.
+- [x] **Guard in de globale pipeline op naamgelijkheid** i.p.v. de fuzzy ≥95: die is daar
+      taxonomie-breed en `jack daniels` scoort >95 tegen "Jacks".
+- [x] **Geverifieerd**: end-to-end gedraaid op 12 URL's (8 kandidaten + 4 controles);
+      controlegevallen onveranderd. Alle acht nieuwe bestemmingen live opgehaald met de
+      whitelisted UA: HTTP 200, H1 "<merk> <maincat>". Omvang op de 5.000-rijen-input van
+      26-08: 3 van 1.907 maincat-r-urls en 5 van 92 globale, ~2.600 visits. Geen linter in
+      dit project → `py_compile` + suite: **181 groen** (16 nieuw, in
+      `tests/test_v70_maincat_brand_page.py`).
+
+**Open:**
+- [ ] **Prod `:3003` moet nog pullen.** Auto-Redirects draait daar met eigen run-historie
+      ([[rurl_runs_live_on_prod_3003]]); een run die daar start pakt V70 pas na een pull.
+      De optimizer draait als subprocess, dus een uvicorn-herstart is níet nodig.
+- [ ] **De maincat-pagina's staan niet in `facets.csv`.** V70 omzeilt dat nu met een
+      vrijstelling, maar elke volgende regel die op maincat-niveau wil bouwen loopt tegen
+      dezelfde `facet_url_set()`-test aan. Overweeg de loader synthetische maincat-rijen te
+      laten afleiden zodra een tweede pad ze nodig heeft — één gebruiker is geen reden.
+- [ ] **Alleen `merk`.** De regel geldt niet voor andere facetten die een hele maincat
+      kunnen dragen (bv. `personage`: `lilo--stitch` gaat nu naar
+      `speelgoed_spelletjes_395614_16926660/c/personage~23600620`). Niet onderzocht of dat
+      dezelfde versmalling heeft.
+
 ### 2026-09-09 (5) — Redirect-tool: Source-labels in het merktrio
 
 Joep vroeg de drie labels in de Source-kolom van Recent results in de primaire kleuren
