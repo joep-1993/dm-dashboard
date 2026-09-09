@@ -1,6 +1,52 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Het merktrio op outlined labels: de groene basistint is onleesbaar, en de eerste kleur hoort op de rijen die je ziet (2026-09-09, Redirect-tool)
+
+Joep vroeg de labels in de Source-kolom van Recent results (Redirect Tool) in de drie
+primaire kleuren uit `cc1/UI_BLUEPRINT.md`: lichtblauw, roze, groen. Dat is één regel in
+`redirectSourceBadge()` (`frontend/redirect-tool.html`), maar twee keer kon de tint níet
+1-op-1 overgenomen worden. Regel staat nu in UI_BLUEPRINT §Labels/badges; code in
+`efe92d4`.
+
+**1. `accent-500 #91c34e` haalt op wit 2,08:1 en kan dus geen outlined label zijn.** Deze
+pil is transparant met rand-en-tekst in de tint, dus de hue is de *tekst*kleur — en dan
+geldt de blueprint-regel "een chart-hue die ook label is, moet mid-to-dark". Gemeten:
+lichtblauw `#1f99c4` 3,28:1 (al zo in `.lbl-blue` en de CPR-pil van GSD Campaigns), roze
+`#be4693` 4,68:1, lichtgroen `#91c34e` **2,08:1**. Oplossing is niet uitwijken naar een
+andere groene familie (Healthscore's `.lbl-green #198754` haalt 4,53:1 maar zit op hue
+163° tegen accents 85,6°), maar dezelfde verdonkering die het blueprint al voor amber
+voorschrijft (`#ffc107` → `#b26a00`): hue en saturatie vast, lightness omlaag.
+**`#5a7e2b` = 4,71:1.** Nieuwe hex in de codebase, bewust: het is de labelvariant van
+accent, geen nieuwe kleur. Ook `#7BAB3A` uit seo-stats is hiervoor te licht (2,72:1) —
+die staat er als *chart*-hue, en dat is een andere toets.
+
+**2. De regel "de eerste kleur hoort op de grootste serie" wees hier naar de verkeerde
+kolomwaarde.** `SELECT input_method, count(*) FROM redirect_tool_runs` geeft file 25,
+form 15, text 14 — dus lichtblauw op FILE. Maar de tabel toont alle 54 runs op tijd
+gesorteerd, en in de eerste schermvulling komt `file` **2x** voor terwijl text/form de
+lijst vullen: recent werk komt uit Auto-Redirects (text) en losse regels (form). Dat is
+letterlijk de Bot Hits-val van 2026-08-11 (eerste kleur nooit in beeld), alleen met
+recency als oorzaak in plaats van volume. Lichtblauw zit daarom op TEXT — wat ook de
+tint is die dat label hiervóór al had, dus niemand hoeft iets af te leren. **Les: bij een
+labelkolom tel je de rijen boven de vouw, niet de hele tabel.**
+
+**3. Wat de oude pillen al niet haalden, ter kalibratie.** Paars `#5e4a90` 7,35:1, maar
+oranje `#e8730c` 3,05:1 en blauw `#0984e3` 3,87:1 zaten allebei al onder 4,5:1. De
+praktijkgrens voor deze vetgedrukte uppercase-pillen ligt dus op de ~3,3:1 van
+`.lbl-blue`, niet op 4,5:1 — daarom is lichtblauw hier niet verdonkerd en lichtgroen wél.
+
+**4. Statics hebben geen backend-restart nodig, ook niet zonder `--reload`.** De uvicorn
+op `:8003` draait zonder `--reload` ([[dm_tools_backend_no_reload]]), maar `StaticFiles`
+leest van schijf: een HTML/JS-wijziging is direct live, alleen Ctrl+Shift+R nodig. Dat
+geldt niet voor Python.
+
+**5. Verificatie zonder linter.** Dit project heeft geen `package.json`/`pyproject.toml`/
+pre-commit, dus in plaats van lint: de functie uit de HTML geknipt, `node --check` erop,
+en de mapping afgedraaid voor `text/form/file/manual/upload/''/onzin` (grijs `#6c757d`
+blijft alleen de fallback). Screenshot van de echte tabel via Windows-Chrome
+([[wsl_screenshot_windows_chrome]]) — daar viel punt 2 pas op.
+
 ## Een tegel die nul toont kan het verkeerde veld zijn, en een marge kan één dag zijn (2026-09-09, Shop Campaigns-tool)
 
 Joep vroeg een analyse van de `SHOP/`-campagnes uit de dm-dashboard-tool. Cijfers live uit

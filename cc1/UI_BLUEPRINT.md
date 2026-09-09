@@ -1118,6 +1118,32 @@ constraint replaced a luminance-based `textOn()` helper in Bot Hits: picking the
 readable text colour per background works, but keeping the label palette dark is one
 rule instead of a function.
 
+**Het merktrio als LABELS: twee tinten mogen zo, de derde moet donkerder** (Joep,
+2026-09-09, Redirect-tool → Recent results, Source-kolom). De drie pillen dragen nu
+lichtblauw/roze/groen uit §Charts, en gemeten op wit is dat:
+
+| tint | hex | contrast op wit | verdict als outlined label |
+|---|---|---|---|
+| lichtblauw `primary-500` | `#1f99c4` | 3,28:1 | OK — al zo in `.lbl-blue` en GSD Campaigns' CPR-pil |
+| roze `secondary-500` | `#be4693` | 4,68:1 | OK — al zo in `.lbl-pink` |
+| lichtgroen `accent-500` | `#91c34e` | **2,08:1** | **onleesbaar** — donkerder stop nodig |
+| groen als label | **`#5a7e2b`** | 4,71:1 | zelfde hue (85,6°) en saturatie, alleen lightness omlaag |
+
+Dus: **de trio-regel geldt onverkort, maar `accent-500` gaat als label door dezelfde
+verdonkering die dit blueprint hierboven al voorschrijft voor amber `#ffc107` →
+`#b26a00`** — hue en saturatie vast, lightness omlaag tot 4,5:1. Niet uitwijken naar de
+`.lbl-green` van Healthscore (`#198754`): die haalt wel 4,53:1 maar zit op hue 163° en
+is dus een ándere groene familie dan het merkaccent. Reik voor een donkerder stop van de
+hue die je al hebt, precies zoals de 7e/8e-hue-zoektocht in §Charts.
+
+**En "de eerste kleur hoort op de grootste serie" leest in een LABELKOLOM als "op wat
+boven de vouw staat".** Over alle 54 runs is `file` de grootste groep (25 tegen form 15,
+text 14), dus de telling wees lichtblauw naar FILE — maar in de eerste schermvulling komt
+`file` 2x voor en vullen text/form de lijst. Dat is exact de Bot Hits-val (eerste kleur
+nooit in beeld), alleen dan met recency in plaats van volume als oorzaak. Lichtblauw zit
+daarom op TEXT, wat bovendien de tint is die dat label al had — een labelkolom is
+gesorteerd op tijd, dus tel de rijen die je ziet, niet de hele tabel.
+
 **Een `.badge` staat verticaal ~1px te LAAG — symmetrische padding centreert niet**
 (Joep, 2026-08-19, GSD Budgets Results). Bootstrap zet `line-height: 1` op `.badge`,
 en die em-doos zit niet symmetrisch om het blok cap-hoogte→basislijn. Gemeten op

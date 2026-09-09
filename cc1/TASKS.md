@@ -3,6 +3,40 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-09 (5) — Redirect-tool: Source-labels in het merktrio
+
+Joep vroeg de drie labels in de Source-kolom van Recent results in de primaire kleuren
+uit UI_BLUEPRINT (lichtblauw, roze, groen). Lessen in LEARNINGS, zelfde datum; regel
+vastgelegd in UI_BLUEPRINT §Labels/badges. Code in `efe92d4`.
+
+- [x] **`redirectSourceBadge()` omgezet** (`frontend/redirect-tool.html`): TEXT/`manual`
+      lichtblauw `#1f99c4`, FORM roze `#be4693`, FILE/`upload` groen `#5a7e2b`. Was
+      paars/oranje/blauw. Grijs `#6c757d` blijft alleen de fallback voor een onbekende
+      methode.
+- [x] **Groen is een donkere stop van `accent-500`, niet de basistint**: `#91c34e` haalt
+      op wit 2,08:1 en is als outlined label onleesbaar. `#5a7e2b` = zelfde hue (85,6°)
+      en saturatie, 4,71:1 — dezelfde zet die het blueprint voorschrijft voor amber
+      `#ffc107` → `#b26a00`. Nieuwe hex, bewust: labelvariant van accent.
+- [x] **Lichtblauw op TEXT, niet op FILE**, hoewel `file` over alle 54 runs de grootste
+      groep is (25 / form 15 / text 14). Boven de vouw komt `file` 2x voor — de Bot
+      Hits-val "eerste kleur nooit in beeld", hier door recency. Bij een labelkolom tel
+      je de zichtbare rijen.
+- [x] **Geverifieerd**: geen linter in dit project, dus `node --check` op de losgeknipte
+      functie + mapping afgedraaid voor alle zes de sleutels en twee onbekende waarden,
+      plus een screenshot van de echte tabel. Statics komen van schijf, dus geen restart
+      van de `:8003`-uvicorn nodig (wel Ctrl+Shift+R).
+
+**Open:**
+- [ ] **`#5a7e2b` staat nu op één plek.** Als een tweede tool het merkgroen als label
+      nodig heeft, hoort dit een `.lbl-*`-regel in `style.css` te worden in plaats van
+      een tweede hex in een JS-map — zelfde afweging als bij `PAL.terracotta` in Bot
+      Hits. Nu niet gedaan: één gebruiker is geen vocabulaire.
+- [ ] **De pil staat nog op inline styles** (`style="border:…; color:…"` in de template
+      string), terwijl UI_BLUEPRINT §Labels/badges de pagina-eigen `.lbl`-klasse
+      voorschrijft, inclusief de asymmetrische padding die de badge verticaal centreert.
+      Bewust buiten scope gehouden bij een kleurwijziging; los mee te nemen als deze
+      kolom ooit toch verbouwd wordt.
+
 ### 2026-09-09 (4) — Shop Campaigns-tool doorgelicht: 77 dagen performance + drie tooldefecten
 
 Joep vroeg een artifact met de performance-analyse van de SHOP-campagnes uit de dm-dashboard-tool.
