@@ -96,7 +96,8 @@ aangeraakt.
       jong, 16.601 uitzetten-zonder-effect, 45.040 behouden. De twee echte uitzetgroepen kosten
       16.054 visits en €1.016 per jaar.
 - [x] **Deliverables**: `Downloads\claude\facetwaarde_seoprio_20260908.xlsx` (9 tabs) en
-      `facetwaarde_seoprio_volledig_20260908.csv` (82.719 rijen, 33 kolommen).
+      `facetwaarde_seoprio_volledig_20260908.csv` (82.719 rijen, 33 kolommen). Samenvatting voor het
+      team als artifact: https://claude.ai/code/artifact/4e241120-f19e-4d8f-abd0-c5ecc5fab7ce
 
 - [x] **25 waarden bleven staan en dat is geen bug**: 9 met een leeg `nameOnDetail` (de API eist
       een niet-lege waarde; niet ingevuld, want dat is content verzinnen) en 16 met een duplicaatnaam
@@ -109,6 +110,14 @@ aangeraakt.
       gewone-woordmerken ("quantum computers") glippen door de automatische vlag.
 - [ ] **16 duplicaatnamen opruimen** in de taxonomie (o.a. 9× `Galaxy A** accessoires`, 2× `Everdell`,
       2× `28 mm`); zolang die er staan is de waarde niet te bewerken.
+- [ ] **"Kans" (3.046 waarden, 807k zoekvolume/mnd) heeft géén waarde-schakelaar** — ze staan al op
+      `true`. Uitgezocht 09-09: 478 zijn te bereiken via `CategoryFacetSettings` (het facet staat in
+      die categorie uit), maar dat vergt **1.299 combinaties aanzetten**, sleept **4.957 andere
+      waarden** mee en **85 van die combinaties heb ik op 07-09 zelf uitgezet** (81 uit `ronde1`,
+      o.a. `merk` 21× en `maat_mode_broeken` 12×). De overige **2.568** (604k zoekvolume) vallen
+      buiten de gelinkte lijst en vragen sorteer- en productwerk, geen vlag. Gunstigste snede als
+      het ooit doorgaat: de **top-300 combinaties op volume** — 113 waarden, 126.820 zoekvolume,
+      maar 183 meelopers. Joep koos 09-09 bewust voor niets doen.
 - [ ] **De 3.046 kans-waarden** zijn de omgekeerde actie: aanzetten of hoger in de facetsortering
       krijgen. Nog geen mechanisme onderzocht om die sortering te beïnvloeden.
 
