@@ -1263,7 +1263,7 @@ def submit_rows(processed: list[dict], task: dict | None = None,
     {processed, success, failed, skipped}; total is set by the caller.
 
     When `replace_existing` is True, rows whose old URL already has a
-    redirect rule (preflight tagged them with `existing_id`) are NOT
+    redirect rule (preflight tagged them with `existing_target`) are NOT
     skipped — instead the submitter DELETEs the existing rule first, then
     POSTs the new one. This is the explicit "overwrite" flow.
     """

@@ -666,10 +666,20 @@
         // (they'll be DELETE+POST'd at submit). Stats + filter outcomes
         // need to react to it without re-running preflight.
         function isReplaceableRow(row) {
-            // Must match the skip_reason the backend emits in
-            // redirect_tool_service.preflight_rows (_process_one). Any drift
-            // here silently disables the "Replace existing redirects" toggle.
-            return row && row.existing_id
+            // Must match the gate in redirect_tool_service.submit_rows
+            // EXACTLY (existing_target + skip_reason), because that is what
+            // decides whether the backend actually DELETE+POSTs the row. Any
+            // drift here silently disables the "Replace existing redirects"
+            // toggle: the checkbox flips, no row is reclassified as ready, and
+            // Submit stays greyed out with no explanation.
+            //
+            // Gated on existing_target and NOT on existing_id (Joep,
+            // 2026-09-09): the preflight resolver
+            // GET /api/redirect?searchterm= returns only {url, statusCode} —
+            // never an id — so existing_id is None on every normal row and
+            // this predicate was false for ALL of them. The replace deletes by
+            // fromUrl (input_old), so the id was never needed.
+            return row && row.existing_target
                 && row.skip_reason === 'source has existing rule';
         }
         function replaceExistingOn() {
