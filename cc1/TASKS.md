@@ -26,6 +26,10 @@ en vroeg om een domein-dropdown in de tool. Die dropdown bleek er al te zitten (
       `pa.index_now_joep` (sinds 27-03-2026 niet meer gevuld) en gaf voor élke datum een lege xlsx.
       Staat nu op Redshift; geverifieerd met 2 rijen terug voor 09-09.
 - [x] **Backend herstart** (draait zonder `--reload`) en de pagina visueel gecontroleerd.
+- [x] **`www.` uit de domeinkolom** in Submission History (`3b5c5b4`) — alleen de weergave.
+      De export-link geeft bewust de volledige host mee: `/api/indexnow/export` filtert op
+      `url LIKE 'https://<host>/%'` en zou met een kale `beslist.be` nul rijen teruggeven.
+      Wie dit later "opschoont" tot één kale waarde, breekt de Export-knop stil.
 
 **Open:**
 - [x] **n8n-flow uitgebreid met een .be-tak** — `Downloads/claude/indexnow_submitter_IMPORT_2026-09-09_be.json`
