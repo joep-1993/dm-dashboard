@@ -3,6 +3,42 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-09 (7) — Tier-A runs misten `started_at`, dus Recent runs toonde "—"
+
+Joeps melding met de fix erbij: `_run_tier_a_loop` zet bij de start geen `started_at`, dus
+Tier-A runs krijgen null als startdatum. Fix `15047fa` (één regel). Lessen in LEARNINGS,
+zelfde datum. Vervolg op 2026-09-08 (3).
+
+- [x] **Eén regel toegevoegd** in `_run_tier_a_loop` (`backend/rurl_optimizer_v2_service.py:855`):
+      `"started_at": datetime.now().isoformat()` in de `_set` bij de runstart.
+- [x] **Oorzaak bevestigd, niet aangenomen**: `_history_append` staat twee regels lager en
+      kopieert `t.get("started_at")` → `None`. Neveneffect van V61 ("schrijf de historie-rij
+      METEEN"): vóór V61 vuurde die pas op een eindstatus, als `_run_subprocess` (regel 131)
+      `started_at` al had gezet.
+- [x] **Vastgesteld dat de null permanent was, niet incidenteel**: de dedupe bewaart alleen een
+      *bestaande* `started_at`, en het Tier-A-pad draait zijn chunks via `_run_optimizer_chunk`
+      (niet `_run_subprocess`), dus niets zette dat veld ooit. Gold voor élke Tier-A-run.
+- [x] **Verklaard waarom :8003 het niet toont**: 0 van de 56 lokale rijen heeft een
+      `params.tier_a_limit`; de modus draait op prod :3003.
+- [x] **Patchscript voor de oude rijen gemaakt en getest** —
+      `Downloads\claude\patch_tier_a_started_at.py`: haalt de starttijd uit de timestamp in de
+      output-bestandsnaam (`ts`, regel 1064, gezet bij indienen = de échte starttijd), valt terug
+      op `finished_at` en zegt per rij welke bron het gebruikte. Dry-run default, maakt een
+      `.bak-<ts>`, idempotent. Getest op een synthetische kopie met 3 nulls (waarvan één zonder
+      `output_path`): 3/3 gepatcht, tweede run "niets te doen".
+
+Open:
+
+- [ ] **De drie null-rijen op prod patchen.** Kan niet vanuit WSL: `win-htz-006` resolvet hier
+      niet en er is geen ssh-config. Script staat klaar in `Downloads\claude`. **Met de backend
+      gestopt** — `_HISTORY` leest alleen bij import (regel 85) en elke
+      `_save_history_to_disk()` schrijft de hele deque uit het geheugen weg, dus een draaiende
+      backend overschrijft de patch bij de eerstvolgende run. En dus tussen runs, want een
+      restart sloopt een lopende Tier-A-run.
+- [ ] **Deze fix moet mee in de prod-deploy** die al openstaat bij 2026-09-08 (3) ("Prod pullen
+      + herstarten") — `15047fa` werkt pas op :3003 na kill + relaunch, en nieuwe runs krijgen
+      hun startdatum vanaf dat moment automatisch goed.
+
 ### 2026-09-09 (6) — Knoptekst stond ~1px te laag in de hele app
 
 Joep zag het aan Export/Remove in Recent results (Redirect-tool) en vroeg de andere

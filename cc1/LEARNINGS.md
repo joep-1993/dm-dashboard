@@ -1,6 +1,48 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een historie-rij die bij de runstart wordt geschreven, kent de starttijd nog niet (2026-09-09, Auto-Redirects Tier A)
+
+Joep: "`_run_tier_a_loop` zet geen `started_at`, daardoor krijgen Tier-A runs null als
+startdatum en toont de frontend — in Recent runs." Klopt, en de fix is één regel
+(`15047fa`). Interessanter is waarom: het is een neveneffect van de V61-verbetering, en de
+dedupe die de rij normaal bijwerkt doet hier juist niets.
+
+**1. De verbetering van V61 maakte het gat.** Vóór V61 vuurde `_history_append` alleen op
+een eindstatus; tegen die tijd had `_run_subprocess` (regel 131) `started_at` al gezet, dus
+de rij was compleet. V61 schrijft de rij **meteen** bij runstart — zodat een run die een
+uvicorn-restart niet overleeft toch een spoor nalaat — maar `_run_tier_a_loop` zette bij die
+start alleen `status`, `progress` en `message`. Twee regels later kopieert `_history_append`
+`t.get("started_at")` → `None`. Een rij eerder wegschrijven betekent dus: nalopen welke
+velden op dat moment al bestaan.
+
+**2. De dedupe repareert het juist níet.** Die doet `merged = {**h, **new_entry}` en daarna
+`if h.get("started_at"): merged["started_at"] = h["started_at"]` — hij bewaart alleen een
+**bestaande** waarde. Bij een lege rij valt hij terug op wat later komt, en in het
+Tier-A-pad komt er niets: de chunks lopen via `_run_optimizer_chunk`, niet via
+`_run_subprocess`, dus **niets in dat pad zette ooit `started_at`**. De null was daarmee
+permanent voor élke Tier-A-run, niet alleen voor een gecrashte.
+
+**3. Waarom :8003 dit niet laat zien.** 0 van de 56 lokale historie-rijen heeft een
+`params.tier_a_limit` — de Tier-A-modus wordt op prod :3003 gebruikt (zie 2026-09-08). Een
+symptoom van een modus zoek je op de machine waar die modus draait; de lokale JSON was hier
+geen tegenbewijs maar een lege steekproef.
+
+**4. Handmatig patchen van die JSON vraagt een gestopte backend.** `_HISTORY` leest alleen
+bij import (regel 85) en elke `_save_history_to_disk()` schrijft de **hele deque uit het
+geheugen** weg. Een draaiende backend gooit je handmatige patch dus bij de eerstvolgende
+`_history_append` weer overboord, met de oude rijen terug — en herstarten sloopt een lopende
+Tier-A-run, dus het moet tussen runs. Vult de deque-regel van 2026-09-08 aan.
+
+**5. De echte starttijd staat in de bestandsnaam.** `ts` (regel 1064) wordt gezet bij het
+indienen van de run en gaat mee in `redirects_<task>_<YYYYMMDD_HHMMSS>.xlsx`. Dat is een
+betere bron dan `finished_at` (die geeft een run van 0 seconden) en zelfs beter dan de oude
+`started_at` van niet-Tier-A-rijen: die komt van de eerste subprocess en loopt achter — run
+`f364006b` heeft bestandsnaam 11:08:42 tegen `started_at` 11:14:17, 5,5 minuut later. Sinds
+de fix wint de loop-start, want nu bewaart de dedupe wél een bestaande waarde. Patchscript
+voor oude rijen: `Downloads\claude\patch_tier_a_started_at.py` (dry-run default, maakt een
+`.bak`, idempotent).
+
 ## Twee knoppen die scheef staan zijn 300 knoppen die scheef staan (2026-09-09, .btn in dm-dashboard)
 
 Joep zag dat de tekst in Export/Remove (Redirect-tool → Recent results) verticaal niet
