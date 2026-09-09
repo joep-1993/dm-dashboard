@@ -3,6 +3,42 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-09 (1) — Koptekst- vs FAQ-dekking uitgezocht, `no_valid_links`-cohort terug op pending
+
+Joep vroeg waarom de koptekst-dekking (46,7%) zoveel lager is dan de FAQ-dekking (56,4%) op dezelfde
+URL-basis. Geen repo-code geraakt: analyse via psycopg2-scripts in de scratchpad, één DB-write.
+Lessen in LEARNINGS, zelfde datum.
+
+- [x] **Oorzaak gevonden**: het gat is volledig de failed-bak (14,4% vs 4,4%), en 83% daarvan is
+      `no_valid_links` — de gegenereerde koptekst wordt weggegooid als er geen `/p/`-link in staat.
+      FAQ kent die gate niet.
+- [x] **Actuele stand gemeten** (09-09 10:21): koptekst 45,4% (203.712/449.051), FAQ 55,7%
+      (250.230/448.997). De cijfers die Joep zag waren iets ouder; de daily automation zet dagelijks
+      rijen terug op pending, dus de tegels zakken tussentijds.
+- [x] **52.053 rijen terug op pending gezet**, met snapshot
+      `pa.kopteksten_jobs_bak_novalidlinks_20260909` in dezelfde transactie.
+      `last_error='no_valid_links'` bewust laten staan als cohort-marker — de queue-selectie in
+      `main.py:723-731` kijkt alleen naar `status` en `url_validation`.
+- [x] **1.698 rijen bewust NIET gereset**: die hebben `is_valid=FALSE` / `no_products_found`, worden
+      door een herloop niet opgepakt en zouden alleen van de failed- naar de skipped-tegel schuiven.
+
+**Open:**
+- [ ] **Slagingskans meten na de eerste automation-run** — de faalreden was "model zette geen
+      `/p/`-link in de tekst", dus een deel faalt opnieuw:
+      `SELECT k.status, COUNT(*) FROM pa.kopteksten_jobs_bak_novalidlinks_20260909 b
+      JOIN pa.kopteksten_jobs k USING (url_id) GROUP BY 1;`
+- [ ] **Rollback klaar** als het slecht uitvalt (raakt de al geslaagde regeneraties niet):
+      `UPDATE pa.kopteksten_jobs k SET status='failed', last_error='no_valid_links',
+      updated_at=b.updated_at FROM pa.kopteksten_jobs_bak_novalidlinks_20260909 b
+      WHERE b.url_id=k.url_id AND k.status='pending';`
+- [ ] **Beslissen over de gate zelf**: `main.py:533-545` gooit nu de hele tekst weg. De producten
+      zijn op dat moment bekend, dus een link achteraf injecteren (of de tekst zonder link bewaren)
+      scheelt structureel ~50k pagina's.
+- [ ] **De 1.698 `no_products_found`-URL's**: alleen zinnig na het verwijderen van hun
+      `url_validation`-rij, waarmee je pagina's hertest die eerder als productloos beoordeeld zijn.
+- [ ] **`attempts` is dood in beide jobtabellen** — of vullen, of weghalen. Nu suggereert de kolom
+      een retry-mechanisme dat er niet is.
+
 ### 2026-09-08 (8) — Zoektermenrapport SHOP-campagnes + keywords doorgevoerd
 
 Joep vroeg het search-term rapport van de branded SHOP-campagnes en een voorstel voor toe te voegen

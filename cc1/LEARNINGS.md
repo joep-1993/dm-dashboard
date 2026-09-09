@@ -1,6 +1,44 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## De koptekst-dekking loopt 10pp achter op FAQ door één alles-of-niets-linkcheck (2026-09-09, kopteksten vs FAQ)
+
+Joep vroeg waarom maar 46,7% van de URL's een koptekst heeft en 56,4% een FAQ, terwijl beide
+dezelfde data gebruiken. Dat doen ze ook: `pa.kopteksten_jobs` (449.051) en `pa.faq_jobs` (448.997)
+overlappen op 448.997 rijen — 54 URL's zitten alleen in kopteksten. Het gat zit dus niet in de input.
+
+**1. De tegel meet job-status, niet "heeft content".** `/api/status` en `/api/faq/status` geven
+`processed = COUNT(*) WHERE status='success'` over hun eigen jobtabel. Twee tabellen betekent ook
+twee (iets verschillende) noemers, dus één noemer voor beide percentages quoten is al fout.
+
+**2. Het hele gat is de failed-bak.** Kopteksten 64.503 failed (14,4%) tegen FAQ 19.910 (4,4%);
+verschil 44.593, precies het gat dat Joep zag. Pending was bij beide vrijwel gelijk.
+
+**3. 83% van die failures is `no_valid_links` (53.752).** De koptekst wórdt gegenereerd en daarna
+weggegooid als de HTML geen enkele productdeeplink bevat: `check_content_has_valid_links()`
+(`gpt_service.py:194-199`) zoekt letterlijk `<a href="/p/` of `<a href="https://www.beslist.nl/p/`,
+en de gate in `main.py:533-545` schrijft dan `status='failed'` **zonder de tekst te bewaren**. FAQ
+kent die alles-of-niets-gate niet: die faalt alleen als de linkvalidator een linkvórm niet kan
+parsen (`unknown_url_format`, ~4,5k) of bij een ongeldige facetwaarde (62). Kruistabel: 50.338
+URL's hebben wél een FAQ en geen koptekst, 9.718 andersom. Bijna alles `/c/` (53.525), en recent:
+30.179 rijen uit augustus, 14.515 uit september.
+
+**4. De `skipped`-tegel is geen werkvoorraad.** Van de "niet verwerkte" URL's staat ~177k op
+job-status `pending` mét `url_validation.is_valid=FALSE` (meestal `no_products_found`); de endpoints
+tellen die als `skipped`. Echt pending was 3.394 (koptekst) en 7.406 (FAQ). Wie `status='pending'`
+telt zonder die join denkt 180k werkvoorraad te hebben terwijl het 3k is.
+
+**5. `attempts` is een dode kolom** in `pa.kopteksten_jobs` én `pa.faq_jobs`: niets in de code
+schrijft hem, alle 53.752 `no_valid_links`-rijen stonden op 0. "Één keer geprobeerd en mislukt" is
+daarmee niet te onderscheiden van "nooit geprobeerd", en er is geen retry-plafond.
+
+**6. Een reset naar pending is onbeheerde spend.** `step_process_kopteksten_urls` gebruikt
+`loop_until_done` (batches van 200, 20 workers, 8u cap, 3 retries — `daily_automation.py:59,273,438`)
+zonder dagplafond, dus de eerstvolgende automation-run vreet de hele pending-queue op, op
+`KOPTEKST_MODEL=gpt-5.6-luna`. De oude 429's in deze tabel waren letterlijk "You have no credits
+remaining" (laatste 31-07-2026); de endpoint heeft daar wel een `_block_if_no_openai_credits`-guard
+voor, maar die grijpt pas als de kraan al dicht is.
+
 ## Uitsluitingslijsten die je juist NIET moet koppelen (2026-09-08, SHOP-campagnes zoektermen)
 
 Joep vroeg het zoektermenrapport van de branded SHOP-campagnes plus een voorstel voor toe te voegen
