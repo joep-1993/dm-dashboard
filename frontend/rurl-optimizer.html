@@ -1097,23 +1097,77 @@
             updatePushSelectionCount();
         });
 
-        // Poll a redirect-tool task to completion. Bounded (~5 min) so a task
-        // stuck in 'running' can't hang the modal forever; total falls back so
-        // the width math never goes NaN.
-        async function _pollTask(statusUrl, progId, totalFallback) {
-            const MAX_POLLS = 600;  // 600 x 500ms ~ 5 minutes
-            for (let i = 0; i < MAX_POLLS; i++) {
-                const s = await fetch(statusUrl);
-                if (!s.ok) throw new Error((await s.json()).detail || 'Status poll failed');
-                const task = await s.json();
+        // Poll a redirect-tool task to completion.
+        //
+        // The old bound here was a flat 600 polls x 500ms = 5 minutes. A
+        // 500-row push runs well past that — submit POSTs one row at a time by
+        // design (per-row pass/fail, incoming-rewire, restore-on-failure) — so
+        // a perfectly healthy push died with "Timed out waiting for the task to
+        // finish" while the backend thread kept writing to production. The user
+        // then saw a failure for a push that actually landed, and a retry would
+        // double-submit. So: give up on a task that has genuinely STOPPED
+        // MOVING, not on one that is merely slow.
+        //
+        //  * progress stall — no counter movement for STALL_MS
+        //  * hard ceiling   — MAX_MS, so a wedged task can't poll forever
+        //  * transient poll errors are retried; only a run of them aborts, since
+        //    the task lives in backend memory and a dropped poll is not a failed
+        //    push.
+        const POLL_FAST_MS = 500, POLL_SLOW_MS = 2000, FAST_POLLS = 60;
+        const STALL_MS = 6 * 60 * 1000;
+        const MAX_MS = 60 * 60 * 1000;
+        const MAX_POLL_ERRORS = 5;
+        const STILL_RUNNING_HINT = 'It may still be running in the background — '
+            + 'check the Redirect tool → Recent Results before retrying.';
+
+        function _elapsed(t0) {
+            const s = Math.round((Date.now() - t0) / 1000);
+            return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+        }
+
+        async function _pollTask(statusUrl, progId, totalFallback, txtId) {
+            const t0 = Date.now();
+            let lastToken = null, lastProgressAt = t0, pollErrors = 0, i = 0;
+            while (Date.now() - t0 < MAX_MS) {
+                let task;
+                try {
+                    const s = await fetch(statusUrl);
+                    if (!s.ok) {
+                        const detail = await s.json().catch(() => ({}));
+                        throw new Error(detail.detail || `Status poll failed (${s.status})`);
+                    }
+                    task = await s.json();
+                    pollErrors = 0;
+                } catch (e) {
+                    if (++pollErrors > MAX_POLL_ERRORS) throw e;
+                    await _sleep(POLL_SLOW_MS);
+                    continue;
+                }
                 const total = task.total || totalFallback || 1;
                 const done = task.processed || 0;
                 const el = document.getElementById(progId);
                 if (el) el.style.width = Math.min(100, Math.round(done / total * 100)) + '%';
+                if (txtId) {
+                    const txt = document.getElementById(txtId);
+                    // During prefetch there is no per-row progress yet — report
+                    // the rules pulled from the redirect table instead, so the
+                    // first ~20s doesn't look frozen at 0.
+                    if (txt) txt.textContent = (task.phase === 'prefetch'
+                        ? `Prefetching redirect table — ${fmtInt(task.prefetch_rows || 0)} rules`
+                        : `${fmtInt(done)} / ${fmtInt(total)}`) + ` · ${_elapsed(t0)} elapsed`;
+                }
                 if (task.status === 'completed' || task.status === 'failed') return task;
-                await _sleep(500);
+                // Prefetch and per-row preflight advance different counters, so
+                // the stall check watches both (plus the phase itself).
+                const token = `${task.phase || ''}:${done}:${task.prefetch_rows || 0}`;
+                if (token !== lastToken) { lastToken = token; lastProgressAt = Date.now(); }
+                else if (Date.now() - lastProgressAt > STALL_MS) {
+                    throw new Error(`The task stopped making progress at `
+                        + `${fmtInt(done)} / ${fmtInt(total)}. ${STILL_RUNNING_HINT}`);
+                }
+                await _sleep(i++ < FAST_POLLS ? POLL_FAST_MS : POLL_SLOW_MS);
             }
-            throw new Error('Timed out waiting for the task to finish');
+            throw new Error(`Still running after ${Math.round(MAX_MS / 60000)} minutes. ${STILL_RUNNING_HINT}`);
         }
 
         async function pushSelectedToRedirect() {
@@ -1133,7 +1187,8 @@
             const footer = document.getElementById('pushModalFooter');
             footer.innerHTML = '';
             body.innerHTML = `<p>Preflighting ${fmtInt(rows.length)} redirect(s) with score &ge; ${escapeHtml(minScore)}…</p>
-                <div class="progress"><div id="pushProg" class="progress-bar" role="progressbar" style="width:0%"></div></div>`;
+                <div class="progress"><div id="pushProg" class="progress-bar" role="progressbar" style="width:0%"></div></div>
+                <div id="pushProgTxt" class="small text-muted mt-1"></div>`;
             modal.show();
 
             try {
@@ -1143,7 +1198,8 @@
                 });
                 if (!start.ok) throw new Error((await start.json()).detail || 'Preview failed');
                 const { task_id } = await start.json();
-                const task = await _pollTask(`${REDIRECT_API}/preview-status/${task_id}`, 'pushProg', rows.length);
+                const task = await _pollTask(`${REDIRECT_API}/preview-status/${task_id}`,
+                    'pushProg', rows.length, 'pushProgTxt');
                 if (task.status === 'failed') throw new Error(task.error || 'Preflight failed');
                 _redirPreflight = task.result;
                 const st = _redirPreflight.stats || {};
@@ -1183,7 +1239,8 @@
             const footer = document.getElementById('pushModalFooter');
             footer.innerHTML = '';
             body.innerHTML = `<p>Pushing to production…</p>
-                <div class="progress"><div id="pushProg2" class="progress-bar" role="progressbar" style="width:0%"></div></div>`;
+                <div class="progress"><div id="pushProg2" class="progress-bar" role="progressbar" style="width:0%"></div></div>
+                <div id="pushProgTxt2" class="small text-muted mt-1">Rows are POSTed one at a time — a large batch takes several minutes. Leave this open.</div>`;
             try {
                 const start = await fetch(`${REDIRECT_API}/submit`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1195,7 +1252,7 @@
                 if (!start.ok) throw new Error((await start.json()).detail || 'Push failed');
                 const { task_id } = await start.json();
                 const task = await _pollTask(`${REDIRECT_API}/submit-status/${task_id}`,
-                    'pushProg2', (_redirPreflight.processed || []).length);
+                    'pushProg2', (_redirPreflight.processed || []).length, 'pushProgTxt2');
                 if (task.status === 'failed') throw new Error(task.error || 'Push failed');
                 const res = task.result || {};
                 body.innerHTML = `<div class="alert alert-success mb-2">Done — ${fmtInt(res.success)} succeeded, ${fmtInt(res.failed)} failed.${res.run_id ? ` Run #${res.run_id}.` : ''}</div>

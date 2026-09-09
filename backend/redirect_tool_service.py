@@ -97,7 +97,20 @@ _LIST_SEMAPHORE = threading.BoundedSemaphore(LIST_CONCURRENCY)
 # only ~164 pipelined page calls regardless of batch size, so a slow upstream
 # can't amplify into thousands of timeouts. 2000 keeps tiny batches on the
 # faster no-warmup path while pulling the danger zone onto prefetch.
-PREFETCH_THRESHOLD = 2000
+#
+# Lowered 2000 -> 250 (2026-09-09): 2000 was still far too high once the real
+# cost of the per-row path was known. Preflight asks `check_url_incoming`
+# twice per row, and for a batch of brand-new redirects both are no-match
+# urlContains scans of the full ~820k-row table (2.4-15s each, LIST_CONCURRENCY
+# = 6 in flight). So the per-row path costs roughly `rows * 2 / 6 * t_scan`:
+# at 500 rows and a modest 4s scan that is ~11 minutes, and the frontend gave
+# up long before that. The prefetch path is a flat ~164 page calls (~15-20s)
+# regardless of batch size, so it already wins somewhere around 15-25 rows.
+# 250 keeps genuinely small batches (a handful of hand-typed redirects) on the
+# no-warmup path with plenty of margin, and puts every real Auto-Redirects push
+# on the bulk index. Cost of the switch is ~200MB RAM for the duration of the
+# preflight.
+PREFETCH_THRESHOLD = 250
 PREFETCH_PAGE_SIZE = 5000  # upstream API supports this; ~900KB per page
 PREFETCH_WORKERS = 8       # parallel page fetches; the API tolerates this fine
 # A failed page fetch used to be swallowed into an empty list, which is
