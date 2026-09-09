@@ -1,6 +1,70 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een tegel die nul toont kan het verkeerde veld zijn, en een marge kan één dag zijn (2026-09-09, Shop Campaigns-tool)
+
+Joep vroeg een analyse van de `SHOP/`-campagnes uit de dm-dashboard-tool. Cijfers live uit
+`/api/shop-campaigns/{performance,inventory,top-performers,devices}`, 24-06 t/m 08-09-2026
+(77 dagen, 96 ENABLED van 186, alle 28 subaccounts antwoordden, geen enkele fout). Geen
+repo-code geraakt. Achtergrond in [[shop_campaign_178_bidding_blocker]] en
+[[shop_campaign_searchterm_harvest]].
+
+**1. De tool leest het verkeerde conversieveld, en dat is aan de tegel niet te zien.**
+`_fetch_account_daily()` in `backend/shop_campaigns_service.py` haalt `metrics.conversions`
+op. Dat veld is in deze SA360-categorieaccounts **structureel 0** — de Floodlight/CPR-conversies
+zitten in `metrics.all_conversions`. Gemeten over dezelfde periode met dezelfde client:
+**1.474 conversies op 1.705 klikken**, waar de tool 0 toont. Gevolg: de tegels *Conversions* en
+*Conv. rate* zijn altijd leeg, twee van de negen grafiekseries tekenen een platte lijn op nul, en
+de Excel-export levert nul-kolommen. Losse controle op één account (Huishoudelijk, 01-08 t/m
+08-09): Praxis 29 conversies, EP 35, tool 0 en 0. In de Google Ads API was dit al bekend — het
+geldt dus óók voor de SA360-reporting-API.
+
+**2. Maar `all_conversions` zijn géén orders.** De ratio komt op 86% van de klikken en gaat per
+campagne boven de 100% (Sanitair_Praxis 189%, Meubels_Praxis 255%). Het zijn CPR-uitklikken,
+meerdere per sessie. Bruikbaar als engagementmaat, niet als ordertelling — zet er dus nooit
+"conversieratio" boven zonder die uitleg.
+
+**3. `Totaal: Revenue` loopt ~2 dagen achter op klikken en kosten.** Op 07 en 08 september samen:
+1.206 vertoningen, 61 klikken, EUR 4,80 kosten, **EUR 0,00 omzet**. Wie de standaardperiode
+"laatste 30 dagen" openslaat leest twee verliesdagen die er niet zijn. Zelfde soort valkuil als
+[[standup_fresh_day_incomplete]]; de tool waarschuwt er niet voor.
+
+**4. Marge = `Totaal: Profit` = omzet min kosten, exact.** Per campagne klopt het tot op de cent
+(Praxis Huishoudelijk: 66,21 − 37,83 = 28,38). **Break-even ligt dus op ROAS 1,00**, niet op de
+ROAS-doelen die je bij de generieke campagnes gewend bent. Op totaalniveau 9 cent verschil tussen
+de som van `Totaal: Profit` (EUR 19,64 — wat de tegel toont) en omzet min kosten (EUR 19,73).
+
+**5. Een totaal over 77 dagen kan één transactie zijn; kijk eerst naar de dagverdeling.** De
+campagnes staan op EUR 19,64 marge en dat leest als "licht winstgevend". Maar **29-06 alleen was
+EUR 53,21 omzet op 60 klikken = 30% van alle omzet in de periode**; zonder die dag staan de
+overige 76 dagen op **−EUR 26,03**. Mediane dagomzet EUR 1,09, gemiddelde EUR 2,33. Zelfde soort
+les als [[daily_yoy_match_weekday_not_date]]: een totaal zonder verdeling is geen uitspraak.
+
+**6. Splits MB_PH en EXACT vóór je een CTR-daling duidt.** Vanaf 01-09 schalen de campagnes op:
+162 → 601 vertoningen/dag (+270%), 14,3 → 38,8 klikken/dag (+171%), maar de CTR zakt van 8,81%
+naar 6,45%. Dat verschil zit volledig in één groeptype: **MB_PH 8,09% → 3,89%** (4,8x zoveel
+vertoningen, gehalveerde CTR) terwijl **EXACT 9,42% → 10,18%** gaat bij drie keer zoveel klikken.
+Blended gelezen lijkt het één verslechtering; gesplitst is het broad match die losser matcht
+naast een gezonde harvest-lane. Vergelijking: 11-31 aug (21d) tegen 1-8 sep (8d), genormaliseerd
+per dag. De zoektermenoogst van 08-09 zit hier nog nauwelijks in.
+
+**7. Wat de tool mist om de zaak te verklaren:** impressie-aandeel en het verlies op rang versus
+budget (`search_impression_share`, `search_rank_lost_impression_share`,
+`search_budget_lost_impression_share`). Die zitten op dezelfde `campaign`-resource die
+`_fetch_account_daily()` al bevraagt. Zonder die drie laat de tool zien *dat* er weinig gebeurt,
+niet *waarom* — en het antwoord (10,0% aandeel, 89,6% verloren op rang, 2,2% op budget, gemeten
+08-09) is precies wat elk optimalisatievoorstel stuurt.
+
+**Cijfers om tegen te ijken** (77 dagen, 96 ENABLED): 22.210 vertoningen, 1.705 klikken, CTR
+7,68%, EUR 159,31 kosten (**EUR 2,07/dag** op circa EUR 694 dagbudget), EUR 179,04 omzet, ROAS
+1,12, gem. CPC EUR 0,093. **51 van de 96 campagnes leverden geen enkele klik** (32 nul
+vertoningen, 19 vertoningen zonder klik); 80% van de omzet uit 7 campagnes; 80% van de klikken uit
+154 van de 4.346 advertentiegroepen. Vier winkels (Praxis/Decathlon/EP/Intratuin) = 94% van de
+kosten en 99% van de omzet. De 32 stille campagnes clusteren per winkel — NL.grandado 10 van 10,
+Toolmax 3 van 3, Joybuy 4 van 6, Wibra 4 van 9 — wat naar aanbod wijst, niet naar bod. Seizoen:
+ventilator/airco/parasol/jacuzzi-groepen zijn **50,4% van de omzet**, waarvan
+`Praxis.nl_Huishoudelijk_Ventilatoren_MB_PH` in zijn eentje 28,9%.
+
 ## Carrousel is Google-verkeer met een affiliate-tag, en het maskeert alleen je volume (2026-09-09, SEO/Redshift)
 
 Vervolg op "De SEO-cut in fct_visits bevat de Carrousel" (2026-09-07) verderop. Toen wisten we

@@ -3,6 +3,52 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-09 (4) — Shop Campaigns-tool doorgelicht: 77 dagen performance + drie tooldefecten
+
+Joep vroeg een artifact met de performance-analyse van de SHOP-campagnes uit de dm-dashboard-tool.
+Alleen gelezen — geen repo-code geraakt. Lessen in LEARNINGS, zelfde datum. Vervolg op
+`2026-09-08 (8)` (zoektermen).
+
+- [x] **Data live uit de tool gehaald**: `/api/shop-campaigns/performance`, `/inventory`,
+      `/top-performers` en `/devices` op `:8003`, 24-06 t/m 08-09-2026 (77 dagen). 186 campagnes
+      `SHOP/*`, waarvan 96 ENABLED en 90 REMOVED; alle 28 subaccounts antwoordden, geen fout.
+      Plus twee deelvensters (11-31 aug tegen 1-8 sep) voor de opschaalvergelijking.
+- [x] **Artifact opgeleverd** — "Shop Campagnes Meetrapport", met de 96 campagnes als unit-chart
+      naar status, drie kleine trendpanelen (vertoningen/kosten/omzet per dag, eigen schaal per
+      paneel), een dumbbell voor de MB_PH/EXACT-CTR en tabellen per campagne, winkel en apparaat.
+      Palet volgt UI_BLUEPRINT (merkpaars + de seo-stats-metriekhues); ordinale ramp gevalideerd
+      met de dataviz-validator, licht én donker.
+- [x] **Hoofdbevinding**: EUR 159,31 kosten / EUR 179,04 omzet / EUR 19,64 marge over 77 dagen =
+      **EUR 2,07 per dag** op circa EUR 694 dagbudget. De marge is één transactie (29-06 = 30% van
+      alle omzet; zonder die dag −EUR 26,03), en de helft van de omzet is zomerseizoen.
+- [x] **Drie tooldefecten gevonden en beschreven** (zie Open hieronder): verkeerd conversieveld,
+      geen waarschuwing bij de attributievertraging, en geen impressie-aandeel.
+
+**Open:**
+- [ ] **`metrics.conversions` → `metrics.all_conversions` in `shop_campaigns_service.py`.**
+      `metrics.conversions` is 0 in élk van deze SA360-accounts; de echte telling is 1.474 over
+      dezelfde periode. Raakt `_fetch_account_daily()`, `_base_from_row()` en `_derive()`
+      (conv_rate), en daarmee twee tegels, twee grafiekseries en de Excel-export. Let bij het
+      labelen op de betekenis: het zijn CPR-uitklikken, geen orders (86% van de klikken, per
+      campagne tot 255%).
+- [ ] **Waarschuwing voor verse dagen.** `Totaal: Revenue` loopt ~2 dagen achter; 07 en 08 sept
+      tonen EUR 0,00 omzet bij 61 klikken. De standaardperiode "laatste 30 dagen" laat daardoor
+      altijd twee valse verliesdagen zien. Minimaal een noot onder de grafiek, liever de laatste
+      twee dagen in de omzetserie apart markeren.
+- [ ] **Impressie-aandeel toevoegen**: `search_impression_share`,
+      `search_rank_lost_impression_share`, `search_budget_lost_impression_share` zitten op dezelfde
+      `campaign`-resource die de service al bevraagt. Dat is het enige veld dat "we bieden te laag"
+      van "er is geen vraag" scheidt.
+- [ ] **Besluit over de 32 campagnes met nul vertoningen.** Ze kosten niets, dus pauzeren levert
+      niets op — maar 10 zijn NL.grandado.com en 3 Toolmax.nl. Eerst controleren of die winkels in
+      die categorieën aanbod hebben; zo niet, verwijderen is eerlijker dan ze in elke rapportage
+      meeslepen.
+- [ ] **MB_PH-CTR wekelijks volgen.** 8,09% → 3,89% in een maand terwijl EXACT juist naar 10,18%
+      gaat. Zakt MB_PH verder door terwijl de kosten meelopen, dan moet het budget naar EXACT.
+- [ ] **Het knelpunt blijft rang, niet dekking** — 89,6% verlies op rang tegen 2,2% op budget.
+      Koppelen van de ROAS_CPR-portfolio kan alleen in de SA360-UI (geen API-route, uitgezocht
+      31-08). Ongewijzigd sinds `2026-09-08 (8)`.
+
 ### 2026-09-09 (3) — Twee onverklaarde kanaalsprongen uit de SEO-analyse van 8 sept
 
 Bij het doorlichten van dinsdag 08-09 (analyse-only, geen code) sprongen twee kanalen eruit die
