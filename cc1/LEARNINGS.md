@@ -3068,6 +3068,12 @@ toegangsaanvraag in die nooit iets oplost.
 `accessible_bidding_strategy` zijn queryable (4.523 toegankelijke strategieën over 12
 accounts; de hele `ROAS_CPR_*`-familie van 14 komt terug).
 
+**Lees het target uit, ga niet op de naam af.** Het zijn portfolio-strategieen van het type
+TARGET_ROAS, en het getal in de naam is niet het target: `ROAS_CPR_FASH_SEA_130` (id 10023504778)
+staat op **1,25 (125%)**, niet op 130%. Wie een gerapporteerd tROAS met de campagnenaam vergelijkt,
+concludeert dus het verkeerde. (Genoteerd 2026-09-09 n.a.v. een vraag; de strategieen zelf zijn
+sinds 2026-08-31 ongewijzigd.)
+
 **Legacy SA360 API (`doubleclicksearch v2`)** — we dragen de scope, dus nagekeken in het
 discovery-document. Drie resources: `reports`, `savedColumns`, `conversion`. Geen enkel
 schema met "bid" of "strategy". Die API is voor conversie-upload en rapportage.
