@@ -3,6 +3,41 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-09 (6) — Knoptekst stond ~1px te laag in de hele app
+
+Joep zag het aan Export/Remove in Recent results (Redirect-tool) en vroeg de andere
+Remove/Export-knoppen mee te controleren. Bleek `.btn`-breed. Lessen in LEARNINGS,
+regel in UI_BLUEPRINT bij de badge-metingen. Code in `95cde8c`.
+
+- [x] **Gemeten in plaats van geschat**: 8x-schermshots, label tegen een lege kopie van
+      dezelfde knop gedift zodat alleen de letterink overblijft. `btn-sm` **+0,938px**,
+      volle maat **+1,125px** te laag (cap-hoogte→basislijn). Na de fix −0,06 / 0,00.
+- [x] **Oorzaak vastgesteld**: `(ascent − descent − capHoogte) / 2` = 0,064em voor Segoe
+      UI, onafhankelijk van `line-height` — dus flex-centrering of `line-height: 1` doet
+      hier niets. Zelfde font-metriek als de vier badge-contexten uit augustus.
+- [x] **Eén regel voor de hele app**: `--btn-text-shift: 0.068em` in `:root`, op `.btn`
+      verwerkt via `calc(var(--bs-btn-padding-y) ± ...)`, som gelijk dus hoogtes
+      ongewijzigd (31,0 / 38,0px). In em, zodat `btn-sm`/`btn-lg` het erven.
+- [x] **11 padding-overrides omgezet** naar `--bs-btn-padding-y/-x` (zelfde waarden,
+      identieke afmetingen), want een `padding:`-shorthand overschrijft de correctie
+      stil: `btn-preset` (bothits, shop-campaigns, seo-stats), `cat-banner-btn`,
+      `btn-tool` (dashboard), `btn-orange-action` (redirect-tool), Preview/Run in
+      gsd-campaigns (7x), Run/Cancel in gsd-budgets en dma-bidding, en de Export-knop
+      van indexnow.
+- [x] **Icoonknoppen bewust ongemoeid**: `.btn-remove-row`, `.btn-page`, `.btn-close`
+      zetten hun eigen vulling; een `×`/chevron zit op de mathematische as en staat mét
+      symmetrische vulling al goed.
+- [x] **Gecontroleerd**: 7 omgezette varianten nagemeten (0,00 tot +0,13px), plus
+      screenshots van dashboard (33 `btn-tool`) en gsd-campaigns op 1x — layout intact.
+
+**Open:**
+- [ ] **De drie `×`-filterknoppen in canonical, 301-generator en rurl-optimizer zijn nog
+      `btn btn-outline-secondary`**, terwijl UI_BLUEPRINT voor een ×-control
+      `btn-outline-red` + `.btn-remove-row` voorschrijft. Ze staan nu goed (glyph op de
+      mathematische as, eigen vulling niet nodig), dus dit is opruimwerk en geen defect —
+      maar wie ze omzet, moet weten dat `.btn-remove-row` `padding: 0` zet en dus buiten
+      de knoptekst-correctie valt.
+
 ### 2026-09-09 (6) — Auto-Redirects V70: kale merkquery naar de merkpagina op maincat-niveau
 
 Joep meldde dat `/products/klussen/r/parkside/` naar `klussen_486260_488662/c/merk~23796649`

@@ -1186,6 +1186,50 @@ de rand-ring en de afgeronde hoeken, en bepaal de basislijn als de grootste
 dichtheidsval in de onderste helft van het inkblok — niet de onderkant van de ink,
 want dan meet je de staart van de `g` mee.
 
+**Vijfde context, en de laatste: KNOPPEN hadden het ook, en daar is het één regel voor
+de hele app** (Joep, 2026-09-09, over Export/Remove in de Redirect-tool). Zelfde oorzaak
+als bij de badge, dus het is géén eigenschap van die twee knoppen: het gold voor élk
+knoplabel in dm-dashboard — Refresh, View, Run, Preview, Open Tool.
+
+Analytisch is de afwijking `(ascent − descent − capHoogte) / 2`. Voor Segoe UI (A 1,079 ·
+D 0,251 · C 0,700 em) is dat **0,064em**, en let op wat er níet in die formule staat:
+`line-height`. Die valt eruit, dus `line-height: 1` of flex-centrering lost hier niets op —
+het enige dat werkt is de vulling. Gemeten op de echte knoppen:
+
+| maat | voor | na |
+|---|---|---|
+| `btn-sm` (14px) | **+0,938px te laag** | −0,06px |
+| `.btn` (16px) | **+1,125px te laag** | 0,00px |
+
+De correctie staat als `--btn-text-shift: 0.068em` in `:root` en wordt op `.btn` verwerkt
+als `padding-top: calc(var(--bs-btn-padding-y) - var(--btn-text-shift))` met `+` op
+`padding-bottom`. **In em, niet in rem**: de afwijking hangt aan de fontgrootte, dus één
+waarde dekt `btn-sm`, `.btn` en `.btn-lg` — anders had elke maat zijn eigen ladder nodig,
+zoals bij de badges wél het geval was.
+
+Twee dingen om te weten wie hier iets aan raakt:
+
+* **Zet in een pagina nooit `padding:` voluit op een knop; zet `--bs-btn-padding-y/-x`.**
+  De shorthand overschrijft de correctie stil, en die knop staat dan 1px lager dan zijn
+  buren. Elf plekken deden dat (`btn-preset`, `cat-banner-btn`, `btn-tool`,
+  `btn-orange-action`, Preview/Run in GSD Campaigns, Run/Cancel in GSD Budgets en DMA
+  Bidding, en de Export-knop van IndexNow) en zijn omgezet; dezelfde waarden, dus de
+  afmetingen zijn identiek gebleven.
+* **Icoonknoppen doen NIET mee, en dat is opzettelijk.** `.btn-remove-row` (svg),
+  `.btn-page` (chevrons) en `.btn-close` zetten hun eigen vulling en vallen er daarmee
+  automatisch buiten. Daar zou de correctie ook verkeerd zijn: een `×` of chevron zit op
+  de mathematische as (~0,27em) en niet op de cap-hoogte (0,70em), dus die staat mét
+  symmetrische vulling al goed en zou ná de correctie ~1px te hoog staan.
+
+Meetrecept voor knoppen, iets simpeler dan dat van de badge: render de knop twee keer
+naast elkaar op **vaste breedte**, één met label en één met `&nbsp;`, en trek de twee
+crops van elkaar af. Wat overblijft is precies de letterink — de rand, de radius en de
+vulling vallen weg, dus je hoeft de rand-ring niet te ontwijken. Enige valkuil: de
+anti-aliasing van de afgeronde hoeken laat een paar pixels verschil achter, dus knip
+links en rechts 16px af en eis ≥2 verschilpixels per rij. En kies een label **zonder
+staartletter** ('Remove', niet 'Export'), want anders meet je de descender mee en lees je
++1,4px waar de letters netjes staan.
+
 **Gevulde actielabels gingen outlined in GSD Budgets** (zelfde dag). De vier
 budget-acties stonden vol (`#00b894` groen, `#d63031` rood, `#e17055` zalm) naast drie
 al-outlined tellers in dezelfde rij — twee silhouetten voor hetzelfde soort ding, en

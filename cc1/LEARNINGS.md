@@ -1,6 +1,56 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Twee knoppen die scheef staan zijn 300 knoppen die scheef staan (2026-09-09, .btn in dm-dashboard)
+
+Joep zag dat de tekst in Export/Remove (Redirect-tool → Recent results) verticaal niet
+in het midden stond en vroeg de andere Remove/Export-knoppen in dm-dashboard mee te
+controleren. De uitkomst: het waren niet die knoppen, en niet alleen Remove/Export — het
+zat in `.btn`. Regel staat nu in UI_BLUEPRINT bij de badge-metingen; code in `95cde8c`.
+
+**1. De formule zegt meteen dat het niet lokaal kan zijn.** De regeldoos wordt gecentreerd
+op ascent+descent, maar het zichtbare blok is cap-hoogte→basislijn; de lege
+descenderruimte duwt dat omlaag met `(ascent − descent − capHoogte) / 2`. Voor Segoe UI
+(A 1,079 · D 0,251 · C 0,700) = **0,064em**. Wat er níet in staat is `line-height` — die
+valt weg. Dus `line-height: 1`, `inline-flex` of `align-items: center` doen hier
+helemaal niets, en dat is precies waarom dit zo lang blijft rondzwerven: elke poging om
+het met centrering op te lossen faalt zonder dat je ziet waarom. Het enige dat werkt is
+asymmetrische vulling. Zelfde probleem als bij `.badge` (LEARNINGS 2026-08-19 en de vier
+badge-contexten in UI_BLUEPRINT), nu voor de vijfde keer, en dit is de laatste plek waar
+het nog zat.
+
+**2. Gemeten, niet berekend: btn-sm +0,938px, volle maat +1,125px te laag.** Na de fix
+−0,06 en 0,00. Knophoogtes ongewijzigd (31,0 / 38,0px), want padding-top gaat omlaag en
+-bottom omhoog met de som gelijk. De correctie is `--btn-text-shift: 0.068em` in `:root`,
+verwerkt op `.btn` via `calc(var(--bs-btn-padding-y) ± var(--btn-text-shift))`. **In em**,
+want de afwijking hangt aan de fontgrootte: één waarde dekt alle maten, terwijl de badges
+per context hun eigen ladder nodig hadden (0,035rem/zijde daar, hier 0,068em/zijde).
+
+**3. Via de Bootstrap-variabele, niet via een eigen padding-waarde.** `.btn-sm` zet
+alleen `--bs-btn-padding-y`, dus wie de correctie op die variabele bouwt, erft elke maat
+gratis. Prijs: **een pagina die `padding:` voluit zet, valt er stil buiten.** Dat waren
+elf plekken, waaronder één echte Export-knop (IndexNow, inline style) — die staat nu ook
+op de variabelen. Nieuwe huisregel: op een knop zet je `--bs-btn-padding-y/-x`, nooit de
+shorthand.
+
+**4. Icoonknoppen mogen de correctie NIET hebben.** `.btn-remove-row`, `.btn-page` en
+`.btn-close` zetten hun eigen vulling en vallen er automatisch buiten — gelukkig, want een
+`×` of chevron zit op de mathematische as (~0,27em) en niet op de cap-hoogte (0,70em). Die
+staat mét symmetrische vulling al goed en zou ná de correctie ~1px te hoog komen. Zelfde
+soort onderscheid als bij chart-hue-versus-labelkleur: de regel geldt voor letters, niet
+voor glyphs die ergens anders op de regel hangen.
+
+**5. Meetrecept: dif de knop tegen een lege kopie van zichzelf.** Twee keer dezelfde knop
+op vaste breedte naast elkaar, één met label en één met `&nbsp;`, `--force-device-scale-factor=8`,
+en de crops van elkaar aftrekken — dan is de rest per definitie letterink en hoef je de
+rand-ring en de radius niet te ontwijken (dat was bij de badge het lastige deel). Twee
+valkuilen die me elk een verkeerde meting kostten: de anti-aliasing van de afgeronde
+hoeken laat een paar verschilpixels achter (knip 16px van links en rechts, eis ≥2 pixels
+per rij), en meet met een label **zonder staartletter** — met 'Export' meet je de
+descender van de `p` mee en lees je +1,4px waar de letters netjes staan. Eerste poging
+mat via canvas `TextMetrics` in plaats van pixels: die geeft afgeronde integers voor
+ascent/descent, te grof voor een beslissing over 1px.
+
 ## Een kale merkquery hoorde nooit in een subcategorie: de catalogus dwong hem daarheen (2026-09-09, Auto-Redirects V70)
 
 Joep zag `/products/klussen/r/parkside/` naar `klussen_486260_488662/c/merk~23796649`
