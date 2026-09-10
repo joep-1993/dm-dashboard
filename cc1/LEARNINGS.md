@@ -1,6 +1,36 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een gefaalde job mag geen live content beschermen — toets de status, niet het bestaan van de rij (2026-09-10, de 468 failed FAQ's)
+
+De drain uit het item hieronder sloeg elke URL met een job-rij over, met als reden "die
+regenereert nog". Dat klopt voor `pending`, maar niet voor `failed`: 468 URL's hielden zo een
+stale live FAQ vast zonder DB-rij, en de oudste stond al negen dagen zo.
+
+**1. De pijplijn labelt zijn eigen permanente fouten al — gebruik dat label.** `pa.faq_jobs`
+splitst met `skip_reason`, en de 468 vielen exact in twee groepen: **412 `facet_not_available`**
+(de Search API weigert de facetcombinatie) en **56 `faq_generation_failed`** (kapotte JSON uit het
+model). Geen foutstring hoeven parsen: `skip_reason` is de conditie.
+
+**2. Toets opnieuw voordat je "permanent" gelooft — maar geloof het dan ook.** Alle 412 opnieuw
+langs `fetch_products_api()`: **412/412 nog steeds `facet_not_available`**, in lijn met de 12/12
+van 31-08. Facetten kunnen terugkomen (31-08: 213 van 7.367), dus dit is een meting, geen aanname.
+
+**3. De regel die eruit volgt** staat nu in `content_unpublish_queue.KINDS[...]["protected"]`:
+`pending`/`processing` beschermt, `failed` beschermt nog `FAILED_GRACE_DAYS` (7) zodat een
+tijdelijke storing zich kan herstellen, en `failed + facet_not_available` beschermt niet — dat is
+terminaal. Vroeg handelen is bovendien terugdraaibaar: komt de content later toch terug, dan wist
+`_clear_returned()` de tombstone en zet de gewone publish hem opnieuw live.
+
+**4. Herstelbaar en terminaal vragen tegengestelde acties.** De 56 zijn op `pending` gezet (ze
+regenereren en `replace=True` verft de live FAQ over); de 412 zijn van live gehaald. Beide heten
+"failed" in de tabel, en wie ze als één bak behandelt doet voor de helft het verkeerde.
+
+**5. Restsignaal: ~46 nieuwe `facet_not_available`-fouten per dag** (412 in negen dagen, 01-09 t/m
+10-09). Dat is instroom, geen restant van de opruiming van 31-08 — er komen dus steeds URL's in de
+FAQ-wachtrij waarvan de facetcombinatie niet bestaat. 355 van de 412 falen óók aan de
+koptekstenkant; de 57 die dat niet doen hebben een koptekst van vóór het ongeldig worden.
+
 ## Content uit de DB halen is pas half verwijderd — en de prune die dat repareert kijkt naar de verkeerde tabel (2026-09-10, kopteksten + FAQ)
 
 Joep zocht een URL op in de Kopteksten-tool, kreeg "URL not found in content database", maar de

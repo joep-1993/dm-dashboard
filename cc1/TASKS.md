@@ -44,10 +44,24 @@ op en kreeg "URL not found in content database", terwijl die pagina live een kop
 - [ ] **Openstaand: het pad voor het leegmaken van een hele tabel is ongetest.** De DB-hook
       blokkeert dat commando op de shared DB (terecht), ook tegen een tijdelijke tabel, dus die
       statement-trigger is niet bewezen.
-- [ ] **Openstaand: 468 FAQ-URL's met een `failed` job** houden hun oude live FAQ tot die fout
-      verholpen is. De queue slaat ze bewust over (job-rij = pijplijn), dus dit is onveranderd
-      gedrag, geen regressie — maar het is de laatst overgebleven klasse live content zonder
-      DB-rij.
+- [x] **De 468 FAQ-URL's met een `failed` job opgelost** (zelfde dag, na Joeps vraag). Ze vielen
+      op `skip_reason` in twee groepen die tegengestelde actie vragen:
+      **56 `faq_generation_failed`** (kapotte JSON uit het model) → op `pending` gezet, die
+      regenereren en `replace=True` verft de live FAQ over. **412 `facet_not_available`** →
+      opnieuw getoetst via `fetch_products_api()`, **412/412 nog steeds ongeldig**, dus van live
+      gehaald via de queue: 412 unpublished, 0 fouten, 412 `push_state`-rijen mee opgeruimd,
+      nagemeten op 60: allemaal schoon. Teller "failed met een live FAQ" staat nu op 0.
+- [x] **Drain-regel aangescherpt**: niet meer "heeft een job-rij" maar de job-**status**.
+      `pending`/`processing` beschermt, `failed` nog `FAILED_GRACE_DAYS` (7) voor een tijdelijke
+      storing, en `failed + facet_not_available` beschermt niet — dat is terminaal. Daarmee lost
+      deze klasse zich voortaan zelf op in plaats van eeuwig te blijven staan.
+- [ ] **Openstaand: ~46 nieuwe `facet_not_available`-fouten per dag** (412 in negen dagen). Dit is
+      instroom, geen restant van 31-08: er blijven URL's in de FAQ-wachtrij komen waarvan de
+      facetcombinatie volgens de Search API niet bestaat. De queue ruimt nu wel de live content op,
+      maar de URL's zelf staan nog in `pa.urls`. Op 31-08 was Joeps keuze om zulke URL's te
+      verwijderen (7.154, cascade via `pa.urls`); dezelfde beslissing ligt hier weer open — en
+      sinds vandaag zou zo'n delete de live content automatisch meenemen. 355 van de 412 falen ook
+      aan de koptekstenkant; 57 hebben nog een koptekst van vóór het ongeldig worden.
 - [ ] **Let op bij het opruimen van de `_bak_maincat_c_20260806`-tabellen**: die zijn nu de
       **enige** kopie van 4.304 kopteksten + 4.394 FAQ's, want live is het weg.
 
