@@ -135,6 +135,19 @@ op en kreeg "URL not found in content database", terwijl die pagina live een kop
       gekoppeld aan `url_validation`-geschiktheid, niet aan de foutsoort. Deze set is dus zes weken
       stil blijven staan. Op `pending` zetten laat ze regenereren, maar dat zijn ~24k AI-generaties,
       dus dat is een kosten- en volgordebeslissing voor Joep, geen opruimklusje.
+- [x] **Vrijgegeven op 11-09 (Joeps keuze): 10.029 koptekst-jobs + 14.162 FAQ-jobs op `pending`.**
+      Venster 31-07 09:00-10:00 (koptekst 09:05-09:31, FAQ loopt door tot 09:45). Alleen jobs
+      **zonder** contentrij, anders regenereer je iets wat er al is. Snapshot vooraf in
+      `pa.jvs_credits_reset_20260911` (pijplijn, url_id, url, oude status, oude fout, tijdstip), dus
+      terug te draaien en later te meten hoeveel er echt content kregen. Bewust géén re-probe vooraf:
+      dat zijn 24k Search API-calls om te voorspellen wat de generatie zelf toch al toetst.
+      Resteren met een creditsfout: 11 koptekst + 323 FAQ — die hebben wél content, plus de 69 van
+      10-09 en 1 van mei die buiten het venster vallen.
+- [ ] **Verwachting bijstellen: dit is geen "vannacht klaar".** De pending-selectie in
+      `main.py:724` heeft **geen `ORDER BY`**, dus deze 24k krijgen geen voorrang en geen
+      achterstand; ze zitten verspreid in een wachtrij van ~193k pending kopteksten en ~186k FAQ's.
+      Doorloop de afgelopen week: ~5.000 kopteksten en ~6.200 FAQ's per dag. Reken dus op weken,
+      niet op dagen. Wie deze set eerder wil zien, heeft een gerichte run of een `ORDER BY` nodig.
 - [ ] **Openstaand: unique titles vallen buiten de unpublish-queue.** 411 van de verwijderde URL's
       hadden een unique title. Die store krijgt een volledige CSV-upload uit de DB, dus of een
       verwijderde rij bij de volgende Publish All verdwijnt hangt af van replace-vs-upsert daar —
