@@ -3,6 +3,47 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-10 (5) — SEO shopcaddy.de: basislijn is vlak, de facet-sitemap ontbreekt
+
+Vraag van Joep: "SEO voor Shopcaddy.de droogt bijna op, kun jij zien wat er aan de hand is?"
+Antwoord: er is geen breuk, maar er is wel een structurele oorzaak én DE valt buiten al onze
+monitoring. Lessen in LEARNINGS, zelfde datum. Rapport als artifact:
+https://claude.ai/code/artifact/04120b76-2a74-4f42-b3ea-5fef02401e6c
+
+- [x] **Basislijn vastgesteld**: DE organisch is ~250 visits/week en dat is twaalf maanden vlak
+      (195-390/week). De julipiek (13-07 t/m 02-08, top **787**) is volledig teruggezakt; week
+      36 staat op 241 = de basislijn van mei. YoY **-38%** (241 tegen 388 in wk 202536). DE is
+      0,08% van NL. Controle uitgevoerd: NL en BE zakken in dezelfde weken naar index 82-84
+      (zomerdaling), DE schiet naar 327 en komt terug op 100 — dus geen gedeelde breuk.
+- [x] **Verlies gelokaliseerd op de facetpagina's**: visits/dag Q2 → juli → nu is voor `/c/`
+      9,4 → 31,2 → **4,1** (meer dan gehalveerd t.o.v. de basislijn), tegen `/r/` 21,5 → 20,3 →
+      16,4 (-24%, hetzelfde tempo als NL). Geen gezakte toppagina's: vlakke staart van 1-3 visits.
+- [x] **Oorzaak gevonden**: `sitemap-browse-index.xml` geeft op shopcaddy.de **403 AccessDenied**
+      op elke padvariant en staat niet in robots.txt; beslist.nl en beslist.be geven 200. Dat is
+      de facet-sitemap — alleen `sitemap-browse-cs-mode.xml` is op NL al 25.497 URL's waarvan
+      25.189 met `/c/`. **DE dient dus nul facet-URL's in**, terwijl die pagina's 200 /
+      `index,follow` / self-canonical zijn en 497 interne `/c/`-links krijgen. De andere twee
+      DE-sitemaps zijn vers (`lastmod` vandaag), dus de generator loopt en mist alleen deze uitvoer.
+- [x] **Technisch uitgesloten** (live, met de SEO-user-agent): geen Googlebot-disallow in
+      robots.txt, categorie-/facet-/productpagina's HTTP 200 met `index,follow`, alle canonicals
+      self-referencing, sitemaps vers.
+- [ ] **Openstaand: de browse-sitemap voor DE aanzetten.** De enige concrete, oplosbare oorzaak.
+      Zelfde generator als NL/BE; het DE-pad geeft AccessDenied, dus bucket of rechten ontbreken.
+      Raakt precies de `/c/`-pagina's die gehalveerd zijn.
+- [ ] **Openstaand: DE toevoegen aan de GSC-extract en aan `pa.urls`.** `bt.search_console` heeft
+      **nul rijen** voor shopcaddy.de (en geen `domain`-kolom), dus er zijn geen impressies of
+      posities voor DE en het effect van de sitemap-fix is nu niet te meten. `pa.urls` bevat geen
+      Duitse paden, waardoor DE ook buiten bothits, catalogusdekking en healthscore valt.
+- [ ] **Openstaand: `DMA organic` op DE staat vanaf 29-08-2026 op exact 0** (was ~16 visits/dag).
+      Losstaand van SEO, maar het zit in dezelfde cijfers en vervuilt elke kanaalvergelijking.
+      Zelfde soort signaal als de sprong van `Overig Kanaal` (aff0, channel_id 3/5) van ~20 naar
+      ~45/dag tussen 31-08 en 07-09, terwijl het sitetotaal vlak bleef — tag verdenken, niet Google.
+- [ ] **Openstaand: DE-kwaliteit, ná de bovenstaande drie.** Titels zijn nog de generieke fallback
+      met kleine letter ("Günstige pullover kaufen auf shopcaddy.de" tegen NL "Truien kopen? ✔️ Tot
+      70% korting!"), er is **geen enkele hreflang** tussen .nl/.be/.de, en steekproef-facetpagina's
+      zijn dun ("Männer Pullover" 0 productlinks, "JACK & JONES Pullover" 1). De Keywords API
+      weigert nog steeds `country=de` op `POST /footer`, dus de Duitse kelders bestaan niet.
+
 ### 2026-09-10 (4) — Kopteksten + FAQ's van 6 augustus stonden nog live; een DELETE bereikt nu de store
 
 Joep zocht `/products/parfum_aftershave/c/inhoud_parfum_ml~616575~~merk~422868~~type_parfum~1444257`

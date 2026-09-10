@@ -1,6 +1,60 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## DE organisch stond nooit op — en shopcaddy.de valt buiten élk meetinstrument dat we hebben (2026-09-10, SEO shopcaddy.de)
+
+Joep: "SEO voor Shopcaddy.de droogt bijna op". Dat bleek de verkeerde vraagstelling, en juist
+daardoor kwamen twee gaten boven die elke volgende DE-analyse blokkeren.
+
+**1. Er is geen breuk — er is een piek die uitdooft.** DE organisch (`aff_id=0 / channel_id=4`) is
+**~250 visits/week** en dat is het al twaalf maanden: 195-390 per week zonder trend. Tussen 13-07
+en 02-08 verdrievoudigde dat naar een top van **787**, om volledig terug te zakken; de week van
+31-08 staat op **241**, exact de basislijn van mei. Wat wél echt is: **-38% YoY** (241 tegen 388 in
+dezelfde week 2025). Ter kalibratie: NL 304.150/week, BE 63.954 — DE is **0,08% van NL**. Bij ~35
+visits/dag is dagruis ±30%, dus **duid een DE-daling nooit op minder dan een volle week**; de drie
+slotdagen op 20/dag zijn -41% tegen NL -7% en BE -10%, statistisch net significant maar drie dagen.
+
+**2. Uitgesplitst naar URL-vorm zit het verlies op één plek** (visits/dag; Q2-basis 91d → julipiek
+21d → 31-08 t/m 09-09):
+`/r/` 21,5 → 20,3 → **16,4** · `/c/` 9,4 → 31,2 → **4,1** · `/p/` 3,1 → 19,4 → 5,5 ·
+`/products/` 1,7 → 5,9 → 0,8. De `/r/`-URL's zijn de ruggengraat (55% van Q2) en eroderen met 24%,
+hetzelfde tempo als de NL-zomerdaling. De facetpagina's zijn **meer dan gehalveerd t.o.v. de
+basislijn** en 87% onder de piek. Geen enkele URL draagt het: grootste post is `/outclick/redirect`
+(als landingsURL geregistreerd), daarna een vlakke staart van 1-3 visits — dus geen gezakte
+toppagina's.
+
+**3. De oorzaak: DE dient nul facet-URL's in.**
+`https://www.shopcaddy.de/sitemapxml/de/current/sitemap-browse-index.xml` geeft **403
+AccessDenied** (S3), op elke padvariant; beslist.nl en beslist.be geven daar **200**, en DE noemt
+hem niet in robots.txt. De browse-sitemap ís de facet-sitemap: alleen `sitemap-browse-cs-mode.xml`
+is op NL **25.497 URL's waarvan 25.189 met `/c/`**. DE biedt alleen landing (130.229 `/p/`) +
+category (3.571) aan, alle drie met `lastmod` van vandaag — de generator loopt dus, hij mist deze
+uitvoer. En die facetpagina's zijn technisch volwaardig: HTTP 200, `index,follow`, self-canonical,
+H1, en **497 interne `/c/`-links in het noscript-blok** van één categoriepagina. Ze zijn vindbaar,
+ze worden nooit aangeboden — wat precies past op een piek zonder anker.
+
+**4. `bt.search_console` heeft nul rijen voor shopcaddy.de.** Geen impressies, geen posities, dus
+voor DE is ranking-verlies niet van CTR-verlies te scheiden en is elk GSC-gebaseerd dashboard
+blind voor dit domein. Bijkomend: die tabel heeft **geen `domain`-kolom** (het geheugen zei
+`domain='nld'` — dat bestaat niet meer), filteren gaat op `url`.
+
+**5. Samen met twee al bekende gaten is DE overal onzichtbaar.** `pa.urls` bevat geen Duitse paden
+(11,4% van de CloudFront-bothits matchte op ~7 MB), dus DE valt ook buiten bothits,
+catalogusdekking en healthscore. En de Keywords API weigert `country=de` op `POST /footer`
+(whitelist be/nl, bekend sinds 16-06-2026), dus de Duitse kelders zijn er nooit gekomen. Drie
+onafhankelijke instrumenten die DE allemaal overslaan — dat verklaart waarom "het droogt op" pas
+opvalt als iemand het handmatig navraagt.
+
+**6. Twee kanaalvallen die geen verkeersverlies zijn.** Tussen 31-08 en 07-09 sprong `Overig
+Kanaal` (aff0, `channel_id` 3 en 5 = referer weg) van ~20 naar ~45 visits/dag terwijl SEO
+halveerde en het **sitetotaal vlak bleef** (108-116/dag sinds midden augustus). En `DMA organic`
+staat op DE vanaf **29-08 op exact 0** (was ~16/dag). Beide zijn taggingsignalen; conform de
+bestaande regel eerst de tag verdenken, niet de performance.
+
+**7. Query-hygiëne voor DE: baken af op `dv.url ILIKE '%shopcaddy.de%'`, niet op `dv.domain`.**
+`domain=12` is DE, maar die kolom is 18 t/m 23-08-2026 leeg en laat die dagen stil wegvallen. Live
+pagina's ophalen kan alleen met de SEO-user-agent, anders geeft de WAF de captchapagina.
+
 ## Een gefaalde job mag geen live content beschermen — toets de status, niet het bestaan van de rij (2026-09-10, de 468 failed FAQ's)
 
 De drain uit het item hieronder sloeg elke URL met een job-rij over, met als reden "die
