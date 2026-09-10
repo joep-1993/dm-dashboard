@@ -3,6 +3,52 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-10 (4) — Kopteksten + FAQ's van 6 augustus stonden nog live; een DELETE bereikt nu de store
+
+Joep zocht `/products/parfum_aftershave/c/inhoud_parfum_ml~616575~~merk~422868~~type_parfum~1444257`
+op en kreeg "URL not found in content database", terwijl die pagina live een koptekst had met een
+404-link erin. Diagnose, opruiming en een structurele fix. Lessen in LEARNINGS, zelfde datum.
+
+- [x] **Oorzaak gevonden**: de rij stond sinds de opruiming van 06-08 in
+      `pa.kopteksten_content_bak_maincat_c_20260806`, en de live tekst was byte-identiek (887
+      tekens). 4.304 kopteksten + 4.398 FAQ's stonden nog online zonder DB-rij; steekproef 20/20
+      resp. 60/60 nog live, gemiddeld 6,1 vragen per FAQ-URL (~27.000 vragen).
+- [x] **Vastgesteld waarom niets het opruimde**: `_fetch_stale()` prunet via
+      `kopteksten_push_state`, en die rijen zijn op 06-08 (volgens recept) meegegaan — het was de
+      enige verwijzing naar het live record. De FAQ-publisher heeft helemaal geen prune en `/faq`
+      is additief. De store is niet te enumereren (401 zonder `url`), dus reconcilen kan niet.
+- [x] **4.304 kopteksten van live gehaald** — `scripts/unpublish_maincat_c_20260806.py`, 25 als
+      pilot, daarna de rest: 4.295 deleted + 9 nothing_live, **0 fouten**, 1.950s. Nagemeten op 60
+      willekeurige URL's: 0 records over.
+- [x] **4.394 FAQ's van live gehaald** — `scripts/unpublish_faq_maincat_c_20260806.py`, 4.394
+      deleted, **0 fouten**, 99s. Nagemeten op 60: 0 vragen over. Scope was 4.398 min de 4 met een
+      `faq_jobs`-rij; die horen bij de regeneratie-pijplijn.
+- [x] **Structurele fix** (`aaeef6c`): `pa.content_unpublish_queue` + 5 triggers (AFTER DELETE op
+      beide contenttabellen, BEFORE DELETE op `pa.urls` voor de cascade mét url-tekst, en twee op
+      het leegmaken van een tabel), `backend/content_unpublish_queue.py` met de drain, aangehaakt
+      in `publish_records` en `publish_faq_v2`, zichtbaar in de dagelijkse logregels + Slack via
+      `_unpublish_note()`. Plafond: >25.000 pending = weigeren en luid loggen.
+- [x] **Getest**: 3 van de 4 triggerpaden in een teruggedraaide transactie, en end-to-end op
+      `/products/huishoudelijke_apparatuur/c/merk~102735` (eigen oude tekst teruggezet, tombstone,
+      drain, weg uit de store).
+- [x] **Oude drift geïnventariseerd**: aan de koptekstenkant 0 (de bestaande prune houdt dat
+      schoon), aan de FAQ-kant 17.064 `pending` (regenereren), 468 `failed` en **2** zonder
+      job-rij. Die 2 zijn geadopteerd in de queue en gedraind.
+- [x] **De 531 wezen van 31-08 blijken al opgeruimd** (zie 2026-08-31). De LEARNINGS-alinea die
+      suggereerde dat ze nog live stonden was de diagnose van vóór die actie.
+- [ ] **Openstaand: backend herstarten** zodat de drain in de dagelijkse run meedoet. `:8003`
+      draait zonder `--reload`, dus de nieuwe code zit nog niet in het geheugen van de server.
+      Niet zelf gedaan — een herstart sloopt een lopende Tier-A-run.
+- [ ] **Openstaand: het pad voor het leegmaken van een hele tabel is ongetest.** De DB-hook
+      blokkeert dat commando op de shared DB (terecht), ook tegen een tijdelijke tabel, dus die
+      statement-trigger is niet bewezen.
+- [ ] **Openstaand: 468 FAQ-URL's met een `failed` job** houden hun oude live FAQ tot die fout
+      verholpen is. De queue slaat ze bewust over (job-rij = pijplijn), dus dit is onveranderd
+      gedrag, geen regressie — maar het is de laatst overgebleven klasse live content zonder
+      DB-rij.
+- [ ] **Let op bij het opruimen van de `_bak_maincat_c_20260806`-tabellen**: die zijn nu de
+      **enige** kopie van 4.304 kopteksten + 4.394 FAQ's, want live is het weg.
+
 ### 2026-09-10 (3) — DM Review: jul→aug uitgesplitst, en de fix van gisteren stond niet op prod
 
 Joep vroeg de toelichting bij de genormaliseerde -5% en daarna de MoM-delta's per url-type,
@@ -6014,9 +6060,11 @@ Bestanden in `Downloads\claude\N8N`, als **nieuwe** `*_with_check.json` naast de
       **Terugdraaien:** `INSERT INTO pa.<tabel> SELECT * FROM pa.<tabel>_bak_maincat_c_20260806`
       per tabel. De scope staat in `pa.del_targets_maincat_c_20260806` (url_id + url), dus de set
       is exact reproduceerbaar. Backups nog niet opgeruimd — Joep laat weten wanneer dat mag.
-- [ ] **Openstaand: de live site loopt achter.** Bewuste keuze van Joep — niet direct
-      unpublishen, de eerstvolgende volledige publish ruimt het op (replace-all). Tot dan staan
-      ~4.300 kopteksten en ~4.600 FAQ's nog online op beslist.nl terwijl ze uit de DB weg zijn.
+- [x] **De live site liep achter — opgelost op 2026-09-10.** Bewuste keuze van Joep was: niet
+      direct unpublishen, de eerstvolgende volledige publish ruimt het op (replace-all). Die
+      publish is nooit gedraaid, dus vijf weken later stonden 4.304 kopteksten en 4.394 FAQ's nog
+      online zonder DB-rij, inclusief inmiddels dode productlinks. Alsnog per URL van live
+      gehaald, en `pa.content_unpublish_queue` voorkomt de herhaling — zie 2026-09-10 (4).
 - [ ] **Openstaand: niets belet regeneratie.** `pa.urls` is ongemoeid gelaten, dus een backfill
       die job-rijen aanmaakt voor URLs zonder job zet deze 4.699 gewoon terug in de wachtrij.
       Zie BACKLOG.

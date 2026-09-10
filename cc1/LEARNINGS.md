@@ -1,6 +1,71 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Content uit de DB halen is pas half verwijderd — en de prune die dat repareert kijkt naar de verkeerde tabel (2026-09-10, kopteksten + FAQ)
+
+Joep zocht een URL op in de Kopteksten-tool, kreeg "URL not found in content database", maar de
+pagina had live een koptekst met een 404-link erin. Beide waar, en de combinatie is het signaal.
+
+**1. Bij "not found" naast live content: zoek in de `_bak_`-tabellen, niet in de code.** De rij
+stond in `pa.kopteksten_content_bak_maincat_c_20260806` en de live `seoTexts.top` was
+byte-identiek (887 tekens, zelfde dode Chanel-link). Dat sluit "de tekst komt ergens anders
+vandaan" in één vergelijking uit, en wijst de opruiming aan die hem weghaalde.
+
+**2. De kern: het opruimrecept en het reparatiemechanisme spraken elkaar tegen.** Het recept in
+deze file zegt bij een bulk-delete de zes satelliettabellen mee te legen, inclusief
+`kopteksten_push_state` — anders blijven er wees-rijen achter. Maar de prune in
+`content_records_publisher._fetch_stale()` loopt júist over `push_state`:
+
+```sql
+FROM pa.kopteksten_push_state s ... WHERE NOT EXISTS (<publishable> AND u.url_id = s.url_id)
+```
+
+Netjes de satellieten opruimen wist dus de enige verwijzing naar het live record, en maakte de
+prune blind voor precies de set die je net verwijderde. Resultaat: 4.304 kopteksten en 4.398
+FAQ's stonden vijf weken online zonder DB-rij (steekproef 20/20 resp. 60/60 nog live). Aan de
+FAQ-kant is het erger — `faq_v2_publisher` heeft géén prune, `/faq` is additief, en `replace=True`
+raakt alleen URL's die in een payload zitten, dus daar zou het nooit zijn opgeruimd.
+
+**3. Reconcilen tegen de store kan niet.** `GET /automated-content/records` geeft **401 zonder
+`url`-parameter** (met een url: 200 + het record). Er is dus geen manier om te vragen wat er ligt
+en dat te diffen tegen Postgres. Wie het gat wil dichten moet de DELETE zelf registreren — vandaar
+`pa.content_unpublish_queue` en de triggers (migratie 2026-09-10).
+
+**4. Bij een FK-cascade is de `pa.urls`-rij al weg als de contenttrigger vuurt.** Beide
+contenttabellen hangen met `ON DELETE CASCADE` aan `pa.urls`, dus een `AFTER DELETE`-trigger op de
+contenttabel kan de url-**tekst** niet meer opzoeken: die lookup geeft NULL. Daarom een tweede
+trigger `BEFORE DELETE ON pa.urls` die `OLD.url` vastlegt, plus
+`url = COALESCE(EXCLUDED.url, ...)` in de ON CONFLICT zodat de cascade die tekst niet overschrijft.
+Getest in een teruggedraaide transactie; dit is precies het pad waarlangs de 531 wezen van 31-08
+ontsnapten. Voor de historie: `pa.del_targets_invalidfacet_20260831` bevat **alleen `url_id`** (het
+recept schrijft `url` erbij voor, dat is toen niet gebeurd), dus de url-tekst kwam uit
+`pa.urls_bak_invalidfacet_20260831` — zonder die tabel was die set niet meer adresseerbaar.
+
+**5. "Heeft een job-rij" is de grens tussen tijdelijk en permanent weg.** De link-validator gooit
+een contentrij weg en zet de job op `pending` juist om te laten hergenereren; een permanente
+opruiming neemt de job-rij mee. De drain slaat URL's met een job-rij dus over — anders strip je een
+pagina om hem uren later terug te zetten.
+
+**6. Wezen worden ook niet meer op dode links gecontroleerd.** Zowel de koptekst- als de
+FAQ-validatie selecteert `FROM pa.<content>`, dus een tekst zonder DB-rij wordt nooit meer getoetst,
+gereset of geregenereerd. Gemeten: **4% van de 9.731 productlinks** in de wees-kopteksten is 404
+(~390 dode links) tegen **0/120** in de nog gemonitorde set; bij de FAQ-antwoorden 1,7% van 15.436.
+Een wees is dus niet alleen "achterstallig", hij verrot ook.
+
+**7. Verifieer een unpublish tegen de store, niet tegen de pagina.** CloudFront houdt de HTML ~7
+dagen, dus de pagina blijft de koptekst renderen nadat het record weg is. Vandaar `--verify` op de
+records-endpoint in beide scripts.
+
+**8. Eigen meetval: een "afgekapte" URL was mijn eigen `print(u[:95])`.** Twee 404's leken op
+afgekapte hrefs in de gegenereerde content — bijna een conclusie over de generator. De opgeslagen
+href was compleet; mijn logregel niet.
+
+**9. Procesles: lees TASKS naast LEARNINGS voordat je een "openstaande" bevinding gaat uitvoeren.**
+De alinea hier over "531 verweesde kopteksten staan nog live, aparte beslissing" was de diagnose van
+vóór de actie; `TASKS.md` legde vast dat ze diezelfde dag zijn verwijderd (5 pilot + 526, 0 fouten).
+Ik bood ze aan als openstaand werk. Een LEARNINGS-alinea beschrijft het moment van ontdekken, niet
+de eindstand.
+
 ## Een fix op `main` is geen fix voor Joep — meet welke versie prod serveert (2026-09-10, Redirect-tool op :3003)
 
 Joep meldde exact dezelfde bug als gisteren, op exact dezelfde URL

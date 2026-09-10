@@ -389,10 +389,12 @@ URL opvraagt, want één browsercheck zet een 200 in CloudFront voor >1u en een 
   reproduceerbaar via `pa.del_targets_maincat_c_20260806`. Doen we niets, dan is dit een
   eenmalige opschoning die stilletjes terugdraait — en dat merk je pas als de content er weer
   staat.
-- [ ] **Publish draaien om de live site in lijn te brengen.** Bewust uitgesteld; tot die tijd
-  staan ~4.300 kopteksten en ~4.600 FAQ's nog op beslist.nl. Let op dat de eerstvolgende
-  volledige publish dit hoe dan ook doorvoert (replace-all), ook als iemand anders hem draait
-  voor iets heel anders.
+- [x] **De live site in lijn gebracht — 2026-09-10, per URL in plaats van via een publish.** De
+  aanname hieronder ("de eerstvolgende volledige publish voert dit hoe dan ook door") hield vijf
+  weken niet: die publish is nooit gedraaid en de FAQ-kant zou er nooit door zijn geraakt, want
+  `/faq` is additief en heeft geen replace-all. 4.304 kopteksten + 4.394 FAQ's zijn alsnog per URL
+  van live gehaald en `pa.content_unpublish_queue` maakt dit voortaan onderdeel van de dagelijkse
+  publish. Zie TASKS 2026-09-10 (4).
 
 ### SEO titles — converge the legacy tblPageTitles corpus, or accept the split (logged 2026-07-31)
 - [ ] **Decide whether the legacy blueprints should follow the current builder at all.**
