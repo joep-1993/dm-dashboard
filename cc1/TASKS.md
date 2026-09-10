@@ -96,13 +96,21 @@ op en kreeg "URL not found in content database", terwijl die pagina live een kop
       `pending`/`processing` beschermt, `failed` nog `FAILED_GRACE_DAYS` (7) voor een tijdelijke
       storing, en `failed + facet_not_available` beschermt niet — dat is terminaal. Daarmee lost
       deze klasse zich voortaan zelf op in plaats van eeuwig te blijven staan.
-- [ ] **Openstaand: ~46 nieuwe `facet_not_available`-fouten per dag** (412 in negen dagen). Dit is
-      instroom, geen restant van 31-08: er blijven URL's in de FAQ-wachtrij komen waarvan de
-      facetcombinatie volgens de Search API niet bestaat. De queue ruimt nu wel de live content op,
-      maar de URL's zelf staan nog in `pa.urls`. Op 31-08 was Joeps keuze om zulke URL's te
-      verwijderen (7.154, cascade via `pa.urls`); dezelfde beslissing ligt hier weer open — en
-      sinds vandaag zou zo'n delete de live content automatisch meenemen. 355 van de 412 falen ook
-      aan de koptekstenkant; 57 hebben nog een koptekst van vóór het ongeldig worden.
+- [x] **`facet_not_available` uitgezocht: geen SEO-probleem, wel wachtrijruis.** ~46 nieuwe per
+      dag (412 in negen dagen), en 410 van de 412 zijn `VALUE_NOT_FOUND` — de facetwaarde bestaat
+      niet meer in de taxonomie, dus de Search API weigert hem (`errorCode 300`) en generatie kan
+      nooit lukken. **Maar het platform redirect zulke URL's zelf al met een 301** naar dezelfde
+      bestemming die je zou kiezen (dode facet eruit, geldige facetten blijven, anders de kale
+      categorie) — applicatielogica, geen regel in de redirect-DB, want maar 13 van de 412 staan
+      daar. Zie LEARNINGS voor het bewijs en voor de meetval die me eerst het tegendeel liet
+      concluderen. Verwijderen uit `pa.urls` is daarmee kosmetisch: het scheelt mislukte jobs en
+      wachtrijruis, niet een gat in de zoekresultaten. Joeps keuze: niet verwijderen.
+- [ ] **Openstaand (klein): 57 kopteksten staan live op URL's die 301'en.** Dat is content voor een
+      URL die de bezoeker nooit ziet. Ze hebben een contentrij, dus de unpublish-queue laat ze met
+      recht staan; dit vraagt een eigen opruiming als het je iets waard is.
+- [ ] **Openstaand: `Facet Value Dependency`-wijzigingen vallen buiten Facet Watch**, dus het
+      overlijden van een facetwaarde valt ons pas op als de generatie faalt. Dat is de plek waar
+      dit patroon vroeg gesignaleerd zou kunnen worden.
 - [ ] **Let op bij het opruimen van de `_bak_maincat_c_20260806`-tabellen**: die zijn nu de
       **enige** kopie van 4.304 kopteksten + 4.394 FAQ's, want live is het weg.
 

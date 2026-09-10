@@ -55,6 +55,41 @@ bestaande regel eerst de tag verdenken, niet de performance.
 `domain=12` is DE, maar die kolom is 18 t/m 23-08-2026 leeg en laat die dagen stil wegvallen. Live
 pagina's ophalen kan alleen met de SEO-user-agent, anders geeft de WAF de captchapagina.
 
+## Een dode facetwaarde redirect zichzelf — en `urlopen` verzweeg dat voor me (2026-09-10)
+
+Een URL met een facetwaarde die niet meer in de taxonomie bestaat geeft **301**, automatisch, door
+het platform zelf. Getest op drie van de 412:
+
+```
+/products/meubilair/meubilair_389369/c/merk~7199316
+   -> 301 /products/meubilair/meubilair_389369/
+/products/main_sanitair/main_sanitair_559438/c/merk~389167~~t_toilet~6110111
+   -> 301 /products/main_sanitair/main_sanitair_559438/c/t_toilet~6110111
+```
+
+**De regel die het platform toepast** is exact de regel die je zelf zou kiezen: de dode facet
+eruit, de geldige facetten blijven staan, en blijft er niets over dan de kale (sub)categorie. Ik
+had die bestemmingen los berekend voor een redirect-voorstel en ze kwamen 1-op-1 uit.
+
+**Het is applicatielogica, geen regel in de redirect-DB.** `check_url_is_fromUrl()` vond maar
+**13 van de 412** bronnen terug in `redirect.api.beslist.nl`. Wie dus in de Redirect-tool kijkt of
+in `pa.urls`, ziet niets en concludeert ten onrechte dat er een gat is.
+
+**De meetval die me een verkeerde conclusie kostte.** `urllib.request.urlopen()` en
+`requests.get()` **volgen redirects standaard**, dus mijn statuscheck rapporteerde 200 — de pagina
+*ná* de 301. Daar bovenop kwam dat die pagina de facetwaarde 0 keer bevat en dezelfde producten als
+de kale categorie toont, wat allemaal even goed bij een redirect past. Ik legde Joep voor dat het
+duplicate content was; het was een correct werkende 301. **Meet een statuscode altijd zonder te
+volgen** — `curl -o /dev/null -w '%{http_code} %{redirect_url}'` (geen `-L`), of
+`allow_redirects=False`.
+
+**Wat er wél waar bleef:** de facetwaarde is dood (410 van 412 `VALUE_NOT_FOUND` via
+`url_validator_service`), de Search API weigert hem met `errorCode 300`, en onze generatoren kunnen
+er dus nooit content voor maken. Content publiceren voor een URL die 301't is per definitie
+zinloos, dus de FAQ's van die set weghalen was goed — en de 57 kopteksten die er nog live staan
+zijn content voor een redirectende URL. Verkeer op zo'n URL blijft in `dim_visit` op de **bron**
+staan (924 visits/90d over deze set), dus dat is geen bewijs dat de pagina zelf leeft.
+
 ## Een gefaalde job mag geen live content beschermen — toets de status, niet het bestaan van de rij (2026-09-10, de 468 failed FAQ's)
 
 De drain uit het item hieronder sloeg elke URL met een job-rij over, met als reden "die
