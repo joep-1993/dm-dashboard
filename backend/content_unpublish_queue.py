@@ -16,13 +16,30 @@ validator, the tool's delete button, an ad-hoc bulk transaction, a cascade from
 pa.urls, or a TRUNCATE. All of them land here.
 
 WHAT IT SKIPS, AND WHY THAT IS NOT A GAP
-A URL that still has a pa.kopteksten_jobs / pa.faq_jobs row is left alone. That is the
+A URL is left alone while the pipeline is going to bring its content back. That is the
 regeneration case: the link validator deletes a content row and resets the job to
-'pending' precisely so the content comes back, and unpublishing in between would
-strip the page and republish it hours later for nothing. A delete that is meant to be
-permanent takes the job row with it (the cleanup recipe in cc1/LEARNINGS.md says to),
-so "has a job row" is exactly the line between the two intents. Those URLs are
-reported as `skipped_regenerating` rather than silently dropped.
+'pending' precisely so the content returns, and unpublishing in between would strip the
+page and republish it hours later for nothing.
+
+The test is the JOB STATUS, not the mere existence of a job row (which is what this
+module shipped with on 2026-09-10, and it was too blind — see below):
+
+  * pending / processing        → skip, content is on its way
+  * failed, recent             → skip, the daily cycle may still fix it (FAILED_GRACE_DAYS)
+  * failed, older than that    → action; a live record kept alive by a job that has been
+                                 failing for a week is not "about to regenerate"
+  * failed + facet_not_available (FAQ) → action immediately. That is the pipeline's own
+                                 label for "the Search API rejects this facet
+                                 combination", so generation cannot succeed. Measured
+                                 2026-09-10: all 412 such URLs re-probed as still
+                                 invalid, matching the 12/12 retry on 2026-08-31.
+  * no job row at all          → action; a permanent delete takes the job row with it
+                                 (the cleanup recipe in cc1/LEARNINGS.md says to)
+
+Skipped URLs are reported as `skipped_regenerating` rather than silently dropped. A URL
+whose content does come back later has its tombstone cleared by _clear_returned() and is
+republished by the ordinary publish path, so acting early is recoverable — the page is
+without that block until the next publish, not permanently.
 
 THE CEILING
 A pending set larger than CEILING is not daily drift, it is an accident — someone
@@ -41,11 +58,37 @@ log = logging.getLogger(__name__)
 
 QUEUE_TABLE = "pa.content_unpublish_queue"
 
-# Per kind: the content table that means "it came back", and the job table that means
-# "the pipeline is going to bring it back".
+# How long a 'failed' job keeps protecting a live record. Long enough for the daily
+# cycle to have had several goes at it, short enough that a permanently broken URL does
+# not keep stale content live forever.
+FAILED_GRACE_DAYS = 7
+
+# Per kind: the content table that means "it came back", the job table, and the
+# predicate on that job row that means "the pipeline is going to bring it back".
+# Only pa.faq_jobs has skip_reason — kopteksten_jobs has no such column, so its
+# predicate must not reference it.
+_PROTECTED_COMMON = """
+    j.status IN ('pending', 'processing')
+    OR (j.status = 'failed' AND j.updated_at > now() - make_interval(days => %(grace)s))
+"""
 KINDS = {
-    "koptekst": {"content": "pa.kopteksten_content", "jobs": "pa.kopteksten_jobs"},
-    "faq":      {"content": "pa.faq_content_v2",     "jobs": "pa.faq_jobs"},
+    "koptekst": {
+        "content": "pa.kopteksten_content",
+        "jobs": "pa.kopteksten_jobs",
+        "protected": _PROTECTED_COMMON,
+    },
+    "faq": {
+        "content": "pa.faq_content_v2",
+        "jobs": "pa.faq_jobs",
+        # facet_not_available is terminal: the Search API rejects the facet combination,
+        # so no number of retries produces content. It must not buy protection.
+        "protected": """
+            j.status IN ('pending', 'processing')
+            OR (j.status = 'failed'
+                AND j.skip_reason IS DISTINCT FROM 'facet_not_available'
+                AND j.updated_at > now() - make_interval(days => %(grace)s))
+        """,
+    },
 }
 
 MAX_PER_RUN = 5000     # one bulk cleanup's worth; the rest waits for the next run
@@ -76,35 +119,39 @@ def _clear_returned(kind):
         return_db_connection(conn)
 
 
-def _counts(cur, kind):
+def _protected_exists(kind):
+    """SQL for "a job row says this content is coming back". See KINDS['protected']."""
     t = KINDS[kind]
+    return f"""EXISTS (SELECT 1 FROM {t['jobs']} j
+                        WHERE j.url_id = q.url_id AND ({t['protected']}))"""
+
+
+def _counts(cur, kind, grace=FAILED_GRACE_DAYS):
     cur.execute(f"""
-        SELECT count(*) FILTER (WHERE actionable)                        AS pending,
-               count(*) FILTER (WHERE NOT actionable AND has_job)        AS skipped_regenerating,
-               count(*) FILTER (WHERE NOT actionable AND NOT has_job)    AS unusable
+        SELECT count(*) FILTER (WHERE actionable)                     AS pending,
+               count(*) FILTER (WHERE NOT actionable AND protected)   AS skipped_regenerating,
+               count(*) FILTER (WHERE NOT actionable AND NOT protected) AS unusable
           FROM (
-            SELECT q.url IS NOT NULL AND NOT EXISTS (
-                       SELECT 1 FROM {t['jobs']} j WHERE j.url_id = q.url_id) AS actionable,
-                   EXISTS (SELECT 1 FROM {t['jobs']} j WHERE j.url_id = q.url_id) AS has_job
+            SELECT q.url IS NOT NULL AND NOT {_protected_exists(kind)} AS actionable,
+                   {_protected_exists(kind)}                           AS protected
               FROM {QUEUE_TABLE} q
-             WHERE q.kind = %s AND q.actioned_at IS NULL
+             WHERE q.kind = %(kind)s AND q.actioned_at IS NULL
           ) s
-    """, (kind,))
+    """, {"kind": kind, "grace": grace})
     return cur.fetchone()
 
 
-def _fetch_actionable(cur, kind, limit):
-    t = KINDS[kind]
+def _fetch_actionable(cur, kind, limit, grace=FAILED_GRACE_DAYS):
     cur.execute(f"""
         SELECT q.url_id, q.url
           FROM {QUEUE_TABLE} q
-         WHERE q.kind = %s
+         WHERE q.kind = %(kind)s
            AND q.actioned_at IS NULL
            AND q.url IS NOT NULL
-           AND NOT EXISTS (SELECT 1 FROM {t['jobs']} j WHERE j.url_id = q.url_id)
+           AND NOT {_protected_exists(kind)}
          ORDER BY q.deleted_at
-         LIMIT %s
-    """, (kind, limit))
+         LIMIT %(limit)s
+    """, {"kind": kind, "grace": grace, "limit": limit})
     return [(r['url_id'], r['url']) for r in cur.fetchall()]
 
 
