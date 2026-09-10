@@ -422,6 +422,19 @@ def publish_records(env: str = "production", mode: str = "new", limit: int = Non
         if retire_failed:
             result["success"] = False
 
+        # The prune above can only see URLs whose push_state row survived, which is
+        # why a bulk delete that removed content AND state left records live forever
+        # (2026-08-06: 4,306 of them). The queue is written by triggers on the content
+        # tables, so it sees the delete itself regardless of who did it.
+        _set_progress(task_id, phase="unpublishing")
+        try:
+            from backend.content_unpublish_queue import drain
+            result["unpublish_queue"] = drain("koptekst", env=env)
+        except Exception as e:
+            # A publish must not fail because the follow-up removal did.
+            log.exception("Unpublish queue drain failed")
+            result["unpublish_queue"] = {"error": str(e)}
+
     _set_progress(task_id, phase="cancelled" if result["cancelled"] else "done")
     return result
 

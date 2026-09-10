@@ -506,6 +506,26 @@ def _approx_count(pub_result, key):
     return v
 
 
+def _unpublish_note(pub_result):
+    """Render the unpublish-queue drain, and only when there is something to say.
+
+    Silence is what let 4,306 deleted kopteksten stay live for five weeks, so a
+    refusal or a failure has to reach the summary even though it is a side step of
+    the publish.
+    """
+    q = pub_result.get("unpublish_queue") or {}
+    if q.get("error"):
+        return f", unpublish-queue FOUT: {q['error'][:120]}"
+    if q.get("refused"):
+        return f", unpublish-queue GEWEIGERD: {q['refused'][:160]}"
+    bits = []
+    if q.get("unpublished"):
+        bits.append(f"{q['unpublished']} van live af")
+    if q.get("failed"):
+        bits.append(f"{q['failed']} mislukt")
+    return f", {', '.join(bits)}" if bits else ""
+
+
 def _fold_interrupted(result, pub_result, mapping, log, label):
     """Add what restart-abandoned attempts had already reported to *pub_result*.
 
@@ -571,7 +591,8 @@ def step_publish_kopteksten_records():
         skipped = pub_result.get("urls_too_long", 0)
         extra = f", skipped {skipped} too-long URLs" if skipped else ""
         log.info(f"  Kopteksten: pushed {pub_result.get('urls_pushed', 0)} URLs"
-                 f" (pruned {pub_result.get('urls_retired', 0)}{extra})")
+                 f" (pruned {pub_result.get('urls_retired', 0)}{extra})"
+                 f"{_unpublish_note(pub_result)}")
         return pub_result
     else:
         raise RuntimeError(f"Kopteksten publish did not succeed: {pub_result}")
@@ -625,7 +646,8 @@ def step_publish_faq_v2():
                       log, "FAQ")
     if pub_result.get("success"):
         log.info(f"  FAQ: pushed {pub_result.get('records_pushed', 0)} records"
-                 f" across {pub_result.get('urls_processed', 0)} URLs")
+                 f" across {pub_result.get('urls_processed', 0)} URLs"
+                 f"{_unpublish_note(pub_result)}")
         return pub_result
     else:
         raise RuntimeError(f"FAQ publish did not succeed: {pub_result}")
@@ -791,8 +813,10 @@ def main():
         publish_summary = (
             f"\nPublish: Kopteksten {_approx_count(kopt, 'urls_pushed')} URLs"
             f" (pruned {kopt.get('urls_retired', 0)})"
+            f"{_unpublish_note(kopt)}"
             f", FAQ {_approx_count(faq, 'records_pushed')} records"
             f" ({_approx_count(faq, 'urls_processed')} URLs)"
+            f"{_unpublish_note(faq)}"
             f"{restart_note}"
         )
 

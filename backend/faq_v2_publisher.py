@@ -434,6 +434,19 @@ def publish_faq_v2(env="production", limit=None, replace=True, mode="new", task_
     bad = [b for b in batch_results if not b["ok"]]
     if bad:
         result["failed_batches"] = bad[:10]
+
+    # The removal half of a publish. /faq is additive and this module has never had a
+    # prune, so a deleted faq_content_v2 row used to stay live forever — 4,398 of them
+    # from the 2026-08-06 cleanup, roughly 27,000 questions. The queue is filled by
+    # triggers on the content table, so it catches the delete whoever did it; see
+    # backend/content_unpublish_queue.py.
+    if not cancelled:
+        try:
+            from backend.content_unpublish_queue import drain
+            result["unpublish_queue"] = drain("faq", env=env)
+        except Exception as e:
+            # A publish must not fail because the follow-up removal did.
+            result["unpublish_queue"] = {"error": str(e)}
     return result
 
 
