@@ -3,6 +3,59 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-10 (2) — SEO-dip 9 september uitgezocht: het verlies zit volledig in Google-verkeer
+
+Joep vroeg waarom de SEO-visits van gisteren zo laag waren. Antwoord: ze zijn echt laag, de
+meting en de site zijn in orde, en het verlies zit uitsluitend in verkeer dat Google
+doorstuurde — vanaf ongeveer 10:00. Lessen in LEARNINGS, zelfde datum.
+
+- [x] **Artifact gepubliceerd** — https://claude.ai/code/artifact/68634e14-8b17-499e-ae70-f29b98d247bb
+      ("De Google-dip van 9 september"). Kwartiergrafiek met de basislijn eroverheen, de
+      kanaal/referer-split als bewijsstuk, vijf doorgestreepte verklaringen, en de open vraag
+      met de vervolgstap erin.
+- [x] **De cijfers** — 50.032 SEO-visits all-domain (NL+BE), -16,4% t.o.v. wo 02-09 (59.867),
+      -14,1% t.o.v. het septembergemiddelde 1-8 sept. Puur organisch (aff0 + referer Google):
+      48.551 -> 39.242 = **-19,2%**. NL 38.581 / BE 9.200.
+- [x] **Halve lading uitgesloten via `dm_load_date`** — 09-09 landde in één batch op 10-09 om
+      03:23 met 200.357 rijen (08-09: 205.322). Alle 24 uren aanwezig.
+- [x] **Dader aangewezen met de referer-split** — 10-17u: Google -15,0%, overige referers
+      **+7,0%**, Bing -2,2%; DMA paid +2,6% en GSAAS +4,6%. Eén referer zakt, de rest niet.
+- [x] **Vorm van het verlies is vlak** — R-url -18,9% / C-url -18,6%, PLP +2,3%, mobiel -15,8%
+      tegen desktop -13,9% overdag, grootste hoofdcategorie 13,8% van het verlies, unieke
+      landings-URL's dalen evenredig met de visits. Geen gerichte klap, geen technische breuk.
+- [x] **Seizoen verklaart de helft** — wo 03-09-2025 -> wo 10-09-2025 was -8,8%. YoY liep op
+      deze dag van -26,9% naar -35,2%: 8pp verbreding die het seizoen niet dekt.
+- [x] **Weer en een Google-update uitgesloten als verklaring** — 9 sept was nat en onweerachtig
+      (18,1 mm Schiphol tot 18u), dat drukt online shoppen niet; en er is geen aangekondigde
+      Google-update rond die datum (laatste bevestigde: spam-update 18-08-2026).
+
+Open:
+
+- [ ] **Impressieverlies of klikverlies?** Blokkerend voor elke uitspraak over oorzaak.
+      `bt.search_console` had nul rijen voor 09-09 en 07/08 sept stonden er half in. Zodra
+      09-09 er staat: impressies naast kliks per `type_url`. Vlakke impressies met minder
+      kliks = SERP/CTR-verschuiving; dalende impressies = rankingverlies.
+- [ ] **Is het één dag of een niveau?** 10-09 landt de volgende ochtend in `fct_visits`.
+      Veert hij terug, dan was het een incident; blijft hij liggen, dan is dit de nieuwe
+      basislijn en moet het septemberverhaal herzien.
+- [ ] **De brede avonddip apart uitzoeken.** 18-23u zakte ook DMA paid (-10,2%) en SEA
+      (-18,9%), in NL (-29,6%) dieper dan in BE (-21,1%). Dat is niet SEO-specifiek en staat
+      los van het Google-verlies; nog geen verklaring voor.
+
+### 2026-09-10 (1) — Hoeveel A-tier redirects staan er echt live? 2.363 in 14 dagen
+
+Joeps vraag: hoeveel A-tier redirects zijn er de afgelopen 14 dagen ingesteld, oftewel hoeveel
+R-urls zijn er geredirect. Les in LEARNINGS, zelfde datum.
+
+- [x] **2.375 unieke R-urls succesvol gepusht** (27-08 t/m 10-09), waarvan **2.363 tier A**
+      (99,5%), 7 tier B/C/D en 5 zonder tier-record (handmatig). Plus 117 overgeslagen
+      (`already redirected` / bestaande regel) en 9 mislukt.
+- [x] **Bron is `redirect_tool_runs.results`, niet `rurl_processed`** — die laatste telt wat de
+      optimizer heeft beoordeeld (3.724 tier A in dezelfde periode), niet wat er live staat.
+- [x] **Verschil van ~1.360 is backlog**: tier-A resultaten die berekend zijn maar nog niet
+      zijn doorgezet naar de redirect-API.
+- [x] **`canonicals-*`-runs eruit gefilterd** (259 rijen) — dat zijn /c/-urls, geen R-urls.
+
 ### 2026-09-09 (10) — Redirect-tool: "Replace existing redirects" deed niets
 
 Joeps melding: `/products/fietsen/r/snelbinders_voor_fiets/` → `/products/fietsen/fietsen_484519_484531/`

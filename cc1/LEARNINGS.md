@@ -1,6 +1,202 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een fix op `main` is geen fix voor Joep — meet welke versie prod serveert (2026-09-10, Redirect-tool op :3003)
+
+Joep meldde exact dezelfde bug als gisteren, op exact dezelfde URL
+(`/products/fietsen/r/snelbinders_voor_fiets/`, "current: …/c/geschikt_voor_helm~24074374",
+Submit grijs). De fix `334e4eb` stond op `main` **en** was gepusht, de werkkopie was schoon.
+Toch was de melding correct: prod `:3003` serveerde nog de versie van vóór de fix.
+
+**1. Je kunt van buiten meten welke versie prod draait — vraag het niet, meet het.**
+`win-htz-006.colo.beslist.net` resolvet inmiddels wél vanuit WSL (176.9.61.88), dus:
+
+```bash
+curl -sk https://win-htz-006.colo.beslist.net:3003/static/redirect-tool.html > /tmp/prod.html
+tr -d '\r' < /tmp/prod.html > /tmp/prod_lf.html
+git hash-object /tmp/prod_lf.html    # vergelijk met git rev-parse <commit>:<pad>
+```
+
+Uitkomst: byte-voor-byte identiek aan `334e4eb^`, met `row.existing_id` nog op regel 672.
+
+**2. De CRLF-stap is niet optioneel, en zonder hem lees je het verkeerd óm.** Prod is een
+Windows-checkout: 1691 regels, allemaal CRLF. Zonder `tr -d '\r'` verschilt élke regel, matcht
+prod op géén enkele commit, en is het bestand 1.025 bytes **groter** dan de lokale versie — wat
+"prod is nieuwer" suggereert terwijl hij ouder is. Precies de verkeerde conclusie.
+
+**3. Kies een bestand dat de verdachte commit ook echt gewijzigd heeft.** Mijn eerste
+vergelijking liep over `frontend/rurl-optimizer.html` en die matchte zowel `main` als `2989fd0`
+— dat bestand is tussen die twee niet veranderd, dus de match bewees niets. Alleen
+`redirect-tool.html` (wél gewijzigd in `334e4eb`) gaf een uitspraak.
+
+**4. Gevolg voor de deploy:** raakt de fix alleen `frontend/`, dan is prod-deploy een `git pull`
+plus Ctrl+Shift+R, **geen herstart**. Dat is hier geen detail — een herstart sloopt een lopende
+Tier-A-run. Van `334e4eb` zit alleen een docstring in Python.
+
+**De les erachter:** "gefixt" is een uitspraak over een repository, niet over wat de gebruiker
+ziet. Komt een melding na een fix woordelijk terug, dan is de eerste vraag welke host en welke
+versie — niet opnieuw de code lezen. Ik was gisteren al vastgesteld dat Joep op `:3003` werkt en
+had het als open TASKS-item staan; dat item had de melding van vandaag kunnen voorkomen.
+
+## Een lage laatste dag is niet automatisch een halve lading (2026-09-10, fct_visits september)
+
+Bij een septembercijfer zag ik 09-09 op 50.032 SEO-visits staan tegen ~57-60k de dagen ervoor,
+en heb die dag als onvolledige lading buiten de vergelijking gelaten. Verkeerd: ik rapporteerde
+1-8 sept op **-8,0%** tegen augustus, terwijl 1-9 sept **-9,4%** is.
+
+**De check is `dm_load_date`, niet de vorm van de reeks.** `datamart.dim_visit` en `fct_visits`
+krijgen een visitdag in **precies één batch** binnen, rond 03:20-03:45 de volgende ochtend; er
+is geen incrementele backfill. Een dag is dus of helemaal geladen of helemaal afwezig. 09-09
+laadde op 10-09 om 03:23 met 200.357 rijen — volledig in lijn met 196k-205k de dagen ervoor.
+Die dip was echt (en Google-zijdig; los uitgezocht).
+
+**Twee faalmodi die op elkaar lijken en niet dezelfde zijn:** de visit-grain **loopt een dag
+achter** (de dag is er domweg niet), en de standup-tabel heeft een **half gevulde verse dag**.
+`fct_visits` heeft die tweede vorm niet. Een reeks die naar het einde afzwakt lijkt sprekend op
+een halve lading, en dat is precies waarom je hem niet op het oog mag beoordelen.
+
+## Jul→aug 2026 in cijfers: url-type, device en maincat, met de val per as (2026-09-10, DM Review)
+
+Naslag bij de -8,3% jul→aug (visit-grain, `is_real_visit=1`, chan-join op `marketing_channel='SEO'`,
+**alle domeinen**). Juli 2.140.357 → augustus 1.961.791 = **-178.566**.
+
+**Per url-type.** R-url -124.009 (**69,4%**), C-url -42.413 (23,8%), PLP -10.752 (6,0%),
+Cat-url -1.083. Reproduceert de eerdere maincat-analyse exact.
+- **`type_url` is in de SEO-cut vrijwel compleet: 0,04% NULL** — géén pattern-fallback nodig.
+  Dat corrigeert de aanname bij de HS2.0-entry ("~30% NULL, fallback verplicht"): die ~30% gold
+  voor de all-channel cut inclusief `/p/`; binnen SEO valt `/p/` al onder `PLP`.
+- **R-url stond acht maanden stil en breekt dan.** Per dag: 33.604 (dec) → 34.725 (jul), een
+  bandbreedte van 3%, en dan augustus 30.724 = **-11,5%**. Binnen 2026 dus een **stap**, geen
+  geleidelijke erosie — past bij de trap van 24 augustus. Dat R-url YoY -23,6% doet, komt van het
+  hogere niveau van 2025.
+- Aandeelverschuiving over het jaar: R-url 51,7% → 48,6%, PLP 13,2% → 16,3%, C-url vlak ~33%.
+
+**Kalender vóór gedrag.** Februari heeft 28 dagen: de rauwe -12,1% (feb) en +15,4% (mrt) worden
+per dag -2,7% en +4,2%. Juli en augustus hebben beide 31 dagen, dus **de -8,3% overleeft de
+normalisatie ongewijzigd** — handig als iemand op de kalender gaat zitten.
+
+**Per device.** Er is géén device-kolom op `fct_visits`/`dim_visit`; gebruik dezelfde
+useragent-CASE als `seo_stats_service._device_case` (tablet vóór mobile), dan telt het op tot
+SEO Stats. Mobile -136.239 (-8,7%) = 76,3% van de daling bij **73,0%** van het volume; desktop
+-37.428 (-7,2%) = 21,0% bij 24,4%; tablet -4.899 (-9,1%). Dus **breed, geen mobiel-probleem** —
+1,5pp verschil tussen mobiel en desktop.
+- **De R-url-breuk is device-agnostisch** (-11,9 / -10,3 / -12,3%). Een daling die desktop en
+  mobiel gelijk raakt, wijst weg van mobiele rendering/CWV en naar de SERP-kant.
+- Desktop **PLP (+2,0%) en Cat-url (+2,1%) stegen** juist; het hele desktopverlies zit in R-url
+  en C-url.
+- **Voorbehoud:** de split is useragent-afgeleid en dus gevoelig voor UA-wijzigingen. Apr t/m jul
+  bewegen desktop en mobiel per dag in *tegengestelde* richting (apr -6,0% vs +3,4%; jun +8,0% vs
+  +0,9%; jul -3,6% vs +4,1%) — voor echte vraag ongebruikelijk, deels waarschijnlijk
+  herclassificatie. Verkoop die maanden niet per device. Augustus is juist de enige maand waarin
+  alle drie samen én dezelfde kant op bewegen, wat de brede-stap-lezing versterkt.
+
+**Per maincat, en waarom je de YoY-kolom ernaast nodig hebt.** Site-breed is augustus YoY
+**-22,2%**; dát is de meetlat. De drie zomercats dragen -129.750 (72,7%), er blijft -48.816 over.
+- Grootste dalers erbuiten: Kleding -14.475 (-13,6%), Klussen -11.807 (-5,7%), Drogisterij
+  -9.430 (-8,4%), Auto's -6.841 (-17,6%). **Alle vier zitten YoY op de benchmark** (-22,0 / -22,2
+  / -23,0 / -24,3%) — dus seizoen en volume, geen probleemposten. Kleding en Auto's zijn feitelijk
+  ook zomer; de grens "zomercat" is bij drie maincats niet schoon.
+- **De echte onderpresteerders hebben nauwelijks MoM-beweging** en zie je alleen YoY:
+  Dierenbenodigdheden **-31,8%** (MoM -3,8%), Sanitair **-29,8%** (-4,3%), Cadeaus & gadgets
+  **-29,1%** (MoM **+4,6%**), Sieraden **-28,0%** (MoM **+2,8%**), Meubels **-27,3%** (-1,7%).
+  Twee daarvan *stijgen* maand op maand en vallen in elk MoM-verhaal volledig weg.
+- Andersom, waar juli opgeblazen was: Huishoudelijk MoM -31,1% bij YoY **-3,9%** (de
+  airco/ventilatoren-tell), Computers -7,0%, Parfumerie -9,6%.
+- Enige stijger van betekenis: **Kantoor +6.369 (+15,0%)**, back-to-school.
+- **Niet in een slide:** maincat "Beslist.nl" (46.307 visits) is de ongecategoriseerde bak met
+  `deepest_category_id = 0`; en Boeken/!Overig/Films & Series draaien op honderden visits, dus
+  hun YoY (+172%, +4100%) is ruis.
+
+De join op `dim_category` verliest geen rijen — maincat-totalen tellen exact op tot 2.140.357 /
+1.961.791.
+
+## Bij een dagdaling: eerst `dm_load_date`, dan de referer-split — die twee wijzen aan of het bij ons of bij Google zit (2026-09-10, SEO-dip 9 september)
+
+Woensdag 09-09 zakten de SEO-visits 16,4% (50.032 all-domain tegen 59.867 op wo 02-09).
+De uursverdeling zag er verraderlijk uit: normaal tot 09:45, daarna steeds dieper weglopen
+tot ~-30% na 20:00. **Precies de vorm van een half geladen dag** — en precies de vorm van een
+echte daling die door de dag heen doorzet. Die twee zijn op het oog niet te scheiden.
+
+**1. `dm_load_date` beslist het, niet de uurcurve.** `datamart.dim_visit.dm_load_date` (idem op
+`fct_visits`) laat zien dat een visitdag in **één batch** binnenkomt, rond **03:20-03:45 de
+volgende ochtend** — er is geen incrementele backfill. Een dag is dus óf compleet óf helemaal
+afwezig; ~200k rijen is normaal. 09-09 landde op 10-09 om 03:23 met 200.357 rijen, naast
+205.322 voor 08-09. Daarmee was "half geladen" in één query dood:
+
+```sql
+SELECT intime::date, dm_load_date::date, MIN(dm_load_date), MAX(dm_load_date), COUNT(*)
+FROM datamart.dim_visit WHERE intime >= '2026-09-05' GROUP BY 1,2 ORDER BY 1,2
+```
+
+**2. De referer-split binnen hetzelfde kanaal wijst de dader aan.** Een kapotte tracking, een
+trage site of een storing raakt *alle* referers tegelijk. Op de uren 10-17u (zeker volledig
+geladen) stond er dit:
+
+| referer (SEO, aff0) | 10-17u | 18-23u |
+|---|---|---|
+| Google | **-15,0%** | **-27,5%** |
+| Overig (direct/rest) | **+7,0%** | -8,3% |
+| Bing | -2,2% | -1,6% |
+
+Non-Google verkeer stéég overdag. Eén referer zakt, de rest niet: dan ligt het bij Google,
+niet bij ons. Ter controle dezelfde dagdelen op de betaalde kanalen: DMA paid +2,6% overdag,
+GSAAS +4,6%. `s Avonds zakt er wél van alles (DMA paid -10,2%, SEA -18,9%), dus daar ligt een
+brede avonddip *bovenop* het Google-verlies — het Google-specifieke deel is de hele dag
+ongeveer constant 15 a 19%.
+
+**3. Vlak over elke as = geen technische breuk.** R-url -18,9% en C-url -18,6% (vergelijk
+24-08, waar R-url in z'n eentje 69% van het verlies droeg), PLP +2,3%, mobiel -15,8% tegen
+desktop -13,9% overdag, grootste hoofdcategorie maar 13,8% van het verlies. Unieke
+landings-URL's daalden evenredig met de visits (R-url -14,7% vs -15,2%), dus er vielen geen
+pagina's uit — de hele lange staart werd dunner.
+
+**Twee valkuilen die me bijna een verkeerd cijfer lieten noemen.** (a) De basislijn 1-8 sept
+bevat een weekend, en weekenden zijn mobiel-zwaar: daartegen leek desktop -4,3% terwijl
+woensdag-tegen-woensdag en Google-only -13,5% de eerlijke lezing is. Match de weekdag ook
+binnen de maand. (b) De OPB van een verse dag (hier EUR 0,0793 tegen ~0,103) is niet te lezen —
+affiliate-omzet loopt achter.
+
+**Wat GSC hier níet kon.** `bt.search_console` had nul rijen voor 09-09 en 07/08 sept stonden er
+half in (impressies gehalveerd, CTR optisch verdubbeld). Impressieverlies vs klikverlies bleef
+daardoor open. Zie de entry van 2026-09-09 over de gesamplede extract.
+
+## "Hoeveel redirects staan er live" is een andere vraag dan "hoeveel heeft de optimizer bedacht" (2026-09-10, Auto-Redirects -> Redirect-tool)
+
+Joep vroeg hoeveel A-tier redirects er de afgelopen 14 dagen zijn ingesteld. Er zijn twee
+tabellen die allebei een plausibel antwoord geven, en ze schelen bijna 1.400.
+
+- **`rurl_processed`** = wat de optimizer heeft *beoordeeld*. 3.724 tier-A verdicten in 14 dagen.
+  Dit is het getal dat de Auto-Redirects-tool toont. Een rij hier betekent niet dat de redirect
+  bestaat.
+- **`redirect_tool_runs`** = wat er echt bij `redirect.api.beslist.nl` is geland. De `results`-jsonb
+  bevat één object per rij met `status`, `input_old` en de `api_response`. **2.375 unieke R-urls
+  succesvol gepusht**, waarvan **2.363 tier A** (99,5%), plus 117 overgeslagen
+  (`already redirected` / bestaande regel) en 9 mislukt.
+
+Het verschil van ~1.360 is dus geen fout maar **backlog**: berekend, nog niet doorgezet.
+
+`backend/redirect_tool_service.py` is de enige module die de redirect-API aanroept, dus die
+tabel is compleet — ook voor runs die vanaf prod `:3003` zijn gedaan, want de Postgres is
+gedeeld (zie de entry over eigen historie per instance).
+
+```sql
+WITH pushed AS (
+  SELECT DISTINCT e->>'input_old' AS old_url
+  FROM redirect_tool_runs r, jsonb_array_elements(r.results) e
+  WHERE r.created_at >= now() - interval '14 days'
+    AND e->>'status' = 'ok' AND e->>'input_old' LIKE '%/r/%'
+)
+SELECT COALESCE(rp.reliability_tier,'(geen tier-record)'), COUNT(*)
+FROM pushed LEFT JOIN rurl_processed rp
+  ON replace(rp.original_url,'https://www.beslist.nl','') = pushed.old_url
+GROUP BY 1 ORDER BY 2 DESC;
+```
+
+Twee dingen om op te letten bij die join: `rurl_processed.original_url` is een **volledige URL**
+en `input_old` een **pad**, en een URL kan meerdere keren verwerkt zijn — pak per URL de
+laatste `processed_at` (`DISTINCT ON`), anders tel je een handvol dubbel. Filter ook op
+`/r/`: dezelfde runs bevatten `canonicals-*`-batches met /c/-urls die géén R-url zijn.
+
 ## Een UI-poort die strenger is dan de backend-poort zet een knop uit zonder iets te zeggen (2026-09-09, Redirect-tool → Replace existing)
 
 Joep vinkte "Replace existing redirects" aan om een bestaande regel te overschrijven, en
