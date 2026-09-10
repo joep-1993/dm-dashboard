@@ -120,10 +120,21 @@ op en kreeg "URL not found in content database", terwijl die pagina live een kop
       faq_v2_push_state 354 (allemaal staging — productie was al door de drain opgeruimd).
       Nagemeten: 0 restrijen in elke tabel, `pa.urls` 1.024.315. Scope in
       `pa.del_targets_deadfacet_urls_20260910`. De queue bleef leeg: hun content was al van live af.
-- [ ] **Openstaand: de 89 gespaarde URL's hebben nog een `failed`-job met
-      `skip_reason='facet_not_available'`**, terwijl ze inmiddels weer geldig meten. Ze blijven dus
-      zonder content tot de recheck-stap ze op `pending` zet. Op `pending` zetten zou ze meteen
-      laten regenereren — niet gedaan, want dat viel buiten de vraag.
+- [x] **De 89 gespaarde URL's op `pending` gezet** (11-09, op verzoek van Joep). Eerst opnieuw
+      getoetst omdat er een dag tussen zat: alle 89 staan nog in `pa.urls` en meten **89/89 `ok`**.
+      Beide pijplijnen stonden vast, dus allebei vrijgegeven: **89 FAQ-jobs** (`failed` +
+      `facet_not_available`) en **84 koptekst-jobs** (`failed`); de 5 met een geslaagde koptekst
+      zijn met rust gelaten. Ze regenereren in de eerstvolgende dagelijkse run.
+- [ ] **NIEUW en groter dan de aanleiding: ~24.200 URL's staan sinds 31-07-2026 zonder content
+      door een OpenAI-creditsfout.** Gevonden bij het opruimen hierboven: één van de 84
+      koptekst-fouten was `429 - You have no credits remaining`. Nagemeten over de hele tabel:
+      **10.040 koptekst-jobs** met die fout, waarvan **10.029 nog steeds `failed` en zonder
+      content**, en **14.485 FAQ-jobs**, waarvan **14.163 zonder content**. Vrijwel alles komt uit
+      één venster van 26 minuten op 31-07-2026 (09:05-09:31); daarnaast 69 verse op 10-09-2026.
+      Niets pakt een `failed`-job vanzelf weer op — alleen de recheck-stap doet dat, en die is
+      gekoppeld aan `url_validation`-geschiktheid, niet aan de foutsoort. Deze set is dus zes weken
+      stil blijven staan. Op `pending` zetten laat ze regenereren, maar dat zijn ~24k AI-generaties,
+      dus dat is een kosten- en volgordebeslissing voor Joep, geen opruimklusje.
 - [ ] **Openstaand: unique titles vallen buiten de unpublish-queue.** 411 van de verwijderde URL's
       hadden een unique title. Die store krijgt een volledige CSV-upload uit de DB, dus of een
       verwijderde rij bij de volgende Publish All verdwijnt hangt af van replace-vs-upsert daar —
