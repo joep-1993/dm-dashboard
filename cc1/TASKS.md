@@ -3,6 +3,37 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-10 (3) — DM Review: jul→aug uitgesplitst, en de fix van gisteren stond niet op prod
+
+Joep vroeg de toelichting bij de genormaliseerde -5% en daarna de MoM-delta's per url-type,
+per device en per maincat. Onderweg twee dingen rechtgezet: prod bleek de Redirect-tool-fix
+niet te hebben, en ik had een volledige dag ten onrechte als halve lading afgeschreven.
+Lessen in LEARNINGS, zelfde datum. Geen code gewijzigd.
+
+- [x] **Toelichting bij de -5% opgebouwd** uit de normalisatie van 07-09: 68.059 hittegolf-exces
+      in juli (3,2% van de maand) = 38% van de jul→aug-daling; -178.566 werkelijk → -110.507
+      genormaliseerd. Met de twee doorvragen erbij (like-for-like wk31→wk35 geeft ~4pp echte
+      extra verslechtering; normaliseren maakt *juli* slechter, YoY -9,4% → -12,3%).
+- [x] **MoM-reeksen gedraaid** dec-25 t/m aug-26 per url-type, per dag genormaliseerd, per device
+      en per maincat met de augustus-YoY ernaast. Getallen + valkuilen in LEARNINGS.
+- [x] **Vastgesteld dat prod `:3003` de pre-fix HTML serveerde** via een curl + CRLF-normalisatie
+      tegen de git-blobs. Zie het aangescherpte open item onder 2026-09-09 (10).
+- [x] **Septembercijfer gecorrigeerd** van -8,0% naar **-9,4%** per dag tegen augustus: 09-09 is
+      compleet geladen (200.357 rijen, één batch op 10-09 03:23) en dus een echte dip, geen
+      halve lading.
+
+Open:
+
+- [ ] **PLP splitsen naar aff0 vs Carrousel (aff 908)** voordat de PLP-groei als organische winst
+      gelezen wordt. Concrete aanleiding: desktop-PLP **stijgt** jul→aug (+1.322 / +2,0%) terwijl
+      mobiel -4,7% doet, en de Carrousel valt bijna volledig in de PLP-bak.
+- [ ] **De structurele YoY-onderpresteerders apart uitzoeken** — Dierenbenodigdheden -31,8%,
+      Sanitair -29,8%, Cadeaus & gadgets -29,1%, Sieraden -28,0%, Meubels -27,3%, allemaal 5-10
+      punten onder de site-benchmark van -22,2%. Ze hebben nauwelijks MoM-beweging (twee stijgen
+      zelfs) en vallen daardoor in elk maand-op-maand-verhaal weg.
+- [ ] **Jul→aug-tabellen als tabblad in de DM Review-Excel** of los xlsx in `Downloads\claude`,
+      als Joep ze in het deck wil. Nu alleen in de sessie geleverd.
+
 ### 2026-09-10 (2) — SEO-dip 9 september uitgezocht: het verlies zit volledig in Google-verkeer
 
 Joep vroeg waarom de SEO-visits van gisteren zo laag waren. Antwoord: ze zijn echt laag, de
@@ -77,9 +108,12 @@ Open:
 - [ ] **Joep laat het overschrijven zelf nog draaien** op de fietsen-URL: harde Ctrl+Shift+R
       (de pagina is statisch, de fix zit in de HTML), toggle aan, Submit — en daarna in Recent
       Results controleren dat de oude regel weg is en de nieuwe staat.
-- [ ] **Uitrollen op prod `win-htz-006:3003`** als Joep de Redirect-tool daar ook gebruikt; de
-      HTML komt mee met een `git pull`, een herstart is er niet voor nodig (alleen de
-      docstring zit in Python).
+- [ ] **Uitrollen op prod `win-htz-006:3003`** — **voorwaarde bevestigd op 10-09-2026**: Joep
+      gebruikt de Redirect-tool daar, en prod serveerde die dag nog byte-voor-byte de versie van
+      `334e4eb^` (`row.existing_id` op regel 672), waardoor hij dezelfde melding opnieuw kreeg.
+      De HTML komt mee met een `git pull`, een herstart is er niet voor nodig (alleen de
+      docstring zit in Python) — en dat scheelt hier echt, want een herstart sloopt een lopende
+      Tier-A-run. Daarna Ctrl+Shift+R.
 - [ ] **Overweeg een zichtbare reden bij een grijze Submit-knop** — "0 van de N rijen
       selecteerbaar" naast de knop had dit in seconden verklaard in plaats van in een
       code-duik.
