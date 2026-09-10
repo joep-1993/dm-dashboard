@@ -105,9 +105,29 @@ op en kreeg "URL not found in content database", terwijl die pagina live een kop
       daar. Zie LEARNINGS voor het bewijs en voor de meetval die me eerst het tegendeel liet
       concluderen. Verwijderen uit `pa.urls` is daarmee kosmetisch: het scheelt mislukte jobs en
       wachtrijruis, niet een gat in de zoekresultaten. Joeps keuze: niet verwijderen.
-- [ ] **Openstaand (klein): 57 kopteksten staan live op URL's die 301'en.** Dat is content voor een
-      URL die de bezoeker nooit ziet. Ze hebben een contentrij, dus de unpublish-queue laat ze met
-      recht staan; dit vraagt een eigen opruiming als het je iets waard is.
+- [x] **57 kopteksten op redirectende URL's weggehaald** (op verzoek van Joep). Alle 57 stonden
+      bevestigd live in de store, job-status `success` — content van vóór het overlijden van de
+      facetwaarde. Alleen ontpubliceren was niet genoeg: met een contentrij en zonder push-state
+      zet de incrementele publisher hem de volgende ronde gewoon terug. Dus contentrij weg (backup
+      in `pa.kopteksten_content_bak_deadfacet_20260910`, **mét url-kolom** zodat de tabel zelfstandig
+      leesbaar is), waarna de trigger 57 tombstones zette en de drain ze van live haalde: 57
+      unpublished, 0 fouten.
+- [x] **De 412 dode-facet-URL's uit `pa.urls` verwijderd** (`1c7e820`,
+      `scripts/delete_dead_facet_urls.py`), zodat ze niet elke ronde opnieuw falen. Scope opnieuw
+      gemeten: 501 kandidaten, 412 nog ongeldig, **89 gespaard omdat ze weer geldig antwoordden**.
+      Cascade + backups per tabel: faq_jobs 412, kopteksten_jobs 412, unique_titles_content 411,
+      unique_titles_jobs 412, kopteksten_link_validation 63, faq_link_validation 14,
+      faq_v2_push_state 354 (allemaal staging — productie was al door de drain opgeruimd).
+      Nagemeten: 0 restrijen in elke tabel, `pa.urls` 1.024.315. Scope in
+      `pa.del_targets_deadfacet_urls_20260910`. De queue bleef leeg: hun content was al van live af.
+- [ ] **Openstaand: de 89 gespaarde URL's hebben nog een `failed`-job met
+      `skip_reason='facet_not_available'`**, terwijl ze inmiddels weer geldig meten. Ze blijven dus
+      zonder content tot de recheck-stap ze op `pending` zet. Op `pending` zetten zou ze meteen
+      laten regenereren — niet gedaan, want dat viel buiten de vraag.
+- [ ] **Openstaand: unique titles vallen buiten de unpublish-queue.** 411 van de verwijderde URL's
+      hadden een unique title. Die store krijgt een volledige CSV-upload uit de DB, dus of een
+      verwijderde rij bij de volgende Publish All verdwijnt hangt af van replace-vs-upsert daar —
+      dat is niet getoetst.
 - [ ] **Openstaand: `Facet Value Dependency`-wijzigingen vallen buiten Facet Watch**, dus het
       overlijden van een facetwaarde valt ons pas op als de generatie faalt. Dat is de plek waar
       dit patroon vroeg gesignaleerd zou kunnen worden.

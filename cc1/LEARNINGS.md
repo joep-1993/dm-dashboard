@@ -55,6 +55,31 @@ bestaande regel eerst de tag verdenken, niet de performance.
 `domain=12` is DE, maar die kolom is 18 t/m 23-08-2026 leeg en laat die dagen stil wegvallen. Live
 pagina's ophalen kan alleen met de SEO-user-agent, anders geeft de WAF de captchapagina.
 
+## Ontpubliceren zonder de contentrij te wissen is tijdelijk, en de cascade dekt niet alles (2026-09-10, 57 kopteksten + 412 URL's)
+
+Twee valkuilen die de asserts uit het opruimrecept vingen, bij het weghalen van kopteksten op
+URL's die 301'en.
+
+**1. Alleen ontpubliceren draait zichzelf terug.** `content_records_publisher` selecteert in
+`mode="new"` elke publiceerbare URL **zonder push-state-rij of met een gewijzigde md5**. Een URL
+met een contentrij waarvan je alleen het live record verwijdert, valt dus precies in die selectie
+en staat de volgende ronde weer live. Wie iets duurzaam van live wil halen moet de contentrij
+weg doen — dan zet de trigger de tombstone en haalt de drain het record weg. Ontpubliceren is het
+gevolg, niet de actie.
+
+**2. `ON DELETE CASCADE` dekt de push_state-tabellen niet.** `pa.kopteksten_push_state` en
+`pa.faq_v2_push_state` hebben **geen FK** naar `pa.urls` (staat ook in TASKS bij 31-08: "handmatig,
+want die missen de FK"), dus een `DELETE FROM pa.urls` laat ze staan — 354 rijen die beweren dat
+een verdwenen URL live content heeft. Ik had ze in het script tussen de cascade-tabellen gezet en
+er 0 restrijen van geasserteerd; die assert ná de DELETE draaide de transactie terug en wees het
+aan. **Bouw de "geraakte tabellen"-lijst uit de FK-graaf én een expliciete lijst van tabellen
+zonder FK, en verifieer per tabel ná de delete** — de FK-graaf alleen liegt hier.
+
+**3. Twee deletes op één dag botsen op de backup-tabelnaam.** De conventie `_bak_<tag>` met een
+datum-tag geeft bij de tweede ronde `DuplicateTable`. Ook dat kwam als een rollback en niet als een
+halve delete, want de `CREATE TABLE`s zitten in dezelfde transactie als de `DELETE`. Geef de tweede
+ronde een eigen tag (`deadfacet_urls_20260910` naast `deadfacet_20260910`).
+
 ## Een dode facetwaarde redirect zichzelf — en `urlopen` verzweeg dat voor me (2026-09-10)
 
 Een URL met een facetwaarde die niet meer in de taxonomie bestaat geeft **301**, automatisch, door
