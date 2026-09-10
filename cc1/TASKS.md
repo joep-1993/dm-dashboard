@@ -36,9 +36,11 @@ op en kreeg "URL not found in content database", terwijl die pagina live een kop
       job-rij. Die 2 zijn geadopteerd in de queue en gedraind.
 - [x] **De 531 wezen van 31-08 blijken al opgeruimd** (zie 2026-08-31). De LEARNINGS-alinea die
       suggereerde dat ze nog live stonden was de diagnose van vóór die actie.
-- [ ] **Openstaand: backend herstarten** zodat de drain in de dagelijkse run meedoet. `:8003`
-      draait zonder `--reload`, dus de nieuwe code zit nog niet in het geheugen van de server.
-      Niet zelf gedaan — een herstart sloopt een lopende Tier-A-run.
+- [x] **Backend herstart** (14:51, pid 53081), zodat de drain in de dagelijkse run meedoet —
+      `:8003` draait zonder `--reload`. Vooraf gecheckt: geen Tier-A- of automation-run bezig
+      (laatste logregel stond op 09:50) en `backend.content_unpublish_queue` importeert in de
+      **venv**-interpreter, niet alleen in de systeem-python. Na `fuser -k 8003/tcp` +
+      relaunch: HTTP 200, schone startup, GSD-scheduler weer op 2026-09-11 09:50.
 - [ ] **Openstaand: het pad voor het leegmaken van een hele tabel is ongetest.** De DB-hook
       blokkeert dat commando op de shared DB (terecht), ook tegen een tijdelijke tabel, dus die
       statement-trigger is niet bewezen.
