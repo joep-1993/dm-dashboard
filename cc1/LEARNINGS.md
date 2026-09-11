@@ -1,6 +1,76 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een doorklik heeft een eigen filterlaag nodig zodra de bestaande control een ándere reikwijdte heeft (2026-09-11, Bot Hits)
+
+Joep wilde vanaf een aangeklikte crawler kunnen doorklikken naar de URL's erachter. Dat bleek
+puur een frontend-gat — `/top-urls` accepteert `bot_family` al jaren, de filterkaart bovenaan
+kent alleen Bot-SOORT — maar de interessante vraag zat in waar die keuze moet wonen.
+
+**De blueprint-regel "schrijf de control van het doel, voeg geen tweede bron van waarheid toe"
+geldt alleen als die control dezelfde reikwijdte heeft als de doorklik.** In SEO Stats klopt dat:
+de datumklik schrijft de datumpicker van de kaart eronder, en die picker stuurt precies die kaart.
+In Bot Hits is de enige bestaande control de filterkaart bóven de tabstrip, en die stuurt élk
+tabblad — een klik op één donutsegment zou dus ook het Overzicht en de bot-tabel versmallen, en
+dan is het geen doorklik meer maar een paginabreed filter. De aanvulling op de regel: is er geen
+control met de juiste reikwijdte, maak er dan één die zichtbaar is (een chip bij de lijst) in
+plaats van de bredere te kapen. Eén dimensie in deze tool hád wél zo'n control — de Status-keuze
+naast de tabel — en die wordt dus geschreven en niet gedupliceerd.
+
+**Een doorklik wint van het filter erboven voor de dimensie die hij noemt, en een grovere korrel
+van dezelfde dimensie moet dan wijken.** `bot_class` gaat eruit zodra je op een bot_family
+doorklikt: anders geeft "Googlebot" nul rijen zodra iemand de soort `search` had uitgevinkt, en
+dat is een lege lijst die niets met je klik te maken heeft.
+
+**De grootste taartpunt is soms de enige die per constructie leeg is.** PLP is 46% van de
+URL-type-ring en dus de waarschijnlijkste eerste klik, maar productpagina's staan niet in
+`pa.urls` en gaan ook niet naar `unknown_daily` (`elif ut not in PRODUCTISH` in de ingest), dus
+die lijst kán niet gevuld zijn. De structurele uitleg die daarvoor al in de lege staat stond keek
+alleen naar de vinkjes bovenaan; die moest de doorklik meelezen, anders leest de meest logische
+eerste klik als een kapotte tabel. Les: kijk bij een nieuwe ingang expliciet na welke bestaande
+"waarom is dit leeg"-teksten hun conditie uit de oude ingang halen.
+
+**Een ring die uit losse tellers wordt opgebouwd heeft de restbak nodig, anders telt hij niet op
+tot zijn eigen midden.** De statuscode-donut per crawler komt zonder nieuwe query uit `/summary`
+(`hits_2xx`..`hits_5xx` naast het totaal), maar die vier zijn een SUBSET van `hits` en geen
+partitie: `status_class()` levert ook `'0xx'` (CloudFront logt `sc-status` 000 bij een afgebroken
+verbinding). Zonder een vijfde bak "overig" wijkt de som af van het getal in het gat en klopt elk
+percentage in de hover net niet.
+
+**Een filter dat de grafiek nabootst moet ook de SCOPE van die grafiek meenemen.** De
+Facet-diepte-grafiek telt alleen category-vormige URL's, want `facet_depth` is 0 voor álles zonder
+`/c/` — zonder die inperking was 84% van de nul-balk productverkeer dat per definitie geen facetten
+heeft. Het nieuwe `facet_depth`-filter op `/top-urls` kent die inperking niet, dus de doorklik
+stuurt C-url + Cat-url mee en toont dat als eigen chip. Anders is de lijst breder dan de staaf
+waarop je klikte, en dat merk je pas als je de rijen naloopt. Tweede vorm-detail: de grafiek vouwt
+zijn staart tot één kolom "7+ facets", dus het filter moet `N+` (>= N) kennen of de klik levert
+een smallere lijst dan de staaf.
+
+**Chart.js 4: `onClick`/`onHover` geven een index die op de BRONRIJEN slaat, ook met een plugin
+die de hoeken herschrijft.** `donutMinAngle` verzet alleen start/end-hoeken en raakt de volgorde
+niet, dus `rows[els[0].index]` blijft kloppen. Bij een staafgrafiek met
+`interaction: {mode:'index', intersect:false}` vuurt de klik op de hele kolom en niet alleen op de
+staaf — prettig, maar het betekent ook dat de aanwijzer over het hele plotvlak een handje wordt.
+Voor een segment dat níet doorklikbaar is (de 0xx-restbak) hoort daarom een aparte
+`canPick`-toets: een handje boven dood klikgebied is vervelender dan geen handje.
+
+**Testrecept voor een klikbare grafiek**: dispatch een echte `MouseEvent` op de canvas, met
+coördinaten uit de arc-geometrie zelf (`(startAngle+endAngle)/2`, `(innerRadius+outerRadius)/2`,
+plus `arc.x/arc.y` en de `getBoundingClientRect()` van de canvas). Dan test je de hele hit-test
+van Chart.js mee in plaats van de handler rechtstreeks aan te roepen. En de bekende val van
+`--virtual-time-budget` sloeg weer toe: een vaste `sleep(6000)` in de probe fotografeerde een
+tabel die nog aan het laden was, want de query kost 4-10s echte tijd terwijl virtual time de
+timer meteen afvuurt. Wacht op de RIJEN, niet op een klok.
+
+**Kleurregel teruggedraaid op verzoek, met de prijs erbij.** `status_class` volgde sinds
+2026-08-28 bewust niet SERIES omdat de kleuren semantisch waren (groen goed, oker waarschuwing,
+bordeaux kritiek); Joep wilde in het uitklappaneel dezelfde kleuren als URL-type, omdat twee
+ringen naast elkaar met een eigen palet als twee soorten grafiek lezen. Nu volgt hij de reeks en
+staat 4xx in lichtgroen, wat als "in orde" leest. Dat soort terugdraaiing hoort met de oude reden
+én de terugzetregel in de code te staan, anders "repareert" de volgende lezer hem terug zonder te
+weten dat het gevraagd is. Let op de reikwijdte: die map voedt ook "Hits per dag > Splitsen op >
+Statuscode".
+
 ## DE organisch stond nooit op — en shopcaddy.de valt buiten élk meetinstrument dat we hebben (2026-09-10, SEO shopcaddy.de)
 
 Joep: "SEO voor Shopcaddy.de droogt bijna op". Dat bleek de verkeerde vraagstelling, en juist

@@ -246,6 +246,42 @@ other tool uses the grey default. New tools follow the grey default.
      If you ever DO need to open one: `bootstrap.Collapse.getOrCreateInstance(pane,
      {toggle: false}).show()` — the default config is `toggle:true` and the
      **constructor acts on it**, so the bare call toggles a never-clicked pane shut.
+- **Een doorklik die de bestaande control niet kán schrijven, krijgt een eigen zichtbare
+  chip** (Bot Hits, 2026-09-11). De regel hierboven — schrijf de control van het doel — geldt
+  alleen als die control **dezelfde reikwijdte** heeft als de doorklik. In SEO Stats klopt dat:
+  de datumklik schrijft de picker van de kaart eronder en die picker stuurt precies die kaart.
+  In Bot Hits staat de enige control (de filterkaart) bóven de tabstrip en stuurt hij élk
+  tabblad, dus een klik op één donutsegment zou ook het Overzicht en de bot-tabel versmallen —
+  dan is het geen doorklik meer maar een paginabreed filter. Maak in dat geval een tabgebonden
+  selectie die je ZIET: een rij chips boven de lijst, elk met een kruisje, in de paarse tinten
+  van een aangeklikte rij (`#f1edfa` grond, `#e6dff5` hover). Drie dingen die dat werkbaar
+  houden:
+  1. **Zichtbaar, want anders filtert de lijst strenger dan de pagina zegt.** Een tabel die
+     stiller gefilterd is dan de filterkaart belooft, is dezelfde "ziet er compleet uit en is
+     het niet"-fout die dit blueprint elders bestrijdt.
+  2. **De doorklik wint voor de dimensie die hij noemt, en een grovere korrel van diezelfde
+     dimensie wijkt.** Bot Hits laat `bot_class` vallen zodra je op een `bot_family` klikt —
+     anders krijg je nul rijen omdat iemand ooit een soort uitvinkte, en die lege lijst heeft
+     niets met je klik te maken.
+  3. **Heeft één dimensie wél een eigen control in het doel, schrijf die dan.** De Status-keuze
+     staat naast de tabel en krijgt dus geen chip; twee bronnen voor dezelfde keuze is erger
+     dan een inconsistente vorm.
+  En controleer bij een nieuwe ingang welke bestaande "waarom is dit leeg"-teksten hun conditie
+  uit de OUDE ingang lezen: de uitleg waarom productpagina's nooit in de URL-lijst staan keek
+  alleen naar de filtervinkjes, terwijl PLP 46% van de donut is en dus de waarschijnlijkste
+  eerste klik — en de enige die per constructie leeg is.
+- **Een klikbare grafiek: `canPick` naast `onPick`, en test met een echte MouseEvent**
+  (Bot Hits, 2026-09-11). Chart.js 4 geeft in `onClick`/`onHover` een index die op de BRONRIJEN
+  slaat, ook met een plugin die hoeken herschrijft (`donutMinAngle` verzet alleen start/end en
+  raakt de volgorde niet). Zet de aanwijzer op `pointer` via `onHover`, maar leid dat af van een
+  aparte `canPick(label)` en niet van "er is een handler": een ring kan een segment dragen dat
+  nergens heen kan (de 0xx-restbak), en een handje boven dood klikgebied is vervelender dan geen
+  handje. Bij een staafgrafiek met `interaction: {mode:'index', intersect:false}` vuurt de klik
+  op de hele kolom — prettig, maar dan is het hele plotvlak een pointer. Testen doe je met een
+  `MouseEvent` op de canvas met coördinaten uit de arc-geometrie
+  (`(startAngle+endAngle)/2`, `(innerRadius+outerRadius)/2`, plus `arc.x/arc.y` en de
+  `getBoundingClientRect()`); dan loopt de hit-test van Chart.js mee in plaats van dat je de
+  handler rechtstreeks aanroept.
 - **A category column of labels is centred** (`text-align: center`) — an outlined
   `.lbl` is a block with its own edges, so left-aligning it against a numeric
   column's right-aligned digits leaves a ragged gutter between them.

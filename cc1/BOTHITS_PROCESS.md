@@ -507,6 +507,40 @@ verbinding) en dat valt bewust in geen bucket — het URL-detailpaneel toont het
 
 ---
 
+## Doorklikken vanaf een grafiek naar de URL's (2026-09-11)
+
+Elke categorische grafiek is een ingang naar de URL's-tab. In het Overzicht: de URL-type-donut en
+de Facet-diepte-staven. In het uitklappaneel per bot-familie: URL-type, Statuscode, Domein en
+Facet-diepte — die vier nemen de familie mee.
+
+**Waar de keuze woont.** Niet in de filterkaart bovenaan: die stuurt élk tabblad, dus een klik op
+één segment zou ook het Overzicht en de bot-tabel versmallen. De doorklik staat als **chip** boven
+de URL-tabel en geldt alleen voor die lijst. Uitzondering is `status`: dat heeft al een eigen
+zichtbare control naast de tabel (de Status-keuze), en die wordt geschreven in plaats van
+gedupliceerd.
+
+**De regel**: een doorklik wint van de filterkaart voor de dimensie die hij noemt. `url_type`
+overschrijft de URL-type-vinkjes, `host` de Domein-vinkjes, en `bot_family` zet **Bot-soort**
+opzij — dezelfde dimensie, één korrel grover, dus de fijnere keuze wint. Zonder die laatste regel
+levert doorklikken vanaf een crawler nul rijen zodra iemand een soort had uitgevinkt. Een nieuwe
+doorklik vervangt de vorige in zijn geheel; hij stapelt niet.
+
+**`facet_depth` op `/top-urls`** is hiervoor bijgebouwd. Vorm: losse dieptes (`0`, `2`), een lijst
+(`0,1`) of `N+` voor ">= N" — dat laatste omdat de grafiek zijn staart tot één kolom "7+ facets"
+vouwt. Anders dan bij `status` valt er geen been weg: `pa.bothits_unknown_daily` DRAAGT een
+`facet_depth`-kolom, en voor de bekende kant leidt `SQL_FACET_DEPTH` de diepte uit `pa.urls.url`
+af. Er hoort dus ook geen dekkingsmelding bij.
+
+**Let op de scope-koppeling.** De Facet-diepte-grafiek telt alleen category-vormige URL's (zie
+"verspilling moet je over `/c/` meten" hierboven): `facet_depth` is 0 voor álles zonder `/c/`, en
+84% van die nul-balk zou anders productverkeer zijn dat per definitie geen facetten heeft. Het
+filter zelf kent die inperking niet, dus de frontend stuurt **C-url + Cat-url** mee bij elke
+diepte-doorklik en toont dat als tweede chip. Bouw je een eigen aanroep van `/top-urls` met
+`facet_depth`, zet dat `url_type` er dan zelf bij — anders is je lijst breder dan de balk.
+
+**Wat de tab NIET onthoudt**: de chips staan alleen in het geheugen. Een reload of een gedeelde
+link valt terug op de filterkaart.
+
 ## IP-verificatie (2026-08-11)
 
 `backend/bothits_verify.py` toetst elk bot-IP aan de **officieel gepubliceerde

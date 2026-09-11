@@ -3,6 +3,42 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-11 (1) — Bot Hits: doorklikken vanaf de grafieken naar de URL's, en statuscodes per crawler
+
+Vraag van Joep: vanaf een aangeklikte crawler door kunnen klikken naar een overzicht van URL's
+(de donutsegmenten klikbaar), plus een statuscode-donut bij de individuele crawlers. Daarna nog
+drie: ook de Facet-diepte-grafiek klikbaar, de knop weer weg, en de statuskleuren gelijk aan
+URL-type. Lessen in LEARNINGS, zelfde datum. Commits ebdf18d + c6c42cc.
+
+- [x] **Statuscode-donut per crawler** in het uitklappaneel, dat nu vier grafieken draagt
+      (col-md-3). Zonder nieuwe query: `/summary` geeft per familie al `hits_2xx`..`hits_5xx`
+      náást het totaal, dus de vijfde bak "overig" is het verschil — de 0xx-rest van afgebroken
+      verbindingen, die anders de som van de ring van zijn eigen midden laat afwijken.
+- [x] **Doorklikken naar de URL's-tab** vanaf vier plekken: de ringen URL-type, Statuscode en
+      Domein in het bot-paneel, de Facet-diepte-staven daar, en de grote URL-type-donut plus de
+      Facet-diepte-grafiek in het Overzicht (die twee zonder familie, want ze tellen alle bots op).
+      De selectie staat als chip boven de tabel en overschrijft de filterkaart alleen voor de
+      dimensie die hij noemt; `bot_class` wijkt voor een `bot_family`-doorklik.
+- [x] **`facet_depth` op `/top-urls`** (service + router). Losse dieptes, een lijst, en `N+` voor
+      de gevouwen staartkolom. Beide benen kunnen het eerlijk: `unknown_daily` draagt de kolom,
+      de bekende kant leidt hem met `SQL_FACET_DEPTH` uit `pa.urls.url` af. De doorklik stuurt
+      C-url + Cat-url mee, want dat is de scope van de grafiek. Getest op alle paden inclusief
+      combinatie met zoekterm en status; `facet_depth=twee` geeft 400.
+- [x] **Knop "URL's van <familie> →" weer verwijderd** nadat alle vier de grafieken doorklikbaar
+      werden. De kale familie haal je nu in twee klikken (dimensie-chip wegklikken).
+- [x] **`status_class` volgt SERIES**, zoals URL-type. Draait 2026-08-28 terug; 4xx staat nu in
+      lichtgroen en leest daarmee als "in orde" — de terugzetregel staat bij COLOR_MAPS.
+      Raakt ook "Hits per dag > Splitsen op > Statuscode".
+- [ ] **Open: geen legenda onder de mini-donuts.** De vier ringen in het paneel dragen alleen een
+      hover; naast elkaar zijn URL-type en Statuscode sinds de kleurwissel lastiger uit elkaar te
+      houden (beide blauw-roze-groen). Een regeltje `2xx · 3xx · 4xx` eronder zou dat oplossen,
+      maar dat is een vormkeuze voor alle vier de panelen tegelijk — niet eenzijdig doen.
+- [ ] **Open: een doorklik overleeft geen reload.** De chips zitten alleen in het geheugen, niet
+      in de URL-hash. Een gedeelde link naar "de 4xx-URL's van Googlebot" bestaat dus niet.
+- [ ] **Open: de dekkingsmelding verschijnt alleen bij een statusfilter.** Bij een
+      diepte-doorklik is dat terecht (beide benen doen mee), maar als er ooit een filter bij komt
+      dat één been uitschakelt, hoort die melding mee te groeien.
+
 ### 2026-09-10 (5) — SEO shopcaddy.de: basislijn is vlak, de facet-sitemap ontbreekt
 
 Vraag van Joep: "SEO voor Shopcaddy.de droogt bijna op, kun jij zien wat er aan de hand is?"
