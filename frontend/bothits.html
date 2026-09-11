@@ -163,6 +163,25 @@
            zelf samengesteld. Eén kleurregel per kleur; de border volgt currentColor. */
         .lbl-green { color: #198754; }
         .lbl-red   { color: #b02a37; }
+
+        /* Doorklik-chip boven de URL-tabel (Joep, 2026-09-11) — de selectie die je met
+           een klik op een donutsegment of de knop in het bot-paneel meeneemt.
+           Bewust GEEN .lbl: die is uppercase, en hier staan eigennamen in
+           ("GoogleOther", "C-url", "beslist.nl"). De paarse tinten zijn die van een
+           aangeklikte rij uit UI_BLUEPRINT (#f1edfa hover, #e6dff5 vastgezet), zodat
+           "hier is iets aangeklikt" er overal hetzelfde uitziet.
+           Het kruisje is een echte <button>: dit is de enige manier om de chip weer
+           kwijt te raken, dus hij hoort met de tab-toets bereikbaar te zijn. */
+        .drill-chip { display: inline-flex; align-items: center; gap: 0.35rem;
+                      font-size: 0.8rem; background: #f1edfa; color: #3f3560;
+                      border: 1px solid #d9cff0; border-radius: 999px;
+                      padding: 0.1rem 0.15rem 0.1rem 0.6rem; }
+        .drill-chip .dc-key { color: #7a6ca0; }
+        .drill-chip .dc-val { font-weight: 600; }
+        .drill-chip .dc-x { border: 0; background: transparent; color: #6b5b96;
+                            font-size: 1rem; line-height: 1; padding: 0 0.3rem;
+                            border-radius: 999px; cursor: pointer; }
+        .drill-chip .dc-x:hover { background: #e6dff5; color: #2d2a3a; }
         /* Gecentreerde kolom. Als .num.mid zodat hij het text-align: right van .num
            wint zonder van de volgorde in dit blok af te hangen. */
         .mid, .num.mid { text-align: center; }
@@ -584,7 +603,15 @@
                 <div class="row g-3 mb-3">
                     <div class="col-md-6">
                         <div class="card h-100">
-                            <div class="card-header"><h5 class="mb-0">URL-type</h5></div>
+                            <!-- De segmenten zijn klikbaar sinds 2026-09-11 (Joep) en gaan
+                                 naar de URL's-tab, gefilterd op dat type. Zonder crawler
+                                 erbij: deze ring telt álle bots in de selectie op. Vanaf
+                                 één crawler doorklikken doet het paneel onder "Per
+                                 bot-familie", dat dezelfde ring per familie tekent. -->
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0">URL-type</h5>
+                                <span class="muted-note">klik op een segment voor de URL's</span>
+                            </div>
                             <div class="card-body">
                                 <div class="donut-wrap">
                                     <canvas id="typeChart"></canvas>
@@ -729,6 +756,14 @@
                              waarschuwing lees je één keer, deze legt uit wat je NU ziet. -->
                         <div id="urlRangeNote" class="alert alert-warning py-2 px-3 mb-3 d-none"
                              style="font-size:0.85rem;" role="alert"></div>
+                        <!-- Doorklik-selectie (Joep, 2026-09-11). Staat BOVEN de tabel en niet
+                             in de filterkaart bovenaan: die kaart stuurt elk tabblad, deze
+                             keuze alleen deze lijst. Inhoud en zichtbaarheid komen uit
+                             renderUrlDrill(); zonder doorklik staat hier niets.
+                             Toggelen op .d-none, die wint van .d-flex — zie de noot bij
+                             #filterBusy. -->
+                        <div id="urlDrillBar"
+                             class="d-flex flex-wrap align-items-center gap-2 mb-3 d-none"></div>
                         <!-- Dekking van het statusfilter (2026-08-28). Zelfde vorm en plek als
                              de melding hierboven: hij hoort bij de rijen eronder en zegt wat je
                              NIET ziet. Inhoud en zichtbaarheid komen uit renderUrls(), die de
@@ -1601,6 +1636,15 @@
             },
             options: {
                 responsive: true, maintainAspectRatio: false, cutout: '68%',
+                // Doorklikken naar de URL's-tab (Joep, 2026-09-11), zonder bot-familie:
+                // deze ring is de optelsom van álle bots in de selectie. Zelfde
+                // mechaniek als de ringen in het bot-paneel — zie drillToUrls().
+                onHover: (e, els) => {
+                    e.native.target.style.cursor = els.length ? 'pointer' : 'default';
+                },
+                onClick: (e, els) => {
+                    if (els.length) drillToUrls({ url_type: rows[els[0].index].url_type });
+                },
                 // Ruimte links/rechts voor de labels buiten de ring. Zonder deze
                 // padding tekent Chart.js de ring tot de rand en valt elk label
                 // buiten de canvas — het wordt dan stil afgekapt.
@@ -1781,7 +1825,7 @@
         // Chart.js-instanties achter die naar een losgekoppelde canvas wezen —
         // inclusief hun resize-listeners. Het herstelde zichzelf bij de volgende klik,
         // maar tot die tijd is het een lek.
-        closeDetails('#botTable', ['detDaily', 'detType', 'detHost', 'detDepth']);
+        closeDetails('#botTable', ['detDaily', 'detType', 'detStatus', 'detHost', 'detDepth']);
         document.querySelector('#botTable tbody').innerHTML = botRows.map(b => `
             <tr class="bot-row" data-fam="${escapeHtml(b.bot_family)}">
               <!-- Geen kleurblokje meer voor de familie (Joep, 2026-08-13). De tabel is
@@ -1834,7 +1878,7 @@
 
     async function toggleBotDetail(tr) {
         const open = tr.classList.contains('is-open');
-        closeDetails('#botTable', ['detDaily', 'detType', 'detHost', 'detDepth']);
+        closeDetails('#botTable', ['detDaily', 'detType', 'detStatus', 'detHost', 'detDepth']);
         if (open) return;                       // dit was een klik om te sluiten
 
         const fam = tr.dataset.fam;
@@ -1845,23 +1889,43 @@
         // vierde kolom erbij (Joep, 2026-08-13): een tijdreeks over ~30 dagen in een
         // col-md-3 geeft ~9px per dag, en dan is de vorm van de lijn niet meer te
         // lezen. De drie uitsplitsingen eronder houden hun col-md-4.
+        // VIER grafieken op de onderste rij sinds 2026-09-11 (Joep): Statuscode is
+        // erbij gekomen, dus col-md-4 wordt col-md-3. De vier tellers stonden al als
+        // kolommen in de tabel hierboven; wat de ring toevoegt is de VERHOUDING — dat
+        // 3xx bij de ene familie een kwart van het verkeer is en bij de andere niets,
+        // lees je niet uit vier losse getallen naast een totaal van zes cijfers.
         det.innerHTML = `<td colspan="12">
             <div class="row g-3">
               <div class="col-12">
-                <div class="chart-title mb-1">Hits per dag — ${escapeHtml(fam)}</div>
+                <div class="d-flex justify-content-between align-items-center mb-1 gap-2">
+                  <div class="chart-title">Hits per dag — ${escapeHtml(fam)}</div>
+                  <button type="button" class="btn btn-sm btn-outline-purple" id="detUrlsBtn"
+                          title="Opent de URL's-tab met alleen de URL's die deze crawler heeft opgevraagd, binnen de periode en filters die nu gelden.">URL's van ${escapeHtml(fam)} →</button>
+                </div>
                 <div class="chart-box-sm chart-framed"><canvas id="detDailyChart"></canvas></div></div>
             </div>
-            <div class="row g-3 mt-1">
-              <div class="col-md-4"><div class="chart-title mb-1">URL-type</div>
+            <!-- Eén regel voor drie ringen, niet drie keer "klikbaar" boven elke kaart:
+                 de aanwijzer wordt een handje zodra je een segment raakt, dus dit hoeft
+                 alleen de eerste keer uit te leggen wát er dan gebeurt. -->
+            <div class="muted-note mt-2">Klik op een segment — URL-type, statuscode of domein —
+                 om de URL's erachter te zien.</div>
+            <div class="row g-3 mt-0">
+              <div class="col-md-3"><div class="chart-title mb-1">URL-type</div>
                 <div class="donut-wrap chart-framed"><canvas id="detTypeChart"></canvas>
                      <div class="donut-center" id="detTypeCenter"></div></div></div>
-              <div class="col-md-4"><div class="chart-title mb-1">Domein</div>
+              <div class="col-md-3"><div class="chart-title mb-1">Statuscode</div>
+                <div class="donut-wrap chart-framed"><canvas id="detStatusChart"></canvas>
+                     <div class="donut-center" id="detStatusCenter"></div></div></div>
+              <div class="col-md-3"><div class="chart-title mb-1">Domein</div>
                 <div class="donut-wrap chart-framed"><canvas id="detHostChart"></canvas>
                      <div class="donut-center" id="detHostCenter"></div></div></div>
-              <div class="col-md-4"><div class="chart-title mb-1">Facet-diepte</div>
+              <div class="col-md-3"><div class="chart-title mb-1">Facet-diepte</div>
                 <div class="chart-box-sm chart-framed"><canvas id="detDepthChart"></canvas></div></div>
             </div></td>`;
         tr.after(det);
+        // Meteen gewired en niet pas na de fetch: de knop hangt alleen aan `fam` en
+        // moet ook werken terwijl de vier grafieken nog laden.
+        det.querySelector('#detUrlsBtn').onclick = () => drillToUrls({ bot_family: fam });
 
         // Twee endpoints naast elkaar: /summary voor de drie uitsplitsingen en
         // /daily voor de tijdreeks. Beide filteren op bot_family — dat filter bestond
@@ -1885,9 +1949,39 @@
         CHARTS.detDaily = miniDaily('detDailyChart', daily.rows || [], fam);
 
         CHARTS.detType = miniDonut('detTypeChart', 'detTypeCenter',
-            (s.by_url_type || []).map(r => [r.url_type, Number(r.hits)]), 'url_type');
+            (s.by_url_type || []).map(r => [r.url_type, Number(r.hits)]), 'url_type',
+            t => drillToUrls({ bot_family: fam, url_type: t }));
         CHARTS.detHost = miniDonut('detHostChart', 'detHostCenter',
-            (s.by_host || []).map(r => [r.host, Number(r.hits)]), 'host');
+            (s.by_host || []).map(r => [r.host, Number(r.hits)]), 'host',
+            h => drillToUrls({ bot_family: fam, host: h }));
+
+        // Statuscodes van deze familie (Joep, 2026-09-11). GEEN nieuwe query en geen
+        // nieuw endpoint: /summary geeft per familie al hits_2xx t/m hits_5xx náást het
+        // totaal, dus de vijfde bak is precies het verschil — en dat verschil heeft een
+        // naam. status_class() in de ingest levert ook '0xx' (CloudFront logt sc-status
+        // 000 bij een afgebroken verbinding) en dat valt bewust in geen van de vier
+        // tellers. Zonder die restbak telt de ring niet op tot het getal in het gat, en
+        // dan klopt elk percentage in de hover net niet.
+        //
+        // Optellen over alle rijen van /summary en niet `s.bots[0]` pakken: die query
+        // groepeert op (bot_family, bot_class), dus een familie die ooit in twee klassen
+        // is ingedeeld levert twee rijen. Nu is dat er één, maar een stille halvering is
+        // een slechte manier om daar achter te komen.
+        const st = (s.bots || []).reduce((a, b) => {
+            ['2xx', '3xx', '4xx', '5xx'].forEach(k => { a[k] += Number(b['hits_' + k] || 0); });
+            a.tot += Number(b.hits || 0);
+            return a;
+        }, { '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0, tot: 0 });
+        const rest = Math.max(0, st.tot - st['2xx'] - st['3xx'] - st['4xx'] - st['5xx']);
+        CHARTS.detStatus = miniDonut('detStatusChart', 'detStatusCenter',
+            [['2xx', st['2xx']], ['3xx', st['3xx']], ['4xx', st['4xx']], ['5xx', st['5xx']],
+             ['overig', rest]], 'status_class',
+            // 'overig' is niet door te klikken: /top-urls rangschikt op n_2xx..n_5xx en
+            // heeft voor de 0xx-rest geen kolom. canPick houdt de aanwijzer daar dan ook
+            // een pijl — een handje boven een segment dat niets doet is de vervelendste
+            // vorm van dood klikgebied.
+            c => drillToUrls({ bot_family: fam, status: c }),
+            c => c !== 'overig');
 
         // Zelfde vorm als de grote Facet-diepte-grafiek: één reeks in één kleur. De
         // splitsing in "in pa.urls" / "niet in pa.urls" is hier op 2026-08-13 met de
@@ -1971,7 +2065,13 @@
 
     // Kleine donut voor het uitklappaneel: zelfde vorm als de URL-type-ring
     // (68% cutout, witte spacers, directe labels, totaal in het gat).
-    function miniDonut(canvasId, centerId, pairs, dim) {
+    //
+    // `onPick` maakt de segmenten klikbaar (Joep, 2026-09-11) en `canPick` zegt welke
+    // — standaard alle. De aanwijzer volgt canPick en niet onPick, zodat een ring met
+    // één niet-klikbaar segment (zie 'overig' bij Statuscode) geen handje toont boven
+    // een segment dat niets doet. Zonder onPick verandert er niets aan de ring: de
+    // URL-detailpanelen tekenen hem nog steeds zonder doorklik.
+    function miniDonut(canvasId, centerId, pairs, dim, onPick = null, canPick = () => true) {
         const rows = pairs.filter(([, v]) => v > 0);
         const total = rows.reduce((a, [, v]) => a + v, 0);
         const el = document.getElementById(canvasId);
@@ -1999,6 +2099,17 @@
                     legend: { display: false },
                     tooltip: { enabled: false, external: donutTooltip,
                                callbacks: { label: c => `${fmt(c.parsed)} · ${pctOf(c.parsed, total)}` } },
+                },
+                // rows[] en niet chart.data.labels: donutMinAngle verzet alleen hoeken,
+                // dus de index van het aangewezen segment blijft die van de rij.
+                onHover: (e, els) => {
+                    const on = !!onPick && els.length > 0 && canPick(rows[els[0].index][0]);
+                    e.native.target.style.cursor = on ? 'pointer' : 'default';
+                },
+                onClick: (e, els) => {
+                    if (!onPick || !els.length) return;
+                    const k = rows[els[0].index][0];
+                    if (canPick(k)) onPick(k);
                 },
             },
             plugins: [donutMinAngle],
@@ -2032,6 +2143,74 @@
     // hem, en een `let` daar zou betekenen dat deze functie een variabele aanraakt die
     // in de temporal dead zone staat tot dat blok is uitgevoerd.
     let urlRows = [], urlQuery = '', urlQLast = '', urlStatus = '', urlCoverage = null;
+
+    // ---- Doorklikken: van een crawler of een segment naar de URL's erachter ----
+    // (Joep, 2026-09-11.) De vraag was om vanaf een aangeklikte crawler door te kunnen
+    // klikken naar een overzicht van URL's. Dat kón niet: de filterkaart bovenaan kent
+    // wel Bot-SOORT maar geen bot-FAMILIE, dus de URL's-tab was niet op Googlebot alleen
+    // te zetten — terwijl /top-urls die parameter allang accepteert.
+    //
+    // Daarom een selectie die IN de tab woont en niet in de filterkaart. Het patroon
+    // "schrijf de control van het doel, voeg geen tweede bron van waarheid toe"
+    // (UI_BLUEPRINT) wijst hier twee kanten op: `status` heeft zo'n control — de
+    // Status-keuze naast de tabel — en die wordt dus geschreven. Voor de andere drie
+    // bestaat er alleen de filterkaart bovenaan, en die stuurt élk tabblad: een klik op
+    // één donutsegment zou dan ook het Overzicht en de bot-tabel versmallen, en dan is
+    // het geen doorklik meer maar een paginabreed filter. Die drie krijgen daarom een
+    // eigen, zichtbare chip boven de tabel — zichtbaar, want een lijst die stiller
+    // gefilterd is dan de filterkaart zegt, is precies de "ziet er compleet uit en is
+    // het niet"-fout die deze pagina elders vermijdt.
+    //
+    // DE REGEL: een doorklik wint van de filterkaart voor de dimensie die hij noemt, en
+    // alleen voor deze lijst. url_type overschrijft de URL-type-vinkjes, host de
+    // Domein-vinkjes, en bot_family zet Bot-soort opzij — dat is dezelfde dimensie, één
+    // korrel grover, dus de fijnere keuze hoort te winnen. Zonder die laatste regel geeft
+    // doorklikken vanaf een crawler nul rijen zodra iemand een bot-soort had uitgevinkt.
+    //
+    // Een nieuwe doorklik VERVANGT de vorige in zijn geheel; hij stapelt niet. Klikken
+    // op het URL-type van Googlebot en daarna op een segment in het Overzicht (dat over
+    // alle bots gaat) moet niet stilletjes op Googlebot blijven staan.
+    let urlDrill = {};
+    const DRILL_LABELS = { bot_family: 'Crawler', url_type: 'URL-type', host: 'Domein' };
+
+    function drillToUrls({ bot_family = null, url_type = null, host = null, status = null } = {}) {
+        urlDrill = {};
+        if (bot_family) urlDrill.bot_family = bot_family;
+        if (url_type) urlDrill.url_type = url_type;
+        if (host) urlDrill.host = host;
+        // De Status-keuze is een bestaande control met een eigen zichtbare stand, dus
+        // die wordt geschreven in plaats van gedupliceerd. Alleen als de doorklik hem
+        // noemt: een klik op URL-type mag een al gekozen status niet ongevraagd wissen —
+        // hij staat in beeld, dus je ziet wat er geldt.
+        if (status) document.getElementById('urlStatusSel').value = status;
+        const pane = document.getElementById('tab-urls');
+        if (pane?.classList.contains('active')) {
+            loadUrls();                       // al open: shown.bs.tab vuurt dan niet
+        } else {
+            bootstrap.Tab.getOrCreateInstance(
+                document.querySelector('[data-bs-target="#tab-urls"]')).show();
+        }
+    }
+
+    // De chips. Vanuit loadUrls() getekend en niet vanuit drillToUrls(), zodat ze altijd
+    // de selectie tonen waarmee de rijen eronder zijn opgehaald.
+    function renderUrlDrill() {
+        const bar = document.getElementById('urlDrillBar');
+        if (!bar) return;
+        const keys = Object.keys(DRILL_LABELS).filter(k => urlDrill[k]);
+        bar.classList.toggle('d-none', !keys.length);
+        if (!keys.length) { bar.innerHTML = ''; return; }
+        bar.innerHTML = '<span class="muted-note">Doorgeklikt op:</span>'
+            + keys.map(k => `<span class="drill-chip" title="Geldt alleen voor deze lijst en `
+                + `overschrijft ${k === 'bot_family' ? 'Bot-soort' : DRILL_LABELS[k]} in de `
+                + `filterkaart bovenaan."><span class="dc-key">${DRILL_LABELS[k]}:</span>`
+                + `<span class="dc-val">${escapeHtml(urlDrill[k])}</span>`
+                + `<button type="button" class="dc-x" data-k="${k}" aria-label="Verwijder `
+                + `${DRILL_LABELS[k]}-selectie">&times;</button></span>`).join('');
+        bar.querySelectorAll('.dc-x').forEach(b => {
+            b.onclick = () => { delete urlDrill[b.dataset.k]; loadUrls(); };
+        });
+    }
     // Zes kolommen, of zeven met een statuskolom erbij. Elke colspan in deze tab leest
     // hem op, want een vaste 6 zou de skeletonrijen, de lege staat en het uitklappaneel
     // een cel te smal maken zodra de kolom verschijnt — en dat is precies het soort
@@ -2092,6 +2271,7 @@
         // van één regel naar honderd). Acht rijen ongeacht de limiet: het is een hint,
         // geen voorspelling, en bij "Alles" wil je hier geen 5.000 skeletons.
         tb.innerHTML = skeletonRows(urlCols(), 8);
+        renderUrlDrill();
         setBusyHint('urls', true);
         try {
             // De kolom toont sinds 2026-08-13 de vorm MÉT trailing slash (zie urlPath),
@@ -2106,9 +2286,17 @@
             // Sinds 2026-08-28 een object en geen kale lijst meer: `coverage` moet in
             // hetzelfde antwoord zitten als de rijen, anders kan de melding erboven over
             // een ándere selectie gaan dan de tabel eronder.
-            const resp = await getJSON(API + '/top-urls?'
-                + params({ limit, q: qSend || null, status: urlStatus || null,
-                           ...urlRange() }));
+            // De doorklik gaat als `extra` mee, dus hij overschrijft wat params() uit de
+            // filterkaart zet (die lus doet p.set(), de laatste wint). bot_class gaat
+            // eruit zodra er op een familie is doorgeklikt: dezelfde dimensie, één korrel
+            // grover, en anders geeft "Googlebot" nul rijen als de soort `search` niet
+            // aanstaat. Op een URLSearchParams en niet op de string, want een reguliere
+            // expressie over een querystring is een val zodra een waarde een & bevat.
+            const qs = new URLSearchParams(params({
+                limit, q: qSend || null, status: urlStatus || null,
+                ...urlRange(), ...urlDrill }));
+            if (urlDrill.bot_family) qs.delete('bot_class');
+            const resp = await getJSON(API + '/top-urls?' + qs.toString());
             if (!resp || !Array.isArray(resp.rows)) throw new Error('onverwacht antwoord van /top-urls');
             urlRows = resp.rows;
             urlCoverage = resp.coverage || null;
@@ -2223,7 +2411,11 @@
             // uniek per hit. Die selectie kán dus nooit rijen opleveren, terwijl de
             // donut in het Overzicht er wel honderden miljoenen hits voor toont — zonder
             // deze tekst lees je dat als "er wordt niets gecrawld" (fase 3).
-            const types = checked('typeFilter');
+            // De doorklik wint hier net zo goed van de filterkaart, en dat is geen detail:
+            // PLP is met 46% het grootste segment van de URL-type-ring, dus het is de
+            // meest waarschijnlijke eerste klik — en de enige die per constructie nul
+            // rijen oplevert. Zonder deze regel las die klik als een kapotte tabel.
+            const types = urlDrill.url_type ? [urlDrill.url_type] : checked('typeFilter');
             const plpOnly = types.length > 0 && types.every(t => t === 'PLP');
             const c = urlCols();
             tb.innerHTML = plpOnly
