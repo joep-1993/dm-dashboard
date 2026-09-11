@@ -30,9 +30,24 @@
         /* ---- Standard table look ---- */
         .tool-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; max-height: 620px; }
         .tool-table { font-size: 0.9rem; margin-bottom: 0; }
+        /* z-index 5 en niet 1 (Joep, 2026-09-11). De kop bleef plakken, maar de INHOUD
+           van een uitklappaneel schilderde eroverheen: het totaal in het gat van een
+           donut stond dwars door "Bot-familie" en "Aandeel" heen. Oorzaak is de stapel
+           binnen dit bestand — .donut-center 2, .donut-tip 3, .chart-skel 4 — en die
+           winnen allemaal van een kop op 1. De ring zelf ging wél netjes onder de kop
+           door, want .donut-wrap heeft z-index auto; dat verschil is precies wat het zo
+           raar liet lijken.
+           5 is dus "boven de hoogste laag in het paneel", niet een rond getal: komt er
+           een laag bij in de donut-stack, dan moet dit mee omhoog. Ver eronder blijft de
+           navbar (1030 in css/style.css), dus de sticky kop kruipt daar niet overheen.
+           BEWUST HIER en niet in css/style.css: die gedeelde regel zet ook z-index 1,
+           maar dit page-<style>-blok laadt later en wint — daar repareren zou op deze
+           pagina niets doen. De andere tien pagina's met een eigen .tool-table-blok
+           hebben dezelfde 1; daar is het (nog) geen probleem omdat hun uitklappanelen
+           geen gestapelde lagen dragen. */
         .tool-table th {
             background: #f8f9fa; white-space: nowrap;
-            position: sticky; top: 0; z-index: 1;
+            position: sticky; top: 0; z-index: 5;
             padding: 6px 14px; font-size: 1rem;
         }
         .tool-table td { vertical-align: middle; }

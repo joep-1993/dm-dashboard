@@ -186,6 +186,21 @@ other tool uses the grey default. New tools follow the grey default.
   right; `_tool-template.html` did not, which is how it spread — still present in
   gsd-campaigns, gsd-tag-toppers, gsd-check, shop-campaigns, mc-id-finder and
   seo-titles.
+- **De sticky kop moet boven de HOOGSTE laag in een uitklappaneel staan, niet op 1**
+  (Joep, 2026-09-11, Bot Hits > Per bot-familie). De kop bleef netjes plakken, maar de
+  inhoud van een open paneel schilderde eroverheen: het totaal in het gat van een donut
+  stond dwars door "Bot-familie" en "Aandeel" heen. `.tool-table th` staat op
+  `z-index: 1`, en de lagen binnen het paneel winnen daarvan — in Bot Hits `.donut-center`
+  2, `.donut-tip` 3, `.chart-skel` 4. Verwarrend is dat de ring zélf wél onder de kop
+  door ging: `.donut-wrap` heeft `z-index: auto` en verliest dus van een kop met een
+  positieve waarde, terwijl zijn kinderen met een expliciete z-index winnen. Zet de kop
+  op één boven de hoogste laag die je in een paneel gebruikt (hier 5) en zeg in het
+  commentaar wélke lagen dat zijn, zodat een nieuwe laag zichtbaar meegroeit. Ver onder
+  de navbar blijven (1030 in `css/style.css`).
+  **Repareer dit op de PAGINA, niet in `css/style.css`.** Elf pagina's dragen een eigen
+  `.tool-table th`-blok met dezelfde `z-index: 1`, en een page-`<style>` laadt later en
+  wint — de gedeelde regel aanpassen doet op precies die pagina's niets. Dezelfde
+  eigenschap die de gedeelde basis veilig additief maakt, maakt hem hier machteloos.
 - **A row that expands: one open at a time.** For a per-row breakdown (Bot Hits'
   bot-family table), make the `<tr>` clickable, add a `▸` caret that rotates on
   `.is-open`, and insert a sibling `<tr class="…-detail"><td colspan="N">` with the

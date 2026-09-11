@@ -29,6 +29,11 @@ URL-type. Lessen in LEARNINGS, zelfde datum. Commits ebdf18d + c6c42cc.
 - [x] **`status_class` volgt SERIES**, zoals URL-type. Draait 2026-08-28 terug; 4xx staat nu in
       lichtgroen en leest daarmee als "in orde" — de terugzetregel staat bij COLOR_MAPS.
       Raakt ook "Hits per dag > Splitsen op > Statuscode".
+- [x] **Sticky kop gerepareerd**: de inhoud van het uitklappaneel schilderde door de
+      tabelkop heen (donut-totalen dwars door "Bot-familie" en "Aandeel"). `.tool-table th`
+      stond op `z-index: 1` en de lagen in het paneel — `.donut-center` 2, `.donut-tip` 3,
+      `.chart-skel` 4 — winnen daarvan; nu 5. In `bothits.html` zelf en niet in
+      `css/style.css`, want het page-blok laadt later en wint. Regel staat in UI_BLUEPRINT.
 - [ ] **Open: geen legenda onder de mini-donuts.** De vier ringen in het paneel dragen alleen een
       hover; naast elkaar zijn URL-type en Statuscode sinds de kleurwissel lastiger uit elkaar te
       houden (beide blauw-roze-groen). Een regeltje `2xx · 3xx · 4xx` eronder zou dat oplossen,
