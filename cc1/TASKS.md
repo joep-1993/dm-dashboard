@@ -3,6 +3,35 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-11 (3) — DMA Exclusions: 429's op de mutate-kant opnieuw proberen
+
+Melding: bij een OOS-exclude van 200+ items faalt het merendeel. Oorzaak: Phase B van
+`oos_exclude` deed tot 16 gelijktijdige mutates op hetzelfde account, Google antwoordde met
+`429 TooManyRequests` en die fout viel rechtstreeks in de `except Exception` — item weg, geen
+nieuwe poging. De leeskant (`_ga_search_rows`) had die backoff al wél. Commit `fc7a106`.
+Lessen in LEARNINGS, zelfde datum.
+
+- [x] **`_apply_one_target_retrying()`** in `backend/dma_exclusions_service.py` (vlak vóór
+      `oos_exclude`): wikkel om `_apply_one_target`, 3 nieuwe pogingen met 6s/12s/24s ertussen
+      (Google's eigen "Retry in 6 seconds", verdubbelend), daarna re-raise zodat de bestaande
+      foutafhandeling het item op precies dezelfde manier rapporteert als voorheen.
+- [x] **Alleen `TooManyRequests`, niet heel `_GA_TRANSIENT`.** Een mutate is niet blind
+      herhaalbaar; 429 is de enige van de vier waarbij vaststaat dat er nog niets is
+      weggeschreven. Bij een 500/timeout kan de criterium-boom al gewijzigd zijn.
+- [x] **Phase B van `min(16, len(groups))` naar `min(4, len(groups))`.** De retry maakt een 429
+      overleefbaar, de lagere concurrency moet hem zeldzaam maken — anders wacht elke run zich
+      door dezelfde muur heen. **Phase A blijft op 16** (read-only, leest uit `_RES_CACHE`).
+- [x] **Niet aangeraakt, bewust**: het HTTP-endpoint (N8N stuurt alle item_ids in één keer en
+      dat moet zo blijven), `_ga_search_rows` (had zijn retry al), `_resolve` in Phase A.
+- [ ] **Openstaand: backend herstarten.** `:8003` draait zonder `--reload` (pid 38128), dus
+      dit is pas actief na `fuser -k 8003/tcp` + herstart. Op het moment van committen nog niet
+      gedaan.
+- [ ] **Openstaand: de eerste echte run van 200+ items is de meting.** Alleen compile +
+      codepad-review gedaan, geen live mutate. Kijk of er nog failures op rate limits staan;
+      in de log verschijnt nu `GA mutate rate-limited voor <item> / ad group <id>` per poging.
+      Blijft het misgaan, dan Phase B verder omlaag of een pauze tussen de groepen — niet nóg
+      meer retries.
+
 ### 2026-09-11 (2) — De unpublish-drain uit de publishers, in een eigen stap
 
 De drain draaide synchroon ín beide publish-taken en stuurt tot 5.000 HTTP DELETEs over 8

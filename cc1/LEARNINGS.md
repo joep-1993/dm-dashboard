@@ -1,6 +1,47 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een retry-vorm van de LEESkant overzetten naar de SCHRIJFkant vraagt per foutsoort een beslissing (2026-09-11, DMA Exclusions)
+
+`oos_exclude` Phase B vuurde tot 16 gelijktijdige mutates op hetzelfde Google Ads-account.
+Google antwoordt dan met `429 TooManyRequests` ("Retry in 6 seconds"), die viel meteen in de
+bestaande `except Exception` en het item werd als **failed** gerapporteerd. Bij een lijst van
+200+ items sneuvelde daardoor het grootste deel van de run op rate limits, terwijl er met de
+items zelf niets mis was. De leeskant had dit al lang opgelost: `_ga_search_rows` vangt
+`_GA_TRANSIENT` (500 / 503 / deadline / 429) en probeert het met backoff opnieuw.
+
+**De verleiding is om `_GA_TRANSIENT` één-op-één te hergebruiken op de schrijfkant. Doe dat
+niet.** Die tuple is samengesteld voor een GAQL-query, en een query herhalen kost hooguit tijd.
+Van de vier is 429 de enige waarbij je zéker weet dat de mutate nog niet is uitgevoerd — het
+verzoek is vóór de verwerking geweigerd. Bij een 500 of een timeout kan de criterium-boom al
+gewijzigd zijn; een herhaling voegt dan een tweede uitsluiting toe of botst op een inmiddels
+bestaande node. Vandaar `except google_exceptions.TooManyRequests` en niet `except
+_GA_TRANSIENT` in `_apply_one_target_retrying()`. Algemeen: bij het kopiëren van een
+retry-patroon naar een niet-idempotente aanroep is de vraag niet "is deze fout tijdelijk" maar
+"weet ik zeker dat er nog niets is gebeurd".
+
+**Een retry op een 429 behandelt het symptoom; de concurrency is de oorzaak.** Phase B ging
+daarom van `min(16, len(groups))` naar `min(4, len(groups))`. Met alleen de retry zou elke run
+zich door dezelfde muur heen wachten (3 × 6/12/24s per getroffen item, serieel binnen zijn
+groep) en juist trager worden dan met minder workers. Phase A blijft wél op 16: die fase is
+read-only, en leest bovendien grotendeels uit de `_RES_CACHE` die de scan heeft gevuld — niet
+elke ThreadPool in dezelfde functie hoeft mee omlaag.
+
+**De backoff is niet zelfbedacht.** Google zet de wachttijd in het 429-antwoord zelf ("Retry in
+6 seconds"); 6/12/24 is dat getal met verdubbeling. Een generieke 1-2-4 zou de eerste twee
+pogingen verspillen aan een venster waarvan de server al heeft gezegd dat het nog niet open is.
+
+**Buiten scope gehouden en waarom.** Geen chunking of pauzes op het HTTP-endpoint: de
+N8N-aanroeper stuurt alle item_ids in één keer en dat contract moest blijven werken. De
+rate-limiting hoort daar ook niet thuis — het endpoint weet niet hoeveel mutates één item
+oplevert (een item raakt meerdere ad groups), dus alleen de laag die de mutates daadwerkelijk
+uitvoert kan er zinnig op sturen.
+
+**Niet live geverifieerd** — alleen compile + codepad-review. De eerstvolgende échte
+OOS-exclude van 200+ items is de meting: als items nog steeds op rate limits vallen, staat de
+oorzaak in de log als `GA mutate rate-limited ... retrying in 24s` gevolgd door een failure, en
+dan moet Phase B verder omlaag (of moet er een pauze tussen de groepen).
+
 ## Een zijstap met honderden uitgaande calls hoort niet in een taak die door een poller wordt bewaakt (2026-09-11, unpublish-drain)
 
 De unpublish-drain hing sinds 2026-09-10 aan het einde van `publish_records()` en
