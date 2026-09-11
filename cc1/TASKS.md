@@ -3,6 +3,38 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-11 (4) — Trailing-slash redirects: analyse + fixlijst voor de betaalde kant
+
+Vraag: komt er meer verkeer binnen op URL's zonder trailing slash die daarna geredirect worden?
+Ja — ~38k/dag pure slash-varianten op 10-09 tegen ~5k/dag op 12-08, driver is `/p/` sinds de
+gedragswijziging van **01-09-2026** (daarvóór gaven beide vormen 200 = duplicate content, nu
+301 aan de edge). Drie bronnen naast elkaar gelegd; alleen de ruwe CloudFront-logs zien het.
+Lessen in LEARNINGS, zelfde datum; de bothits-blinde-vlek in `cc1/BOTHITS_PROCESS.md`.
+
+- [x] **Gemeten op de logs**: lokaal archief 24-07 t/m 12-08 (volledige dagen) + S3-steekproeven
+      t/m 10-09, plus één volledige dag 10-09 voor de per-IP-correlatie.
+- [x] **Verificatie dat het verkeer scrapers is** (75% ervan): HTTP/2 volgt de 301 in 99,3% van
+      6.268 gevallen, HTTP/1.1 in 0,4% van 18.909 — zelfde dag, zelfde methode. Plus UA/protocol-
+      tegenspraak, 0,1% asset-requests en 9.619 IP's met mediaan 1 hit.
+- [x] **Onze eigen live surface is schoon**: PDP, R-url, categoriepagina, home én alle drie de
+      sitemapfamilies (`sitemap-landing-*` 2.615/2.615 `/p/` mét slash). Let op: een R-url **mét**
+      facet is canoniek zónder slash — de `/c/`-regel wint van de `/r/`-regel.
+- [x] **Betaalde kant, drie bronnen**: logs (184 getagde hits/dag, 0,15%), `dim_visit` (blind,
+      1 op 309.727 in 30d), en de Ads-config (3.030 foute final URLs / 1.743 uniek).
+      DMA Paid en Google Shopping raken geen PLP's.
+- [x] **Fixlijst weggeschreven**: `Downloads\claude\google_ads_plp_slash_fixlijst_20260911.csv`,
+      2.320 regels met account, plek (ad/keyword/pagefeed), campagne, huidige URL, voorgestelde
+      URL, geteste status en de eindbestemming waar die afwijkt.
+- [ ] **Openstaand — fixlijst naar de SEA-kant.** 558 regels "zet deze URL", 189 "gebruik de
+      eindbestemming", 7 URL's bestaan niet meer, 1.566 `page_N`-regels niet individueel getest.
+      Niemand heeft dit nog opgepakt; het is geen dashboardwerk maar accountwerk. #priority:low
+- [ ] **Openstaand — 32 legacy Bing-ads opruimen** (aff 127, 106 hits/dag): non-slash R-urls met
+      hoofdletters en een onuitgeklapte `{copy:mckv}`-macro. Alleen in Microsoft Advertising te
+      doen, daar is hier geen API-toegang. #priority:low
+- [ ] **Optioneel — bothits slash- en querystring-bewust maken.** Dan pas is dit in de tool te
+      volgen. Prijs: de URL-ruimte is al het onbegrensde deel van de korrel. Niet gestart.
+      #priority:low
+
 ### 2026-09-11 (3) — DMA Exclusions: 429's op de mutate-kant opnieuw proberen
 
 Melding: bij een OOS-exclude van 200+ items faalt het merendeel. Oorzaak: Phase B van

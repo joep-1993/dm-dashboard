@@ -438,6 +438,38 @@ conclusie over levende versus dode URL's moet uit de ruwe logs komen (`sc-status
 `product_legacy`, maar van 224.242 legacy product-URL's gaf er **niet één ooit een echte
 200**.
 
+## Blinde vlek: de ingest strípt trailing slashes (2026-09-11)
+
+`process_file()` doet `stem = unquote(raw_stem).rstrip("/") or "/"`, dus `/x` en `/x/` vallen
+op **dezelfde sleutel** — in de cube én in beide URL-tabellen. Slash-canonicalisatie is
+daarmee niet uit de 3xx te pellen: je ziet het totaal, niet welk deel een slash-redirect is.
+Zelfde klasse als het strippen van querystrings (zie de `?page=`-notitie in memory
+`page_param_pagination_indexbloat`).
+
+Dat is geen theorie. De site canonicaliseert álles **naar** de trailing slash
+(`/products/<cat>/`, `/products/<cat>/r/<term>/`, `/p/<slug>/<shop>/<ean>/`) behalve
+`/c/`-URL's, die ervandaan; legacy `…/page_2/` gaat naar `…?page=2`. Voor `/p/` is dat
+**nieuw sinds 2026-09-01**: non-slash `/p/`-hits gingen van `200=3.281 / 301=247` (31-08) naar
+`200=0 / 301=5.354` (02-09, 5%-steekproeven). Daarvoor serveerden beide vormen een 200
+(duplicate content), nu is het een 301 aan de edge. Volume op www.beslist.nl: pure
+slash-varianten ~5k/dag op 12-08 → **~38k/dag op 10-09**; incl. de `page_N`-redirects 7,9k →
+59k/dag (0,2% → 1,1% van alle hits). Googlebot raakt daar maar ~750/dag van, bingbot ~13k.
+
+**Terugvalpad** is hetzelfde als bij de lange staart: de ruwe logs in
+`~/bothits_s3/_processed`. Twee dingen die daar misgaan als je ze zelf parst:
+
+- **Lees de veldposities uit de `#Fields`-regel per bestand.** Vaste kolomnummers gaven in
+  deze analyse `Miss` en `https` in de protocolkolom. `REQUIRED_FIELDS` + de `idx`-map in
+  `bothits_ingest.py` doen dit al goed; een eigen awk/script moet het overnemen.
+- **Pipe nooit meerdere `zcat`'s parallel in één awk-proces.** Logregels zijn langer dan
+  `PIPE_BUF`, dus parallelle writes raken vermengd en je krijgt onzinwaarden die er als data
+  uitzien. Eén awk per bestand en daarna aggregeren, of één sequentiële `xargs zcat | awk`
+  als je over bestandsgrenzen heen moet correleren (zoals "volgt dit IP de redirect?").
+
+**Wil je dit in de tool zien**, dan moet de ingest slash- én querystring-bewust worden. Dat is
+een bewuste keuze met een prijs: de URL-ruimte is al het onbegrensde deel (zie "Waarom de
+korrel is zoals hij is"), en beide varianten apart bewaren vergroot hem.
+
 ## Wat de tabellen NIET kunnen: de lange staart (2026-08-13)
 
 `pa.bothits_unknown_daily` houdt **top-500 per dag per bot-familie**. Die 500 plekken gaan

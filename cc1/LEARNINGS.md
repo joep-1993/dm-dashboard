@@ -1,6 +1,94 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een redirect die vóór de pagina gebeurt, is onzichtbaar in élke bron behalve de ruwe logs (2026-09-11, trailing slashes + betaald verkeer op PLP's)
+
+Vraag van Joep: komt er meer verkeer binnen op URL's zonder trailing slash die daarna naar de
+slash-vorm geredirect worden? Antwoord: ja (~38k/dag op 10-09 tegen ~5k/dag op 12-08, driver is
+`/p/` sinds 01-09-2026), maar **geen van onze eigen meetbronnen kan het zien**:
+
+- **bothits niet** — de ingest doet `rstrip("/")`, beide vormen vallen op één sleutel. Details
+  in `cc1/BOTHITS_PROCESS.md` § "Blinde vlek".
+- **`datamart.dim_visit` niet** — 1 foute vorm op 309.727 betaalde PLP-visits in 30 dagen,
+  want de visit wordt geregistreerd ná de redirect. Wie een landingspagina-analyse op de
+  *aangevraagde* URL wil doen, kan dim_visit niet gebruiken.
+- **Alleen de CloudFront-logs**, waar het 184 getagde hits/dag bleek.
+
+Dat patroon is algemener dan dit geval: **elke laag die vóór de pagina-render ingrijpt (edge,
+WAF, redirect) bestaat niet in de bronnen die pas bij de render beginnen.** Bij een vraag over
+"wat vraagt iemand aan" is de log de enige geldige bron; bij "wat kreeg iemand te zien" mag
+dim_visit.
+
+### Zes valkuilen waar ik in liep, allemaal het soort dat er als data uitziet
+
+1. **Vaste kolomnummers in een CloudFront-log.** De veldvolgorde verschilt per bestand — lees
+   de `#Fields:`-regel. Symptoom: `Miss` en `https` als waarde in de protocolkolom.
+2. **Parallelle `zcat`'s in één awk.** Logregels overschrijden `PIPE_BUF`, dus de writes raken
+   vermengd. Geen foutmelding, wel kapotte velden. Eén awk per bestand, of sequentieel.
+3. **Substring-matching op een category-id.** `index(stem, "…_484292")` matcht ook
+   `…_484292_638192`; de "200's" die ik op een non-slash URL zag waren andere URL's. Exact
+   vergelijken met beide vormen (`P` en `P "/"`).
+4. **Afkappen in een print precies op de interessante byte.** De URL is 88 tekens zónder
+   slash, dus `r['p'][:88]` verbergt de slash en de conclusie kantelt om. Print de lengte of
+   de vorm expliciet, niet een afgekapte string.
+5. **Een `pgrep -f <script>`-wachtlus matcht zichzelf** en wacht dus eeuwig. En een `pkill -f`
+   in dezelfde bash-call kan de eigen shell meenemen (exit 144) — bij mij vóórdat de heredoc
+   erna was uitgevoerd, dus het script dat ik dacht te starten bestond niet eens.
+6. **De 202 in de logs is de WAF-challenge, geen succesvolle 2xx** (stond al in
+   `BOTHITS_PROCESS.md`; het kostte hier opnieuw een verkeerde tussenconclusie over
+   "non-slash geeft gewoon 200").
+
+### Een verificatie die wél sluit: laat het gedrag zichzelf kalibreren
+
+"Dit zijn scrapers" was eerst een gevolgtrekking. De test die het afmaakte, op de volledige
+logdag: **volgt de client de 301?** Een browser doet dat automatisch, altijd. Op de non-slash
+`/p/`-301's met een browser-UA: **HTTP/2 6.268 gevallen → 99,3% volgt; HTTP/1.1 18.909 gevallen
+→ 0,4% volgt.** Zelfde dag, zelfde URL-type, zelfde meetmethode — het verschil kán dan niet in
+de meting zitten. Daarbovenop: 91% van die requests komt over HTTP/1.1 terwijl de UA "Chrome op
+Windows" claimt (Chrome onderhandelt op HTTPS altijd h2 via ALPN; controlegroep met echte
+campagnetag = 97,8% HTTP/2), geen enkele actuele Chrome-versie tegen 63,6% Chrome/152 in de
+controlegroep, 0,1% asset-requests tegen 5,8%, en 9.619 IP's voor 18.912 requests met mediaan
+1 hit per IP.
+
+**Les voor de vorm, niet voor dit geval:** bouw de controlegroep uit dezelfde dataset en meet
+hem met dezelfde code. Een absolute drempel ("minder dan X% volgt de redirect") zou hier
+niets bewezen hebben; het contrast 99,3 vs 0,4 binnen één query wel.
+
+### Google Ads vanuit een eigen runner: twee dingen die stil falen
+
+- **`ai-read-only@beslist-ga360` komt NIET bij manager 1103539935** (de 30 SEA-accounts), wel
+  bij `3011145605`. De **laiza-SA** (`google-ads-api-read-only@beslist-ga360`,
+  `~/.claude/skills/laiza/credentials/google-ads.json`) komt bij beide: 39 + 137 accounts.
+  Symptoom van de verkeerde sleutel is `USER_PERMISSION_DENIED` met een misleidende hint over
+  `login-customer-id`, terwijl die correct gezet is.
+- **Het serviceobject moet een naam houden.** `for b in cl.get_service("GoogleAdsService").
+  search_stream(...)` levert halverwege `499 Channel deallocated!`: de service wordt opgeruimd
+  terwijl de stream nog loopt. `svc = cl.get_service(...)` op een eigen regel en dan itereren.
+  (Naast de bekende val dat `query_tool.py` buiten zijn eigen kolomschema stil nullen geeft.)
+
+En in Redshift: **`dim_visit.marketing_channel` is een bigint, niet de naam** — join
+`chan_deriv.ref_channel_derivation_stats` op `(aff_id, channel_id)` met `deleted_ind = 0` voor
+het label. De cursor van `get_redshift_connection()` geeft **dicts**, dus tuple-unpacking van
+een rij levert je de kolomnámen op als waarden (een tabel die vol lijkt te staan met de
+headers).
+
+### Uitkomst aan de betaalde kant
+
+Config-scan over alle 176 actieve Ads-accounts (ads + keywords + DSA page feeds): 3.030 foute
+PLP-final-URLs op 18,65 mln, 1.743 uniek — **1.600 legacy `/page_N/`-feed-URL's** (Woon­accessoires
+613, Meubels 479, Kleding 393) en **140 categorie-URL's zonder slash** op 1.098 actieve
+keywords/ads (Schoenen 256, Parfumerie 236, Drogisterij 217). DMA Paid en Google Shopping raken
+géén enkele PLP — die landen op `/p/`.
+
+**Slash toevoegen is niet de hele fix:** live getest geeft 86% van die 140 een 200, maar 14%
+301't alsnog naar een ándere bestemming (opgeheven subcategorieën) en 1 geeft 404. Bij de
+`page_N`-steekproef 78% / 17% / 5%. Zet dus de eindbestemming. Fixlijst met per regel de
+geteste status: `Downloads\claude\google_ads_plp_slash_fixlijst_20260911.csv`.
+
+De grootste échte klikbron van foute vormen zit buiten Google: **32 legacy Bing-ads** (aff 127)
+op non-slash R-urls, 106 hits/dag, waarvan 99 met hoofdletters in het pad en 82 met een
+onuitgeklapte `%257Bcopy:mckv%257D`-macro. Microsoft Advertising is hier niet uit te lezen.
+
 ## Een retry-vorm van de LEESkant overzetten naar de SCHRIJFkant vraagt per foutsoort een beslissing (2026-09-11, DMA Exclusions)
 
 `oos_exclude` Phase B vuurde tot 16 gelijktijdige mutates op hetzelfde Google Ads-account.
