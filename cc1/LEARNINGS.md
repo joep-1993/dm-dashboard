@@ -1,6 +1,59 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een zijstap met honderden uitgaande calls hoort niet in een taak die door een poller wordt bewaakt (2026-09-11, unpublish-drain)
+
+De unpublish-drain hing sinds 2026-09-10 aan het einde van `publish_records()` en
+`publish_faq_v2()`. Hij stuurt tot `MAX_PER_RUN` (5.000) HTTP DELETEs over `WORKERS` (8)
+threads, synchroon, binnen de publish-taak. Het dashboard antwoordde daardoor niet meer op de
+statuspolls van `daily_automation`, `poll_task()` liep tegen `POLL_MAX_ERRORS` en brak de
+**hele** dagrun af — inclusief een publish die al geslaagd was.
+
+**De vorm van de fout is het interessante, niet de drain zelf.** Een achtergrondtaak die door
+een poller wordt bewaakt, deelt een server met die poller. Zet je in zo'n taak werk dat de
+server zwaar belast, dan sloop je het kanaal waarlangs de voortgang van datzelfde werk wordt
+gemeld — en de waarnemer concludeert "taak dood" terwijl het werk gewoon loopt. Regel: werk dat
+de server merkbaar belast, hoort in een eigen taak met een eigen poll, zodat een trage server
+hooguit ÉÉN stap laat struikelen.
+
+**Niet-fataal is wat de storing echt wegneemt.** Verplaatsen alleen zou de traagheid hebben
+verhuisd naar de poll van de nieuwe stap. Door die stap als niet-fataal in te haken (dezelfde
+vorm als de recheck-stap) is de slechtste uitkomst een waarschuwing in plaats van een afgebroken
+run. Dat mag alleen omdat de queue duurzaam is: wat vandaag niet wordt gedraind, staat er morgen
+nog. Controleer die eigenschap vóór je iets niet-fataal noemt.
+
+**Géén restart_fn op de poll van zo'n stap**, anders dan bij de publishes. Een drain die met de
+server sterft laat zijn queue-rijen precies staan (de stamp volgt pas ná elke DELETE), dus de
+volgende run pakt de rest op. Herstarten zou hetzelfde zware werk opnieuw op een server gooien
+die net heeft laten zien dat hij het niet afkrijgt — dat is de storing opnieuw uitlokken.
+
+**Werk uit een taak halen verandert het RESULTAATCONTRACT, en dat moet je expliciet najagen.**
+`result["unpublish_queue"]` verdween uit beide publish-resultaten. Eén `grep` over backend/ en
+frontend/ gaf precies één lezer (`_unpublish_note()` in daily_automation), en die moest mee
+verhuizen naar het resultaat van de nieuwe stap — anders was de Slack-melding stil geworden over
+precies het ding dat ooit 4.306 kopteksten vijf weken live hield. Een verplaatsing zonder die
+grep is een stille regressie in de rapportage, niet in de functionaliteit.
+
+**Twee kanten na elkaar, niet naast elkaar.** In de nieuwe taak lopen `koptekst` en `faq`
+sequentieel. Parallel zou de uitgaande DELETE-concurrency tegen dezelfde store verdubbelen, en
+dat is exact het probleem dat de verhuizing moest oplossen. Wel elk in een eigen `try`: een val
+aan de ene kant mag de andere niet meeslepen, en de aanroeper moet kunnen zien wélke helft brak.
+
+**Testen als de knop 5.411 live verwijderingen is.** Het nieuwe endpoint aanroepen was geen
+optie — er stonden 2.149 koptekst- en 3.262 FAQ-rijen in de wachtrij. Wat wél kan, en genoeg
+dekking geeft voor code die één keer per nacht draait: (1) de taakwikkel in-process met een
+gestubde `drain` (volgorde, foutisolatie per soort, de vorm van het taakdict), (2) de HTTP-randen
+echt (400 op een onbekende environment, 404 op een onbekend task_id), en (3) de CLIENT-kant tegen
+een `http.server`-stub van tien regels die de POST beantwoordt en de eerste poll "running" laat
+zeggen — dan loopt `poll_task()` met zijn echte lus mee. `POLL_INTERVAL` op 0,1 zetten houdt dat
+in een seconde klaar. De Slack-renderfunctie is los langs al zijn takken gehaald (leeg, schoon,
+normaal, geweigerd, fout).
+
+**Kleine valkuil bij het bijbouwen in `main.py`:** dat bestand heeft GEEN module-level `logger`.
+De conventie is `logging.getLogger(__name__)` op de plek zelf. Een `logger.exception(...)` kopiëren
+uit een ander bestand geeft daar een `NameError` die pas in de foutafhandeling vuurt — precies waar
+je hem niet test.
+
 ## Een doorklik heeft een eigen filterlaag nodig zodra de bestaande control een ándere reikwijdte heeft (2026-09-11, Bot Hits)
 
 Joep wilde vanaf een aangeklikte crawler kunnen doorklikken naar de URL's erachter. Dat bleek

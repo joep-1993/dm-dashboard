@@ -3,6 +3,47 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-11 (2) — De unpublish-drain uit de publishers, in een eigen stap
+
+De drain draaide synchroon ín beide publish-taken en stuurt tot 5.000 HTTP DELETEs over 8
+threads. Het dashboard antwoordde daardoor niet meer op de statuspolls van `daily_automation`,
+`poll_task` liep tegen `POLL_MAX_ERRORS` en brak de hele dagrun af — inclusief een publish die
+al geslaagd was. Lessen in LEARNINGS, zelfde datum. Commit `d9b78d4`.
+
+- [x] **Drain uit beide publishers** (`content_records_publisher.publish_records`,
+      `faq_v2_publisher.publish_faq_v2`). Op de plek staat waarom hij weg is en waar hij nu
+      draait; beide `result`-dicts dragen daarmee geen `unpublish_queue` meer.
+- [x] **Eigen endpointpaar in `main.py`**: `POST /api/content-unpublish/drain` +
+      `GET /api/content-unpublish/drain/status/{task_id}`, in de vorm van
+      `content_records_publisher` (dict-store achter een Lock, daemon-thread, uuid). De twee
+      soorten lopen **na** elkaar in die ene thread — parallel zou de uitgaande
+      DELETE-concurrency tegen dezelfde store verdubbelen — elk in een eigen `try`, zodat een
+      val aan de ene kant de andere niet meesleept. De taakstore staat in `main.py` en niet in
+      `content_unpublish_queue.py`, zodat die module een gewone library blijft voor
+      `scripts/delete_dead_facet_urls.py` en zijn eigen `__main__`.
+- [x] **`step_drain_unpublish_queue()` in `daily_automation`**, ná de publish (die vult de queue
+      met de verwijderingen van vandaag) en **niet-fataal**, net als de recheck-stap. Geen
+      `restart_fn`: een drain die met de server sterft laat zijn rijen staan, dus de volgende run
+      pakt de rest op; herstarten zou hetzelfde zware werk op een net bezweken server gooien.
+- [x] **`_unpublish_note()` → `_drain_note()`**: leest nu het resultaat van de eigen stap in
+      plaats van de `unpublish_queue`-sleutel van een publish-result. Even luid (weigering en
+      fout halen de samenvatting), stil op een schone run. `drain_failed` telt mee in de
+      partial-conditie, dus het Slack-icoon wordt `:warning:`.
+- [x] **Getest zonder iets van live te halen** (er stonden 2.149 + 3.262 rijen in de wachtrij):
+      taakwikkel in-process met een gestubde `drain`, de HTTP-randen echt (400/404), en
+      `step_drain_unpublish_queue()` tegen een `http.server`-stub inclusief de pollus-lus.
+      `_drain_note()` langs al zijn takken.
+- [x] **Backend herstart** (13:0x, pid 22237) — `:8003` draait zonder `--reload`, dus zonder
+      herstart zouden de nieuwe endpoints niet bestaan.
+- [ ] **Openstaand: de eerste échte uitvoering is de nachtelijke run.** Het endpoint is nooit
+      met een gevulde wachtrij aangeroepen. Kijk morgen in `logs/daily_automation.log` naar de
+      regels `Unpublish-queue koptekst/faq: N unpublished, M failed` en of de stap de dagrun
+      heeft laten doorlopen — dát is waar deze wijziging op beoordeeld moet worden.
+- [ ] **Openstaand: meet of de server tijdens de drain nu wél blijft antwoorden.** De aanname is
+      dat het verplaatsen de belasting niet wegneemt maar wel isoleert. Blijkt de poll van de
+      drain-stap zelf te sneuvelen, dan is de volgende stap een lagere `WORKERS` of een
+      `MAX_PER_RUN` in porties — niet nóg een verplaatsing.
+
 ### 2026-09-11 (1) — Bot Hits: doorklikken vanaf de grafieken naar de URL's, en statuscodes per crawler
 
 Vraag van Joep: vanaf een aangeklikte crawler door kunnen klikken naar een overzicht van URL's
@@ -116,6 +157,9 @@ op en kreeg "URL not found in content database", terwijl die pagina live een kop
       het leegmaken van een tabel), `backend/content_unpublish_queue.py` met de drain, aangehaakt
       in `publish_records` en `publish_faq_v2`, zichtbaar in de dagelijkse logregels + Slack via
       `_unpublish_note()`. Plafond: >25.000 pending = weigeren en luid loggen.
+      **ACHTERHAALD op 2026-09-11** (zie die datum): het aanhaken ín de publishers brak de dagrun,
+      dus de drain is een eigen stap met een eigen endpoint geworden en `_unpublish_note()` heet
+      nu `_drain_note()`. De queue, de triggers en het plafond zijn ongewijzigd.
 - [x] **Getest**: 3 van de 4 triggerpaden in een teruggedraaide transactie, en end-to-end op
       `/products/huishoudelijke_apparatuur/c/merk~102735` (eigen oude tekst teruggezet, tombstone,
       drain, weg uit de store).
