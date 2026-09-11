@@ -37,6 +37,7 @@ import json
 import time
 import logging
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections import OrderedDict, defaultdict
@@ -1481,7 +1482,7 @@ def exclusion_targets(record_id: int) -> Dict[str, Any]:
 # has dropped off the current list is safe to put back on. See oos_recovered().
 # ---------------------------------------------------------------------------
 
-def _exclude_eans(market: str) -> Dict[str, Any]:
+def _exclude_eans(market: str, *, _attempts: int = 3) -> Dict[str, Any]:
     """Fetch the monitor's authoritative exclude list for a market.
 
     Single source of truth (replaces the old /oos-eans + /by-eans pair): every
@@ -1493,16 +1494,31 @@ def _exclude_eans(market: str) -> Dict[str, Any]:
     Returns {healthy, as_of, count, eans}. `healthy` False means the monitor's
     snapshot is stale/degraded — callers MUST NOT act on an EAN's *absence*
     (i.e. must not re-enable) when the list can't be trusted.
+
+    De nachtelijke NL-cyclus viel op 2026-09-11 om op een TimeoutError: 30s was
+    te kort voor de monitor en één poging betekende dat de hele run daarop
+    eindigde. Nu 60s en drie pogingen met 5s/10s ertussen. Dit is een GET op een
+    snapshot — de aanroep is idempotent, dus herhalen is hier gratis, anders dan
+    op de mutate-kant van deze module.
     """
     country = (market or "NL").upper()
     qs = urllib.parse.urlencode({"country": country})
     url = f"{OOS_BASE}/exclude-eans?{qs}"
-    with urllib.request.urlopen(url, timeout=30) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    return {"healthy": bool(data.get("healthy")),
-            "as_of": data.get("as_of"),
-            "count": data.get("count"),
-            "eans": list(data.get("eans") or [])}
+    for n in range(1, _attempts + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            return {"healthy": bool(data.get("healthy")),
+                    "as_of": data.get("as_of"),
+                    "count": data.get("count"),
+                    "eans": list(data.get("eans") or [])}
+        except (TimeoutError, urllib.error.URLError) as e:
+            if n == _attempts:
+                raise
+            logger.warning("OOS monitor fetch failed (attempt %d/%d): %s",
+                           n, _attempts, e)
+            time.sleep(5 * n)
+    raise AssertionError("unreachable")
 
 
 def _campaign_family(name: str) -> str:
