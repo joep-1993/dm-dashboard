@@ -134,6 +134,84 @@ def export_runs(task_ids: str):
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
+@router.get("/coverage")
+def coverage():
+    """Per-tier: how much of what the optimizer proposed is actually live.
+
+    Answers the two standing questions in one table — how many Tier A/B
+    redirects are still waiting to be pushed, and how many need regenerating
+    because the optimizer never found a target, the push failed, or the
+    suggestion changed after it went live.
+    """
+    from backend import rurl_push_tracking
+    return rurl_push_tracking.coverage()
+
+
+@router.get("/coverage/rows")
+def coverage_rows(tiers: str = "A,B", states: str = "never,stale,failed",
+                  limit: int = 5000):
+    """The individual URLs behind the coverage buckets."""
+    from backend import rurl_push_tracking
+    rows = rurl_push_tracking.outstanding(
+        tiers=[t for t in tiers.split(",") if t.strip()],
+        states=[s for s in states.split(",") if s.strip()],
+        limit=limit,
+    )
+    return {"tiers": tiers, "states": states, "returned": len(rows), "rows": rows}
+
+
+@router.get("/coverage/export")
+def coverage_export(tiers: str = "A,B", states: str = "never,stale,failed",
+                    limit: int = 50000):
+    """The same rows as an xlsx, in the Push-screen column order.
+
+    `old url` / `new url` first, so the file can be pasted straight into the
+    Redirect Tool's text input without reshaping it.
+    """
+    import io
+    import pandas as pd
+    from datetime import datetime
+    from backend import rurl_push_tracking
+
+    rows = rurl_push_tracking.outstanding(
+        tiers=[t for t in tiers.split(",") if t.strip()],
+        states=[s for s in states.split(",") if s.strip()],
+        limit=limit,
+    )
+    if not rows:
+        raise HTTPException(404, "No rows match this selection")
+
+    df = pd.DataFrame(rows)
+    out = pd.DataFrame({
+        "old url": df["original_url"],
+        "new url": df["redirect_url"],
+        "score": df["reliability_score"],
+        "tier": df["reliability_tier"],
+        "state": df["state"],
+        "reason": df.get("reason"),
+        "push_status": df.get("push_status"),
+        "push_detail": df.get("push_detail"),
+        "pushed_target": df.get("pushed_target"),
+        "pushed_at": df.get("pushed_at"),
+        "processed_at": df.get("processed_at"),
+    })
+    # ISO strings with a +00:00 offset in, Amsterdam wall-clock out. openpyxl
+    # rejects a tz-aware datetime outright, and a raw offset string is not
+    # something you can sort or filter on in Excel.
+    for col in ("pushed_at", "processed_at"):
+        s = pd.to_datetime(out[col], errors="coerce", utc=True)
+        out[col] = s.dt.tz_convert("Europe/Amsterdam").dt.tz_localize(None)
+    buf = io.BytesIO()
+    out.to_excel(buf, index=False)
+    name = f"rurl_outstanding_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
+    return Response(
+        content=buf.getvalue(),
+        media_type=("application/vnd.openxmlformats-officedocument"
+                    ".spreadsheetml.sheet"),
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
 @router.post("/refresh-facets")
 def refresh_facets():
     """Kick off a background rebuild of facets.csv from the Search API.

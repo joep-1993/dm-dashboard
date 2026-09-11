@@ -423,24 +423,46 @@ def start_optimize(
                 _history_append(task_id)
                 return
 
-        # Persistence: filter out URLs already processed (unless forced).
+        # Persistence: filter out URLs this run must not touch. Normally that
+        # is everything already in the cache; under Force reprocess all it is
+        # only the URLs that already redirect in production (same rule as v2 —
+        # both call rurl_push_tracking.urls_to_skip).
         all_input_urls = _read_url_column(input_path, url_column)
-        cached_urls: set[str] = set()
-        if not force_reprocess and all_input_urls:
+        skip_urls: set[str] = set()
+        if all_input_urls:
             try:
-                from backend import rurl_optimizer_persistence as pers
-                cached_urls = pers.already_processed(all_input_urls)
+                from backend import rurl_push_tracking as track
+                skip_urls = track.urls_to_skip(all_input_urls, force_reprocess)
             except Exception as e:
                 _append_log(task_id, f"[warn] persistence lookup failed: {e} — processing all URLs")
-                cached_urls = set()
-        if cached_urls:
+                skip_urls = set()
+        if skip_urls:
             _append_log(task_id,
-                        f"Persistence: {len(cached_urls):,} of {len(all_input_urls):,} URLs "
-                        f"already processed — skipping them.")
-            _filter_input_csv(input_path, url_column, cached_urls)
+                        f"Persistence: {len(skip_urls):,} of {len(all_input_urls):,} URLs "
+                        + ("already redirect in production — leaving them alone."
+                           if force_reprocess else "already processed — skipping them."))
+            _filter_input_csv(input_path, url_column, skip_urls)
 
-        # Short-circuit: every URL is cached — write output directly from the cache.
-        if cached_urls and len(cached_urls) >= len(all_input_urls):
+        # Only rows skipped BECAUSE they were cached get merged back into the
+        # output; under force the skip list is the live redirects.
+        cached_urls: set[str] = set() if force_reprocess else skip_urls
+
+        # Short-circuit: nothing left to process. Compared against the
+        # DISTINCT input URLs — `all_input_urls` is a raw column read and a
+        # duplicated URL would otherwise keep the count above the skip set,
+        # handing the optimizer an input CSV that was filtered down to nothing.
+        if skip_urls and len(skip_urls) >= len(set(all_input_urls)):
+            if force_reprocess:
+                msg = (f"All {len(skip_urls):,} URLs already redirect in "
+                       "production — nothing to reprocess")
+                _set(task_id, {"status": "completed", "progress": 100,
+                               "message": msg,
+                               "started_at": datetime.now().isoformat(),
+                               "finished_at": datetime.now().isoformat(),
+                               "script": "no_op"})
+                _append_log(task_id, msg + ".")
+                _history_append(task_id)
+                return
             try:
                 from backend import rurl_optimizer_persistence as pers
                 prev_df = pers.load_previous(list(cached_urls))

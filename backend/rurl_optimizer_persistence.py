@@ -147,14 +147,24 @@ def list_run_output_task_ids() -> set[str]:
 
 
 def load_all_processed() -> pd.DataFrame:
-    """Return every row from rurl_processed (deduped: one row per URL)."""
+    """Return every row from rurl_processed (deduped: one row per URL).
+
+    Includes the push-tracking columns (see rurl_push_tracking), so the
+    "Export all" workbook says per URL whether the suggestion is actually live
+    — the whole point of tracking it.
+    """
     ensure_table()
+    from backend import rurl_push_tracking
+    rurl_push_tracking.ensure_columns()
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT original_url, redirect_url, reliability_tier,
-                          reliability_score, match_type, reason, processed_at
+                f"""SELECT original_url, redirect_url, reliability_tier,
+                          reliability_score, match_type, reason, processed_at,
+                          push_status, push_detail, pushed_target, pushed_at,
+                          push_run_id,
+                          {rurl_push_tracking.STATE_SQL} AS push_state
                    FROM rurl_processed
                    ORDER BY processed_at DESC"""
             )

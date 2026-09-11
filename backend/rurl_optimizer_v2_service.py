@@ -900,9 +900,13 @@ def _run_tier_a_loop(task_id: str, ts: str, output_path: Path, tier_a_limit: int
             df_full = _pd.read_csv(_io.BytesIO(data))
             raw_n = len(df_full)
             df = df_full[~df_full["r_url"].astype(str).isin(processed_urls)]
-            if not force_reprocess and len(df):
-                cached = pers.already_processed(df["r_url"].tolist())
-                df = df[~df["r_url"].isin(cached)]
+            if len(df):
+                # Force reprocess narrows this to the live redirects rather than
+                # skipping it — see rurl_push_tracking.urls_to_skip.
+                from backend import rurl_push_tracking as track
+                skip = track.urls_to_skip(df["r_url"].tolist(), force_reprocess)
+                if skip:
+                    df = df[~df["r_url"].isin(skip)]
             # Cap the candidate window to what the loop can still process before
             # the per-row shop check: rows are visits-desc, and the loop stops at
             # _TIER_A_MAX_URLS total, so vetting rows beyond that window is pure
@@ -1173,7 +1177,10 @@ def start_optimize(
                 # after dropping cached + (optionally) shopname rows. Stops
                 # when we have row_limit fresh URLs, Redshift is exhausted
                 # (returned fewer rows than asked), or we hit MAX_FETCH.
-                needs_oversample = (not force_reprocess) or exclude_shopnames
+                # Always oversample now: even a force run filters something
+                # out (the live redirects), so fetching exactly row_limit rows
+                # would hand back fewer than asked.
+                needs_oversample = True
                 if needs_oversample and row_limit:
                     import io as _io
                     import pandas as _pd
@@ -1189,10 +1196,12 @@ def start_optimize(
                         df_full = _pd.read_csv(_io.BytesIO(data))
                         raw_n = len(df_full)
                         df_filtered = df_full
-                        if not force_reprocess:
-                            cached = pers.already_processed(df_filtered["r_url"].tolist())
-                            df_filtered = df_filtered[~df_filtered["r_url"].isin(cached)]
-                            cached_n = len(cached)
+                        from backend import rurl_push_tracking as track
+                        skip = track.urls_to_skip(df_filtered["r_url"].tolist(),
+                                                  force_reprocess)
+                        if skip:
+                            df_filtered = df_filtered[~df_filtered["r_url"].isin(skip)]
+                        cached_n = len(skip)
                         if exclude_shopnames:
                             shop_mask = df_filtered["r_url"].apply(_url_contains_shopname)
                             shop_n = int(shop_mask.sum())
@@ -1222,7 +1231,9 @@ def start_optimize(
                     data = buf.getvalue().encode("utf-8")
                     parts = [f"Redshift returned {raw_n:,} rows"]
                     if cached_n:
-                        parts.append(f"{cached_n:,} already processed")
+                        parts.append(f"{cached_n:,} already redirect in production"
+                                     if force_reprocess
+                                     else f"{cached_n:,} already processed")
                     if shop_n:
                         parts.append(f"{shop_n:,} contained shopnames")
                     parts.append(f"keeping {len(df_rs):,} fresh URLs")
@@ -1238,21 +1249,30 @@ def start_optimize(
                 _history_append(task_id)
                 return
 
-        # Persistence: filter out URLs already processed (unless forced).
+        # Persistence: filter out URLs this run must not touch. Normally that
+        # is everything already in the cache; under Force reprocess all it is
+        # only the URLs that already redirect in production.
         all_input_urls = _read_url_column(input_path, url_column)
-        cached_urls: set[str] = set()
-        if not force_reprocess and all_input_urls:
+        skip_urls: set[str] = set()
+        if all_input_urls:
             try:
-                from backend import rurl_optimizer_persistence as pers
-                cached_urls = pers.already_processed(all_input_urls)
+                from backend import rurl_push_tracking as track
+                skip_urls = track.urls_to_skip(all_input_urls, force_reprocess)
             except Exception as e:
                 _append_log(task_id, f"[warn] persistence lookup failed: {e} — processing all URLs")
-                cached_urls = set()
-        if cached_urls:
+                skip_urls = set()
+        if skip_urls:
             _append_log(task_id,
-                        f"Persistence: {len(cached_urls):,} of {len(all_input_urls):,} URLs "
-                        f"already processed — skipping them.")
-            _filter_input_csv(input_path, url_column, cached_urls)
+                        f"Persistence: {len(skip_urls):,} of {len(all_input_urls):,} URLs "
+                        + ("already redirect in production — leaving them alone."
+                           if force_reprocess else "already processed — skipping them."))
+            _filter_input_csv(input_path, url_column, skip_urls)
+
+        # Cached rows are merged back into the output further down. Only the
+        # ones skipped BECAUSE they were cached belong there: under force the
+        # skip list is the live redirects, and re-offering those on the Push
+        # screen is the opposite of leaving them alone.
+        cached_urls: set[str] = set() if force_reprocess else skip_urls
 
         # Optional: drop URLs whose keyword contains a SHOP_NAME so they
         # don't burn through the row_limit. For the redshift path the
@@ -1268,8 +1288,25 @@ def start_optimize(
                             f"{len(remaining_urls):,} remaining URLs.")
                 _filter_input_csv(input_path, url_column, shop_urls)
 
-        # Short-circuit: every URL is cached — write output directly from the cache.
-        if cached_urls and len(cached_urls) >= len(all_input_urls):
+        # Short-circuit: nothing left to process. Compared against the
+        # DISTINCT input URLs — `all_input_urls` is a raw column read and a
+        # duplicated URL would otherwise keep the count above the skip set,
+        # handing the optimizer an input CSV that was filtered down to nothing.
+        if skip_urls and len(skip_urls) >= len(set(all_input_urls)):
+            if force_reprocess:
+                # Nothing to serve from cache either — these rows are live and
+                # were deliberately left out. Finish honestly instead of running
+                # the optimizer over an empty CSV.
+                msg = (f"All {len(skip_urls):,} URLs already redirect in "
+                       "production — nothing to reprocess")
+                _set(task_id, {"status": "completed", "progress": 100,
+                               "message": msg,
+                               "started_at": datetime.now().isoformat(),
+                               "finished_at": datetime.now().isoformat(),
+                               "script": "no_op"})
+                _append_log(task_id, msg + ".")
+                _history_append(task_id)
+                return
             try:
                 from backend import rurl_optimizer_persistence as pers
                 prev_df = pers.load_previous(list(cached_urls))

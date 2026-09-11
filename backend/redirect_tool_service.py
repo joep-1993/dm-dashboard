@@ -1645,12 +1645,20 @@ def save_run(label: str, input_method: str, preflight: dict, result: dict) -> in
         )
         new_id = cur.fetchone()["id"]
         conn.commit()
-        return new_id
     except Exception:
         conn.rollback()  # don't return an aborted transaction to the pool
         raise
     finally:
         return_db_connection(conn)
+
+    # Reconcile against the Auto-Redirects suggestion cache, so rurl_processed
+    # knows which of its own proposals are live. Done here rather than in the
+    # Auto-Redirects push button on purpose: a run pasted straight into this
+    # tool from an exported xlsx puts the same rules in production, and that
+    # has to count too. Never fatal — the rules are already posted.
+    from backend import rurl_push_tracking
+    rurl_push_tracking.record_run_safe(new_id, result["per_row"])
+    return new_id
 
 
 def list_runs(limit: int = 100) -> list[dict]:

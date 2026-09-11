@@ -168,9 +168,25 @@ def export_all():
     out["deepest_category"] = df["redirect_url"].apply(_deepest_category_from_redirect)
     out["reason"] = df["reason"]
     out["processed_at"] = df["processed_at"]
+    # Push state per URL — is this suggestion actually live? (rurl_push_tracking)
+    out["push_state"] = df.get("push_state")
+    out["push_status"] = df.get("push_status")
+    out["pushed_at"] = df.get("pushed_at")
+    out["pushed_target"] = df.get("pushed_target")
+    out["push_detail"] = df.get("push_detail")
 
     out["__s"] = pd.to_numeric(out["score"], errors="coerce")
     out = out.sort_values("__s", ascending=False, na_position="last").drop(columns="__s")
+
+    # xlsx has no concept of an offset: openpyxl refuses a tz-aware datetime
+    # outright ("Excel does not support datetimes with timezones"), which made
+    # this endpoint a hard 500 the moment `processed_at` was non-empty. The DB
+    # stores UTC (Etc/UTC), so convert to Amsterdam — the timezone every other
+    # timestamp in this app is read in — and drop the offset.
+    for col in ("processed_at", "pushed_at"):
+        if col in out.columns:
+            s = pd.to_datetime(out[col], errors="coerce", utc=True)
+            out[col] = s.dt.tz_convert("Europe/Amsterdam").dt.tz_localize(None)
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
