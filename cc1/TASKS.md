@@ -3,6 +3,73 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-12 (2) — DMA Exclusions: de OOS-monitor krijgt 60s en drie pogingen
+
+De nachtelijke OOS-cyclus viel op 2026-09-11 om voor NL met een `TimeoutError`.
+`_exclude_eans()` haalde de lijst bij `googlemc-suc.bva-apps.aks.private.beslist.nl` op met
+`timeout=30` en zonder herhaling, dus één trage nacht bij de monitor beëindigde de hele run —
+inclusief de scan en de re-enable erachter, waar niets mis mee was. Commit `edbc2bd`.
+
+- [x] **`timeout=30` → `60`, plus 3 pogingen met 5s/10s ertussen**, `TimeoutError` en
+      `urllib.error.URLError` gevangen. `import urllib.error` erbij; `time` en `logger` stonden er al.
+- [x] **Herhalen mag hier zonder de afweging van `fc7a106`**: dit is een GET op een snapshot,
+      dus idempotent. Die hele "weet ik zeker dat er nog niets is weggeschreven"-vraag geldt
+      alleen op de mutate-kant van dezelfde module.
+- [x] **Gedekt met een gestubde `urlopen`** (happy path met timeout=60 en 0 retries; timeout →
+      URLError → succes met slaapjes 5 en 10; alle drie mislukt, her-raist de laatste fout en
+      slaapt twee keer niet drie; niet-retrybare fout gaat meteen door). Daarna de echte smoke
+      test: `healthy=True, count=1310, as_of=2026-09-11T03:04:55Z`, in 0,3s.
+- [ ] **Openstaand — prod draait dit nog niet.** De nachtcyclus is `scripts/dma_oos_cycle.bat`
+      onder Task Scheduler op een **andere machine** (`C:\Users\l.davidowski\dm-dashboard`) en
+      praat met `BASE_URL`, default `https://localhost:3003` — niet met de :8003 hier. Er bestaat
+      op deze machine geen Windows-service `dm-dashboard` (gecontroleerd), en :3003 is vanaf WSL
+      onbereikbaar. Dus: daar `git pull` + de dashboard-service herstarten, anders draait de
+      volgende nacht nog steeds op 30s zonder retry. #priority:high
+- [ ] **Openstaand — `HTTPError` is een subklasse van `URLError`**, dus een harde 404/400 van de
+      monitor wordt nu ook 3x geprobeerd en kost 15s slapen voordat hij alsnog opgooit. Bewust zo
+      gelaten (volgt de opgegeven fix). Wil je het eruit: `except urllib.error.HTTPError: raise`
+      vóór de brede except. #priority:low
+
+### 2026-09-12 (1) — Auto-Redirects: vastleggen wat er live staat, en dat beschermen
+
+`rurl_processed` hield bij wat de optimizer **voorstelde** en zweeg over wat daarvan in
+productie terechtkwam. Gevolg: "hoeveel Tier A wacht er nog" was alleen te beantwoorden door de
+per-rij-JSON van elke redirect-tool-run met de hand te lezen, en "Force reprocess all" liep
+dwars over rijen heen die al live stonden. Commits `cb925c6` + `a5ec9ad`. Lessen in LEARNINGS,
+zelfde datum.
+
+- [x] **`backend/rurl_push_tracking.py`** (nieuw): zes kolommen op `rurl_processed`
+      (`push_status`, `pushed_at`, `pushed_target`, `push_run_id`, `push_detail`,
+      `push_attempted_at`) + twee indexen, idempotent. Matching op **pad**, niet op URL —
+      `rurl_processed` bewaart absolute URL's, de Redirect API krijgt paden.
+- [x] **Ingehaakt op `redirect_tool_service.save_run()`**, niet op de Push-knop: een export die
+      je zelf in de Redirect Tool plakt telt net zo goed. `record_run_safe`, want de regels staan
+      er al als dit draait.
+- [x] **`urls_to_skip(urls, force_reprocess)`** — één definitie voor de drie gates die de input
+      filteren (Tier-A-chunkloop, Redshift-oversample-lus, gewone input-filter; v2 én v1).
+      Normaal de hele cache, onder force alleen wat al redirect in productie.
+- [x] **Backfill**: `scripts/backfill_rurl_push_state.py` speelde 58 bestaande runs terug,
+      2.918 R-URL's gestempeld (2.847 Tier A). Herdraaien is een no-op.
+- [x] **Purge**: `scripts/purge_stale_rurl_suggestions.py` op de V70-cutoff (`9536098`,
+      09-09 14:59) — 76.890 niet-doorgevoerde rijen van vóór die commit weg (A 3.409, B 8.139,
+      C 18.017, D 47.325), 32.175 blijven (2.909 live + 29.266 van ná V70). Backup-CSV staat
+      lokaal in `scripts/` en valt onder de `*.csv`-regel in `.gitignore`.
+- [x] **e2e geverifieerd**: force-run over 3 live URL's geeft "Persistence: 3 of 3 URLs already
+      redirect in production — leaving them alone" en daarna "nothing to reprocess".
+- [x] **Twee bestaande gaten dichtgemaakt**: de short-circuit vergeleek met de rúwe inputkolom
+      (één dubbele regel zette de optimizer alsnog op een leeggefilterde CSV), en
+      `/api/rurl/export-all` was een harde 500 op openpyxl + tz-bewuste datetime.
+- [x] **Backend herstart** na afloop (`:8003` draait zonder `--reload`). De facets.csv-rebuild
+      die onderweg aansloeg is afgerond: 643.653 rijen, cache weer 0 dagen oud.
+- [ ] **Openstaand — prod `:3003` draait dit nog niet.** DB is gedeeld, dus pushes vanaf prod
+      worden pas gestempeld ná een deploy daar. Niet erg: de backfill is idempotent en haalt
+      het in één keer in. #priority:medium
+- [ ] **Openstaand — geen UI.** De kaart "Doorgevoerd" is op verzoek weer verwijderd (Joep,
+      2026-09-12: het gaat puur om de mogelijkheid in de backend). De endpoints `/coverage`,
+      `/coverage/rows` en `/coverage/export` staan er nog en hebben nu geen frontend-lezer.
+      Een logische volgende stap zou zijn de backlog rechtstreeks vanuit de tool te pushen in
+      plaats van via export-en-plak. #priority:low
+
 ### 2026-09-11 (4) — Trailing-slash redirects: analyse + fixlijst voor de betaalde kant
 
 Vraag: komt er meer verkeer binnen op URL's zonder trailing slash die daarna geredirect worden?
@@ -55,9 +122,8 @@ Lessen in LEARNINGS, zelfde datum.
       door dezelfde muur heen. **Phase A blijft op 16** (read-only, leest uit `_RES_CACHE`).
 - [x] **Niet aangeraakt, bewust**: het HTTP-endpoint (N8N stuurt alle item_ids in één keer en
       dat moet zo blijven), `_ga_search_rows` (had zijn retry al), `_resolve` in Phase A.
-- [ ] **Openstaand: backend herstarten.** `:8003` draait zonder `--reload` (pid 38128), dus
-      dit is pas actief na `fuser -k 8003/tcp` + herstart. Op het moment van committen nog niet
-      gedaan.
+- [x] **Backend herstart** op 2026-09-12 (meerdere keren, laatste om 01:08). De 429-retry uit
+      `fc7a106` draait daarmee op `:8003`. Let op: prod `:3003` staat hier los van.
 - [ ] **Openstaand: de eerste echte run van 200+ items is de meting.** Alleen compile +
       codepad-review gedaan, geen live mutate. Kijk of er nog failures op rate limits staan;
       in de log verschijnt nu `GA mutate rate-limited voor <item> / ad group <id>` per poging.

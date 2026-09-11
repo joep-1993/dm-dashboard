@@ -1,6 +1,91 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een OR met een NULL erin is geen false, en dat merk je pas als iemand hem omdraait (2026-09-12, Auto-Redirects push-tracking)
+
+`LIVE_SQL` in `backend/rurl_push_tracking.py` begon als:
+
+```sql
+(pushed_at IS NOT NULL OR (push_status = 'skipped' AND push_detail = 'source has existing rule'))
+```
+
+Voor 106.147 van de 109.065 rijen is `push_status` NULL, dus `push_status = 'skipped'` is NULL,
+dus de hele OR is **NULL** in plaats van false. In een `WHERE` gedraagt NULL zich als false en
+klopt het antwoord gewoon — `live_urls()` gaf altijd de goede set terug en heeft nooit iets
+verkeerd gedaan. Maar de eerste keer dat iets om `NOT (…)` vroeg, vielen precies die 106k rijen
+uit **beide** kanten van de uitkomst: een telling per bucket gaf 7 en 32.175 op een tabel van
+109.065.
+
+**Wat het verraadde was niet de fout maar de som.** Ik had de twee getallen los kunnen
+geloven — 7 te verwijderen leek zelfs plausibel ("er staat al veel live"). Dat 7 + 32.175 niet
+109.065 is, is wat het omgooide.
+
+- **Regel:** een predicaat dat je ooit gaat ontkennen, moet driewaardige logica uitsluiten.
+  `COALESCE(kolom, '') = 'waarde'` in plaats van `kolom = 'waarde'`, zodat het altijd true of
+  false is.
+- **Regel:** zet bij elke bucket-telling de som ernaast en vergelijk hem met het totaal. Dat is
+  één extra kolom en het is de enige controle die dit soort fouten vangt, want elk getal
+  afzonderlijk ziet er redelijk uit.
+- **Waar het bijna misging:** ik telde voor een `DELETE` van 70% van de tabel. Hier zou de bug
+  fail-safe zijn geweest (te weinig verwijderd), maar dezelfde vorm met de ontkenning de andere
+  kant op verwijdert stil je hele productieset.
+
+### `execute_values` liegt over `rowcount`
+
+Dezelfde sessie, ander getal dat niet klopte: de backfill meldde 615 geschreven rijen terwijl er
+2.918 in de tabel stonden. `psycopg2.extras.execute_values` splitst standaard in pagina's van
+**100 tuples** en voert dus meerdere statements uit; `cur.rowcount` erna draagt alleen de
+**laatste** pagina. Een push van 500 rijen rapporteerde daardoor 100. Fix: `page_size=len(chunk)`,
+dan is het één statement per chunk en telt `rowcount` wat je denkt. De schrijfactie zelf was
+altijd goed — alleen de rapportage niet, en dat is precies het soort fout dat je een verkeerde
+conclusie laat trekken over of iets gewerkt heeft.
+
+### Meet het ding dat de vraag stelt, niet het ding dat toevallig in de rij staat
+
+`rurl_processed.pushed_target` bewaart `input_new` (wat wij voorstelden) en niet `final_new`
+(wat de Redirect Tool uiteindelijk POSTte). Die twee lopen uiteen zodra de tool een keten
+platslaat: het doel dat wij noemden had zelf een redirect, dus de regel wijst verder door. De
+vraag die de kolom moet beantwoorden is "stelt de optimizer inmiddels iets ánders voor dan wat
+we pushten" — en daarvoor is ons eigen voorstel de eerlijke kant van de vergelijking. Op
+`final_new` vergelijken gaf **35** valse "doel gewijzigd" waar er **2** echt zijn.
+
+### Leg de uitkomst vast waar hij landt, niet waar je hem startte
+
+De reconciliatie hangt aan `redirect_tool_service.save_run()` en niet aan de Push-knop van
+Auto-Redirects. Dezelfde regels komen namelijk net zo vaak in productie doordat iemand een
+geëxporteerde xlsx in de Redirect Tool plakt. Had ik het aan de knop gehangen, dan zou de
+dekking kloppen voor de ene route en stil te laag zijn voor de andere — en juist een cijfer dat
+"te laag maar plausibel" is, wordt nooit gecontroleerd. De aanroep is `record_run_safe`: de
+redirects staan er al als dit draait, dus een boekhoudfout mag een geslaagde push niet alsnog
+laten falen.
+
+### Een "al gezien"-cache overleeft stil het script dat hem vulde
+
+`rurl_processed` houdt elke R-URL die de optimizer ooit verwerkte buiten volgende runs. Dat is
+de bedoeling — zolang het voorstel het beste is dat de engine kan. Maar
+`backend/rurl_optimizer_v2/` verandert bijna wekelijks (V59 t/m V70 in drie weken), en een rij
+uit april blokkeerde zijn URL nog steeds alsof er sindsdien niets verbeterd was. 76.890 van de
+109.065 rijen waren van vóór de laatste engine-commit én nergens doorgevoerd.
+
+De twee-assige regel die eruit volgt: **niet-doorgevoerd + ouder dan de code die het maakte =
+weggooien; doorgevoerd = afblijven, hoe oud ook.** Wat je niet hebt gepusht is niets waard, wat
+je wél hebt gepusht is een productieregel. `scripts/purge_stale_rurl_suggestions.py` leest die
+cutoff zelf uit `git log -1 -- backend/rurl_optimizer_v2/`, zodat hij niet veroudert.
+
+En de reden dat "force reprocess" die live rijen óók met rust moet laten is niet zuinigheid:
+een R-URL die 301't opnieuw door de optimizer halen laat de scraper de redirect volgen, de
+engine de **bestemmingspagina** scoren en een verzonnen voorstel over een productieregel heen
+schrijven.
+
+### openpyxl weigert een tz-bewuste datetime
+
+`/api/rurl/export-all` was een harde 500 — `ValueError: Excel does not support datetimes with
+timezones` — en dat was het al vóór deze sessie. Een `TIMESTAMPTZ`-kolom komt als
+`datetime64[ns, UTC]` uit pandas en `to_excel` weigert die botweg. Fix:
+`.dt.tz_convert("Europe/Amsterdam").dt.tz_localize(None)`. Waard om te onthouden omdat elke
+export uit deze Postgres (Etc/UTC) hier tegenaan loopt zodra er een datumkolom in komt.
+
+
 ## Een redirect die vóór de pagina gebeurt, is onzichtbaar in élke bron behalve de ruwe logs (2026-09-11, trailing slashes + betaald verkeer op PLP's)
 
 Vraag van Joep: komt er meer verkeer binnen op URL's zonder trailing slash die daarna naar de
