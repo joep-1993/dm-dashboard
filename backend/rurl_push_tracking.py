@@ -272,9 +272,16 @@ def coverage() -> dict:
 # about to re-run the optimizer over it — the URL 301s, so the scraper would
 # read the destination page and the engine would score a redirect it invented
 # from the wrong content.
+#
+# COALESCE, not a bare `push_status = 'skipped'`: for the 106k rows that have
+# never been pushed, push_status is NULL, so the comparison yields NULL and the
+# whole OR collapses to NULL rather than false. In a WHERE that reads as false
+# and looks fine — but the moment anything asks for `NOT (…)`, every one of
+# those rows drops out of BOTH sides of the answer. Found while counting rows
+# for a delete, where it would have silently protected the entire backlog.
 LIVE_SQL = ("(pushed_at IS NOT NULL"
-            " OR (push_status = 'skipped'"
-            "     AND push_detail = 'source has existing rule'))")
+            " OR (COALESCE(push_status, '') = 'skipped'"
+            "     AND COALESCE(push_detail, '') = 'source has existing rule'))")
 
 
 def live_urls(urls: Iterable[str]) -> set[str]:
