@@ -453,6 +453,49 @@ SQL_URL_TYPE = """
 STATUS_COLS = {"2xx": "n_2xx", "3xx": "n_3xx", "4xx": "n_4xx", "5xx": "n_5xx"}
 
 
+def parse_depth(value):
+    """'0,2' -> ([0, 2], None) en '7+' -> ([], 7). Alles wat geen getal is valt weg.
+
+    De `N+`-vorm bestaat omdat de Facet-diepte-grafiek zijn staart vouwt: dieptes die
+    samen onder 0,05% zitten worden één kolom "7+ facets" (foldDepthTail in de
+    frontend). Doorklikken op die kolom moet dus ">= 7" kunnen betekenen, anders levert
+    de klik een lijst op die smaller is dan de balk waar je op klikte.
+
+    Getallen en geen strings verderop: de waarde landt in de SQL via een parameter, maar
+    int() hier is wat garandeert dat er nooit iets anders dan een geheel getal in kan.
+    """
+    exact, minv = [], None
+    for part in (value or "").split(","):
+        part = part.strip()
+        if part.endswith("+"):
+            part = part[:-1]
+            if part.isdigit():
+                minv = int(part) if minv is None else min(minv, int(part))
+        elif part.isdigit():
+            exact.append(int(part))
+    return exact, minv
+
+
+def _depth_pred(expr, exact, minv):
+    """-> (sql, params) voor 'deze diepte-uitdrukking valt in de selectie'.
+
+    `expr` verschilt per tabel — d.facet_depth in de cube, w.facet_depth in
+    unknown_daily, SQL_FACET_DEPTH over x.url voor de bekende kant — en dat is precies
+    de reden dat dit een bouwer is en geen vaste string: dezelfde selectie moet in alle
+    drie de bronnen hetzelfde betekenen.
+    """
+    parts, params = [], []
+    if exact:
+        parts.append(f"({expr}) = ANY(%s)")
+        params.append(exact)
+    if minv is not None:
+        parts.append(f"({expr}) >= %s")
+        params.append(minv)
+    if not parts:
+        return "", []
+    return "(" + " OR ".join(parts) + ")", params
+
+
 def _known_filters(host=None, bot_class=None, bot_family=None):
     """Filters voor pa.bothits_url_daily (alias `d`). Geen url_type en geen
     is_known_url: die tabel draagt per definitie alleen URL's uit pa.urls, en het type
@@ -470,7 +513,7 @@ def _unknown_filters(host=None, bot_class=None, bot_family=None, url_type=None):
 
 def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
                  bot_family=None, url_type=None, limit=250, force=False, q=None,
-                 status=None):
+                 status=None, facet_depth=None):
     """De meest gecrawlde URL's in de selectie.
 
     TWEE BRONNEN, samengevoegd en opnieuw gerankt (fase 3 van de audit, 2026-08-13):
@@ -555,6 +598,27 @@ def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
     De bekende kant is voor deze vraag wél uitputtend, en levert echt iets op: over
     dezelfde 30 dagen staan de maincat-pagina's bovenaan op 4xx (/products/fietsen/,
     /products/mode/, ~2.100 elk) en redirect /products/ op 2.208 van zijn 4.340 crawls.
+
+    ---- `facet_depth` (Joep, 2026-09-11) ---------------------------------------------
+    Doorklikken vanaf de Facet-diepte-grafiek. Accepteert een lijst van dieptes en de
+    vorm `N+` (>= N) voor de gevouwen staartkolom; zie parse_depth().
+
+    Dit filter bestond nog niet en moest daarom hier landen en niet in de browser: de
+    tab toont een top-N, dus filteren over de al geladen 250 rijen zou een URL op plek
+    800 verzwijgen — dezelfde reden als bij `q`.
+
+    Beide benen kunnen het eerlijk beantwoorden, en dat is niet vanzelfsprekend:
+    pa.bothits_unknown_daily DRAAGT een facet_depth-kolom (anders dan een statuscode),
+    en voor de bekende kant is de diepte uit pa.urls.url af te leiden met dezelfde
+    SQL_FACET_DEPTH die de Facets-kolom al vult. Er valt dus geen kant weg zoals bij
+    `status`, en er hoort hier ook geen dekkingsmelding bij.
+
+    Wat de AANROEPER erbij moet zetten: de grafiek telt alleen category-vormige URL's
+    (zie by_depth in get_summary), want facet_depth is 0 voor álles zonder /c/ —
+    productpagina's, assets, robots.txt. Dit filter kent die inperking niet, dus een
+    doorklik op de nul-balk zonder url_type erbij levert een lijst op die breder is dan
+    de balk waarop geklikt is. De frontend stuurt daarom C-url + Cat-url mee en toont
+    dat als tweede chip.
     """
     start, end = _range(start_date, end_date)
     limit = max(1, min(int(limit or 250), 1000))
@@ -564,10 +628,11 @@ def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
     # dezelfde val als de group_by-echo in get_daily.
     status = status if status in STATUS_COLS else None
     col = STATUS_COLS.get(status)
+    depth_exact, depth_min = parse_depth(facet_depth)
     # Genormaliseerd in de cachesleutel, niet de ruwe string: "  Siemens" en "siemens"
     # zijn dezelfde query en horen dezelfde cache-entry te delen.
     key = ("topurls", start, end, host, bot_class, bot_family, url_type, limit,
-           tuple(terms), status)
+           tuple(terms), status, tuple(depth_exact), depth_min)
 
     def run():
         # ---- dekking: welk deel van deze statusklasse kán deze lijst tonen ---------
@@ -578,6 +643,14 @@ def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
         coverage = None
         if col:
             cfrag, cparams = _filters(host, bot_class, bot_family, url_type)
+            # De diepte hoort ook in de NOEMER: staat er een facet_depth-chip, dan gaat
+            # de lijst over minder URL's en moet "deze lijst dekt X van Y" over diezelfde
+            # inperking gaan. Zonder dit leest de melding een dekkingspercentage af tegen
+            # een selectie die breder is dan wat er in de tabel staat.
+            dsql, dparams = _depth_pred("d.facet_depth", depth_exact, depth_min)
+            if dsql:
+                cfrag += " AND " + dsql
+                cparams = cparams + dparams
             c = _query(f"""
                 SELECT coalesce(sum(d.hits) FILTER (WHERE d.is_known_url), 0)::bigint
                            AS in_lijst,
@@ -599,6 +672,10 @@ def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
         unknown = []
         if not col:
             frag, params = _unknown_filters(host, bot_class, bot_family, url_type)
+            dsql, dparams = _depth_pred("w.facet_depth", depth_exact, depth_min)
+            if dsql:
+                frag += " AND " + dsql
+                params = params + dparams
             if terms:
                 frag += "".join(" AND strpos(lower(w.url), %s) > 0" for _ in terms)
                 params = params + terms
@@ -640,6 +717,20 @@ def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
         #   * een URL-TYPE raakt bijna de hele tabel -> dat als id-lijst doorgeven
         #     betekent een ANY() met ~1 miljoen elementen, en dat kostte 37s. Zo'n
         #     filter hoort als predicaat in de aggregatie zelf, met de join erbij.
+        # De predicaten die over pa.urls gaan, in één lijst: het url_type-filter en sinds
+        # 2026-09-11 ook de facet-diepte. Ze delen dezelfde twee paden hieronder (een
+        # id-lijst bij een zoekterm, anders een EXISTS), en die stonden eerst alleen voor
+        # url_type uitgeschreven — een tweede filter erbij fietsen zou dat verdubbeld
+        # hebben.
+        xpreds, xparams = [], []
+        if wanted:
+            xpreds.append(f"({SQL_URL_TYPE}) = ANY(%s)")
+            xparams.append(list(wanted))
+        dsql, dparams = _depth_pred(SQL_FACET_DEPTH, depth_exact, depth_min)
+        if dsql:
+            xpreds.append(dsql)
+            xparams += dparams
+
         extra, idparams = "", []
         if terms:
             idsql = ["SELECT x.url_id FROM pa.urls x WHERE true"]
@@ -647,18 +738,18 @@ def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
             for t in terms:
                 idsql.append("AND strpos(lower(x.url), %s) > 0")
                 idp.append(t)
-            if wanted:
-                idsql.append(f"AND ({SQL_URL_TYPE}) = ANY(%s)")
-                idp.append(list(wanted))
+            for pred in xpreds:
+                idsql.append("AND " + pred)
+            idp += xparams
             pre_ids = [r["url_id"] for r in _query(" ".join(idsql), idp)]
             if not pre_ids:
                 return out(sorted(unknown,
                                   key=lambda r: (-int(r["hits"]), r["url"]))[:limit])
             extra, idparams = " AND d.url_id = ANY(%s)", [pre_ids]
-        elif wanted:
-            extra = (f" AND EXISTS (SELECT 1 FROM pa.urls x WHERE x.url_id = d.url_id "
-                     f"AND ({SQL_URL_TYPE}) = ANY(%s))")
-            idparams = [list(wanted)]
+        elif xpreds:
+            extra = (" AND EXISTS (SELECT 1 FROM pa.urls x WHERE x.url_id = d.url_id "
+                     "AND " + " AND ".join(xpreds) + ")")
+            idparams = xparams
 
         # `rank_hits` is waarop de top-N wordt gekozen: hits, of de statusteller als er
         # op status wordt gefilterd. HAVING erbij, anders vult de lijst zich met de

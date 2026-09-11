@@ -122,6 +122,8 @@ async def top_urls(
     q: Optional[str] = Query(None, max_length=200,
                              description="zoektekst; meerdere woorden = alle woorden"),
     status: Optional[str] = Query(None, description="2xx | 3xx | 4xx | 5xx"),
+    facet_depth: Optional[str] = Query(None, max_length=40,
+                                       description="0 | 2 | 0,1 | 7+ (>= 7)"),
 ):
     """De meest gecrawlde URL's in de selectie — zie get_top_urls voor de bron.
 
@@ -144,9 +146,21 @@ async def top_urls(
     if status and status not in ("2xx", "3xx", "4xx", "5xx"):
         raise HTTPException(status_code=400,
                             detail=f"status must be 2xx/3xx/4xx/5xx, got {status!r}")
+    # Om dezelfde reden als `status` aan de rand afgewezen en niet stil genegeerd: een
+    # typefout in de diepte hoort niet als "alle dieptes" terug te komen. parse_depth()
+    # laat onleesbare stukken vallen, dus zonder deze toets zou `facet_depth=twee` een
+    # ongefilterde top-N opleveren onder een chip die "2 facets" beweert.
+    if facet_depth:
+        for part in facet_depth.split(","):
+            part = part.strip().rstrip("+")
+            if not part.isdigit():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"facet_depth must be digits, optionally with a trailing + "
+                           f"(e.g. 0, 2, '0,1', '7+'), got {facet_depth!r}")
     try:
         return await _run(get_top_urls, start_date, end_date, host, bot_class,
-                          bot_family, url_type, limit, force, q, status)
+                          bot_family, url_type, limit, force, q, status, facet_depth)
     except Exception as e:
         logger.error("bothits top-urls failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))

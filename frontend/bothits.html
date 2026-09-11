@@ -640,7 +640,10 @@
                                  84% van die balk verkeer dat per definitie geen facetten
                                  heeft. Dat staat uitgelegd bij by_depth in
                                  bothits_service.py en in BOTHITS_PROCESS.md. -->
-                            <div class="card-header"><h5 class="mb-0">Facet-diepte</h5></div>
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0">Facet-diepte</h5>
+                                <span class="muted-note">klik op een staaf voor de URL's</span>
+                            </div>
                             <div class="card-body">
                                 <div class="chart-box-sm chart-framed"><canvas id="depthChart"></canvas>
                                      <div class="chart-skel"></div></div>
@@ -946,13 +949,10 @@
     // Kleur hangt aan de ENTITEIT, nooit aan de rangorde: een bot wegfilteren mag
     // de overblijvers niet herverven. Wat niet in de map staat wordt grijs.
     //
-    // DRIE dimensies volgen SERIES bewust NIET, en dat is de uitkomst van de vraag
-    // "alle Splitsen op-opties dezelfde verdeling?" (Joep, 2026-08-28):
-    //   * status_class en verify_state zijn SEMANTISCH — groen is goed, bordeaux is
-    //     kritiek. Die op categorische slots zetten maakt 4xx lichtgroen en de
-    //     spoof-tripwire turquoise, en dan draagt de kleur geen betekenis meer.
-    //     De dataviz-regel zegt hetzelfde: statuskleuren zijn gereserveerd en worden
-    //     nooit "serie 4".
+    // TWEE dimensies volgen SERIES bewust NIET (was drie tot 2026-09-11, toen
+    // status_class op verzoek van Joep alsnog de reeks in ging — zie daar):
+    //   * verify_state is SEMANTISCH: 'failed' is een tripwire en geen categorie naast
+    //     de andere, dus die hoort niet op een categorisch slot te landen.
     //   * facet_depth is ORDINAAL, geen categorie — zie DEPTH_RAMP.
     const COLOR_MAPS = {
         // Volume over 30 dagen t/m 2026-08-27: PLP 46,4%, C-url 43,7%, R-url 7,4%,
@@ -1034,12 +1034,27 @@
         // secundaire encoding, en die is er: beide grafieken dragen een legenda én de
         // tabel eronder.
         is_known_url: bySeries('not in pa.urls', 'in pa.urls'),
-        // SEMANTISCH, dus buiten SERIES (zie de kop van COLOR_MAPS): 2xx goed, 3xx
-        // informatief, 4xx waarschuwing, 5xx kritiek. Bordeaux is de donkerste warme
-        // hue die het gedeelde palet heeft — een echt rood zou van buiten SEO Stats
-        // moeten komen en dan betekent dezelfde kleur daar iets anders.
-        status_class: { '2xx': PAL.green, '3xx': PAL.rurl, '4xx': PAL.oker,
-                        '5xx': PAL.bordeaux },
+        // VOLGT SERIES sinds 2026-09-11 (Joep: "voor de donut Statuscode dezelfde
+        // kleuren als voor URL-type"). Op volume: 2xx 72%, 3xx 24%, 4xx 4%, 5xx ~0%.
+        //
+        // Dit is een TERUGDRAAIING van de keuze van 2026-08-28, en de reden om hem op te
+        // schrijven is dat de oude reden nog steeds klopt: deze vier waren semantisch
+        // gekleurd — groen goed, okergeel waarschuwing, bordeaux kritiek — en dat is wat
+        // je inlevert. 4xx staat nu in het lichtgroen van serie 3, en lichtgroen leest
+        // als "in orde". Wie dat terug wil: `{ '2xx': PAL.green, '3xx': PAL.rurl,
+        // '4xx': PAL.oker, '5xx': PAL.bordeaux }`, en dan is de statusring de enige
+        // categorische ring op de pagina met een eigen palet.
+        //
+        // Wat het oplevert is de reden dat het gevraagd is: in het uitklappaneel staan
+        // URL-type en Statuscode náást elkaar, en twee ringen met een verschillend palet
+        // lezen als twee verschillende soorten grafiek. Nu pakt slot n overal dezelfde
+        // hue, zoals de kop van COLOR_MAPS voor elke andere dimensie al voorschrijft.
+        //
+        // LET OP: deze map voedt ook "Hits per dag > Splitsen op > Statuscode" en de
+        // legenda daarboven. De kleurwissel is dus paginabreed en niet alleen die ring.
+        // verify_state blijft wél semantisch: daar is 'failed' een tripwire en geen
+        // categorie naast de andere.
+        status_class: { ...bySeries('2xx', '3xx', '4xx', '5xx'), overig: PAL.overig },
         // SEMANTISCH, dus buiten SERIES. IP-verificatie: groen = IP zit in de
         // gepubliceerde range van de operator, bordeaux = claimt een operator mét lijst
         // maar zit erbuiten (de tripwire), grijs = geen lijst om tegen te toetsen (Meta,
@@ -1756,6 +1771,38 @@
         }]);
     }
 
+    // Doorklikken vanaf een facet-diepte-staaf (Joep, 2026-09-11). Eén bouwer voor de
+    // twee grafieken die deze data tekenen — het Overzicht en het bot-paneel — zodat ze
+    // niet uit elkaar kunnen lopen.
+    //
+    // TWEE dingen die deze doorklik anders maken dan die van de ringen.
+    //
+    // 1. De staaf draagt `0`..`6` of de gevouwen `7+`, en dat laatste betekent ">= 7".
+    //    foldDepthTail() vouwt de staart (samen < 0,05%) tot één kolom, dus zonder die
+    //    vorm zou de klik een smallere lijst geven dan de staaf waarop je klikte.
+    //    parse_depth() in de service leest beide vormen.
+    //
+    // 2. Er gaat ALTIJD een URL-type mee. Deze grafiek telt alleen category-vormige
+    //    URL's — facet_depth is 0 voor álles zonder /c/, dus zonder die inperking
+    //    zat 84% van de nul-balk vol met productverkeer dat per definitie geen facetten
+    //    heeft (zie by_depth in bothits_service.py). Het filter in /top-urls kent die
+    //    inperking niet, dus de lijst zou breder zijn dan de staaf. C-url + Cat-url is
+    //    precies de scope van de grafiek, en het staat als eigen chip in beeld in plaats
+    //    van stil in de query — anders filtert de lijst strenger dan de pagina zegt.
+    const DEPTH_DRILL_TYPES = 'C-url,Cat-url';
+    function depthClickOpts(rows, extra = {}) {
+        return {
+            onHover: (e, els) => {
+                e.native.target.style.cursor = els.length ? 'pointer' : 'default';
+            },
+            onClick: (e, els) => {
+                if (!els.length) return;
+                drillToUrls({ ...extra, url_type: DEPTH_DRILL_TYPES,
+                              facet_depth: String(rows[els[0].index].facet_depth) });
+            },
+        };
+    }
+
     function drawDepth(s) {
         const rows = foldDepthTail(s.by_facet_depth || []);
         CHARTS.depth?.destroy();
@@ -1779,6 +1826,7 @@
             options: {
                 responsive: true, maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
+                ...depthClickOpts(rows),
                 // Brede staven: met acht kolommen in plaats van twaalf mag de kolom de
                 // categorie vullen, anders staat er evenveel lucht als data.
                 datasets: { bar: { categoryPercentage: 0.82, barPercentage: 0.98 } },
@@ -1897,18 +1945,20 @@
         det.innerHTML = `<td colspan="12">
             <div class="row g-3">
               <div class="col-12">
-                <div class="d-flex justify-content-between align-items-center mb-1 gap-2">
-                  <div class="chart-title">Hits per dag — ${escapeHtml(fam)}</div>
-                  <button type="button" class="btn btn-sm btn-outline-purple" id="detUrlsBtn"
-                          title="Opent de URL's-tab met alleen de URL's die deze crawler heeft opgevraagd, binnen de periode en filters die nu gelden.">URL's van ${escapeHtml(fam)} →</button>
-                </div>
+                <div class="chart-title mb-1">Hits per dag — ${escapeHtml(fam)}</div>
                 <div class="chart-box-sm chart-framed"><canvas id="detDailyChart"></canvas></div></div>
             </div>
-            <!-- Eén regel voor drie ringen, niet drie keer "klikbaar" boven elke kaart:
-                 de aanwijzer wordt een handje zodra je een segment raakt, dus dit hoeft
+            <!-- Hier stond een knop "URL's van <familie> →". Eruit op verzoek van Joep
+                 (2026-09-11) zodra alle VIER de grafieken doorklikbaar werden: elke klik
+                 draagt nu een dimensie, en de knop was de enige ingang die dat niet deed.
+                 Wat je ervoor inlevert is de doorklik op de kale familie in één klik; die
+                 haal je nu in twee, door de dimensie-chip boven de tabel weg te klikken en
+                 "Crawler" te laten staan. -->
+            <!-- Eén regel voor de vier grafieken, niet vier keer "klikbaar" boven elke
+                 kaart: de aanwijzer wordt een handje zodra je iets raakt, dus dit hoeft
                  alleen de eerste keer uit te leggen wát er dan gebeurt. -->
-            <div class="muted-note mt-2">Klik op een segment — URL-type, statuscode of domein —
-                 om de URL's erachter te zien.</div>
+            <div class="muted-note mt-2">Klik op een segment of staaf — URL-type, statuscode,
+                 domein of facet-diepte — om de URL's erachter te zien.</div>
             <div class="row g-3 mt-0">
               <div class="col-md-3"><div class="chart-title mb-1">URL-type</div>
                 <div class="donut-wrap chart-framed"><canvas id="detTypeChart"></canvas>
@@ -1923,9 +1973,6 @@
                 <div class="chart-box-sm chart-framed"><canvas id="detDepthChart"></canvas></div></div>
             </div></td>`;
         tr.after(det);
-        // Meteen gewired en niet pas na de fetch: de knop hangt alleen aan `fam` en
-        // moet ook werken terwijl de vier grafieken nog laden.
-        det.querySelector('#detUrlsBtn').onclick = () => drillToUrls({ bot_family: fam });
 
         // Twee endpoints naast elkaar: /summary voor de drie uitsplitsingen en
         // /daily voor de tijdreeks. Beide filteren op bot_family — dat filter bestond
@@ -2002,6 +2049,9 @@
             options: {
                 responsive: true, maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
+                // Met de familie erbij, anders dan in het Overzicht: dit paneel gaat
+                // over één crawler en de doorklik hoort dat mee te nemen.
+                ...depthClickOpts(dep, { bot_family: fam }),
                 scales: {
                     x: { border: { display: false }, grid: { display: false },
                          ticks: { color: '#9a9aa6', font: { size: 10 } } },
@@ -2171,13 +2221,25 @@
     // op het URL-type van Googlebot en daarna op een segment in het Overzicht (dat over
     // alle bots gaat) moet niet stilletjes op Googlebot blijven staan.
     let urlDrill = {};
-    const DRILL_LABELS = { bot_family: 'Crawler', url_type: 'URL-type', host: 'Domein' };
+    const DRILL_LABELS = { bot_family: 'Crawler', url_type: 'URL-type', host: 'Domein',
+                           facet_depth: 'Facet-diepte' };
+    // De waarde zoals hij in de chip komt te staan. Twee dimensies lezen als een kale
+    // waarde verkeerd: een diepte-doorklik stuurt twee URL-types mee en dat hoort met
+    // een spatie na de komma te staan, en `facet_depth: "0"` zegt niets — de grafiek
+    // noemt die staaf "geen facet", dus de chip hoort dat ook te doen.
+    const DRILL_VALUE = {
+        url_type: v => v.split(',').join(', '),
+        facet_depth: v => (v === '0' ? 'geen facet'
+                                     : `${v} ${v === '1' ? 'facet' : 'facets'}`),
+    };
 
-    function drillToUrls({ bot_family = null, url_type = null, host = null, status = null } = {}) {
+    function drillToUrls({ bot_family = null, url_type = null, host = null,
+                           facet_depth = null, status = null } = {}) {
         urlDrill = {};
         if (bot_family) urlDrill.bot_family = bot_family;
         if (url_type) urlDrill.url_type = url_type;
         if (host) urlDrill.host = host;
+        if (facet_depth) urlDrill.facet_depth = facet_depth;
         // De Status-keuze is een bestaande control met een eigen zichtbare stand, dus
         // die wordt geschreven in plaats van gedupliceerd. Alleen als de doorklik hem
         // noemt: een klik op URL-type mag een al gekozen status niet ongevraagd wissen —
@@ -2204,7 +2266,8 @@
             + keys.map(k => `<span class="drill-chip" title="Geldt alleen voor deze lijst en `
                 + `overschrijft ${k === 'bot_family' ? 'Bot-soort' : DRILL_LABELS[k]} in de `
                 + `filterkaart bovenaan."><span class="dc-key">${DRILL_LABELS[k]}:</span>`
-                + `<span class="dc-val">${escapeHtml(urlDrill[k])}</span>`
+                + `<span class="dc-val">${escapeHtml(
+                      (DRILL_VALUE[k] || (v => v))(urlDrill[k]))}</span>`
                 + `<button type="button" class="dc-x" data-k="${k}" aria-label="Verwijder `
                 + `${DRILL_LABELS[k]}-selectie">&times;</button></span>`).join('');
         bar.querySelectorAll('.dc-x').forEach(b => {
@@ -2415,7 +2478,8 @@
             // PLP is met 46% het grootste segment van de URL-type-ring, dus het is de
             // meest waarschijnlijke eerste klik — en de enige die per constructie nul
             // rijen oplevert. Zonder deze regel las die klik als een kapotte tabel.
-            const types = urlDrill.url_type ? [urlDrill.url_type] : checked('typeFilter');
+            const types = urlDrill.url_type ? urlDrill.url_type.split(',')
+                                            : checked('typeFilter');
             const plpOnly = types.length > 0 && types.every(t => t === 'PLP');
             const c = urlCols();
             tb.innerHTML = plpOnly
