@@ -1773,6 +1773,31 @@ def _resolve_ad_group_target(client, customer_id, item_id, ref_target, cl0) -> d
     return _build_target(item_id, kind, campaign, ad_group, nodes, leaf, customer_id)
 
 
+# Google Ads throttles per account; a fan-out of mutates can trip 429
+# TooManyRequests ("Retry in 6 seconds"). The read path (_ga_search_rows) already
+# backs off — do the same on the write path so a rate limit costs a few seconds
+# instead of failing the item. Other errors propagate untouched (a mutate is not
+# safe to blind-retry; only an explicit 429 means "nothing was written yet").
+_OOS_APPLY_RETRIES = 3
+_OOS_APPLY_BACKOFF = (6, 12, 24)  # seconds, per Google's own "Retry in 6 seconds"
+
+
+def _apply_one_target_retrying(client, customer_id, item_id, target) -> dict:
+    """_apply_one_target with exponential backoff on 429 TooManyRequests."""
+    for n in range(_OOS_APPLY_RETRIES + 1):
+        try:
+            return _apply_one_target(client, customer_id, item_id, target)
+        except google_exceptions.TooManyRequests as e:
+            if n == _OOS_APPLY_RETRIES:
+                raise
+            delay = _OOS_APPLY_BACKOFF[n]
+            logger.warning(
+                "GA mutate rate-limited for %s / ad group %s (attempt %d/%d), retrying in %ds: %s",
+                item_id, target.get("ad_group_id"), n + 1, _OOS_APPLY_RETRIES + 1, delay, e)
+            time.sleep(delay)
+    raise AssertionError("unreachable")  # loop either returns or raises
+
+
 def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
     """Exclude a selected list of OOS item ids (source-tagged 'oos').
 
@@ -1839,7 +1864,7 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
                 # this ad group yet); 2nd+ re-resolve to see the new subdivision.
                 t = ref_t if i == 0 else _resolve_ad_group_target(client, customer_id, iid, ref_t, cl0)
                 if t["action"] in ("append_negative", "subdivide_and_exclude"):
-                    rev = _apply_one_target(client, customer_id, iid, t)
+                    rev = _apply_one_target_retrying(client, customer_id, iid, t)
                     out.append((iid, "ok", {**rev, "result": "excluded"}))
                 else:
                     out.append((iid, "skip", {**t, "result": "skipped", "reason": t.get("skip_reason")}))
@@ -1850,7 +1875,9 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
         return out
 
     if groups:
-        with ThreadPoolExecutor(max_workers=min(16, len(groups))) as ex:
+        # 4, not 16: every worker fires mutates at the same account, and the
+        # combined rate is what trips 429s (Phase A above stays at 16 — read-only).
+        with ThreadPoolExecutor(max_workers=min(4, len(groups))) as ex:
             for grp_out in ex.map(_run_group, list(groups.values())):
                 for iid, kind, payload in grp_out:
                     per_item[iid]["errors" if kind == "err" else "results"].append(payload)
