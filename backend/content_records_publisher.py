@@ -422,18 +422,24 @@ def publish_records(env: str = "production", mode: str = "new", limit: int = Non
         if retire_failed:
             result["success"] = False
 
-        # The prune above can only see URLs whose push_state row survived, which is
-        # why a bulk delete that removed content AND state left records live forever
-        # (2026-08-06: 4,306 of them). The queue is written by triggers on the content
-        # tables, so it sees the delete itself regardless of who did it.
-        _set_progress(task_id, phase="unpublishing")
-        try:
-            from backend.content_unpublish_queue import drain
-            result["unpublish_queue"] = drain("koptekst", env=env)
-        except Exception as e:
-            # A publish must not fail because the follow-up removal did.
-            log.exception("Unpublish queue drain failed")
-            result["unpublish_queue"] = {"error": str(e)}
+        # The unpublish-queue drain USED TO RUN HERE and no longer does — it is its
+        # own step now, see daily_automation.step_drain_unpublish_queue().
+        #
+        # It is still the necessary other half of this publish: the prune above can
+        # only see URLs whose push_state row survived, which is why a bulk delete that
+        # removed content AND state left records live forever (2026-08-06: 4,306 of
+        # them). The queue is written by triggers on the content tables, so it catches
+        # the delete regardless of who did it.
+        #
+        # Why it moved: drain() sends up to MAX_PER_RUN (5,000) HTTP DELETEs over
+        # WORKERS (8) threads, synchronously, inside this background task. That is
+        # enough concurrent outbound work to stop this FastAPI server from answering
+        # the status polls of daily_automation — whose poll_task then hits
+        # POLL_MAX_ERRORS and aborts the WHOLE daily run, publish included. Running it
+        # as a separate step after the publish keeps the same work but stops it from
+        # competing with the poller that watches the publish.
+        #
+        # The consequence for callers: `result` no longer carries "unpublish_queue".
 
     _set_progress(task_id, phase="cancelled" if result["cancelled"] else "done")
     return result

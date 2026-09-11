@@ -3067,6 +3067,83 @@ async def content_records_seed(request: dict = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ---------------------------------------------------------------------------
+# Unpublish-queue drain — its own background task (2026-09-11)
+#
+# This used to run inside the two publishers, at the end of publish_records() and
+# publish_faq_v2(). It was moved out because of what it does to THIS server while it
+# runs: drain() fires up to 5,000 HTTP DELETEs over 8 worker threads, synchronously,
+# inside a publish task. That is enough concurrent outbound work to stop FastAPI from
+# answering daily_automation's status polls — its poll_task() then hits
+# POLL_MAX_ERRORS and aborts the entire daily run, including the publish that was
+# working fine.
+#
+# Same task shape as content_records_publisher: a dict store behind a Lock, a daemon
+# thread, a uuid task id. It lives here rather than in content_unpublish_queue.py so
+# that module stays importable as a plain library (scripts/delete_dead_facet_urls.py
+# and its own __main__ call drain() directly, and neither wants a task store).
+#
+# The two kinds run SEQUENTIALLY in the one thread. Running them side by side would
+# double the outbound DELETE concurrency against the same live store, which is the
+# problem this move exists to solve.
+_drain_tasks = {}
+_drain_lock = threading.Lock()
+
+
+def _run_unpublish_drain(task_id, env):
+    from backend.content_unpublish_queue import drain
+    with _drain_lock:
+        _drain_tasks[task_id].update(status="running", started_at=time.time())
+    result = {}
+    try:
+        for kind in ("koptekst", "faq"):
+            # Per kind in its own try: a failure on kopteksten must not cost the FAQ
+            # drain, and the caller has to be able to see which half broke.
+            try:
+                result[kind] = drain(kind, env=env)
+            except Exception as e:
+                logging.getLogger(__name__).exception(
+                    "Unpublish queue drain failed for %s", kind)
+                result[kind] = {"kind": kind, "error": str(e)}
+            with _drain_lock:
+                _drain_tasks[task_id]["result"] = dict(result)
+        with _drain_lock:
+            _drain_tasks[task_id].update(status="completed", result=result,
+                                         completed_at=time.time())
+    except Exception as e:
+        with _drain_lock:
+            _drain_tasks[task_id].update(status="failed", error=str(e),
+                                         result=result, completed_at=time.time())
+
+
+@app.post("/api/content-unpublish/drain")
+async def content_unpublish_drain(request: dict = None):
+    """Remove from the live stores what was deleted locally, for both kinds.
+
+    Body: {environment}. Returns a task_id to poll — the work is minutes of HTTP
+    DELETEs, far past any request timeout.
+    """
+    request = request or {}
+    env = request.get("environment", "production")
+    if env not in ("dev", "staging", "production"):
+        raise HTTPException(status_code=400, detail="Invalid environment. Use: dev, staging, production")
+    task_id = str(uuid.uuid4())
+    with _drain_lock:
+        _drain_tasks[task_id] = {"status": "queued", "env": env, "result": {}}
+    threading.Thread(target=_run_unpublish_drain, args=(task_id, env),
+                     daemon=True).start()
+    return {"status": "started", "task_id": task_id, "environment": env}
+
+
+@app.get("/api/content-unpublish/drain/status/{task_id}")
+async def content_unpublish_drain_status(task_id: str):
+    with _drain_lock:
+        t = _drain_tasks.get(task_id)
+        if t is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        return dict(t)
+
+
 @app.post("/api/content-publish/url/unpublish")
 async def unpublish_content_single_url(request: dict = None):
     """Remove one url's koptekst from the live store — paired with a local delete.

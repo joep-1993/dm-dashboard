@@ -435,18 +435,21 @@ def publish_faq_v2(env="production", limit=None, replace=True, mode="new", task_
     if bad:
         result["failed_batches"] = bad[:10]
 
-    # The removal half of a publish. /faq is additive and this module has never had a
-    # prune, so a deleted faq_content_v2 row used to stay live forever — 4,398 of them
-    # from the 2026-08-06 cleanup, roughly 27,000 questions. The queue is filled by
-    # triggers on the content table, so it catches the delete whoever did it; see
-    # backend/content_unpublish_queue.py.
-    if not cancelled:
-        try:
-            from backend.content_unpublish_queue import drain
-            result["unpublish_queue"] = drain("faq", env=env)
-        except Exception as e:
-            # A publish must not fail because the follow-up removal did.
-            result["unpublish_queue"] = {"error": str(e)}
+    # The unpublish-queue drain USED TO RUN HERE and no longer does — it is its own
+    # step now, see daily_automation.step_drain_unpublish_queue().
+    #
+    # It is still the removal half of a publish: /faq is additive and this module has
+    # never had a prune, so a deleted faq_content_v2 row used to stay live forever —
+    # 4,398 of them from the 2026-08-06 cleanup, roughly 27,000 questions. The queue is
+    # filled by triggers on the content table, so it catches the delete whoever did it;
+    # see backend/content_unpublish_queue.py.
+    #
+    # Why it moved: drain() fires up to MAX_PER_RUN (5,000) HTTP DELETEs over WORKERS
+    # (8) threads, synchronously, inside this background task — enough to stop this
+    # FastAPI server from answering the status polls of daily_automation, whose
+    # poll_task then hits POLL_MAX_ERRORS and aborts the whole daily run.
+    #
+    # The consequence for callers: `result` no longer carries "unpublish_queue".
     return result
 
 

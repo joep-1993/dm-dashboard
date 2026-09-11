@@ -506,24 +506,37 @@ def _approx_count(pub_result, key):
     return v
 
 
-def _unpublish_note(pub_result):
-    """Render the unpublish-queue drain, and only when there is something to say.
+def _drain_note(drain_results):
+    """Render the unpublish-queue drain for Slack, per kind.
 
-    Silence is what let 4,306 deleted kopteksten stay live for five weeks, so a
-    refusal or a failure has to reach the summary even though it is a side step of
-    the publish.
+    Was _unpublish_note(), which read the "unpublish_queue" key off a publish result.
+    The drain is its own step since 2026-09-11, so it reads its own result instead —
+    but the reason it is LOUD is unchanged: silence is what let 4,306 deleted
+    kopteksten stay live for five weeks, so a refusal or a failure has to reach the
+    summary even though this is a side step.
+
+    Reports every kind that has something to say, and says nothing at all on a clean
+    run with an empty queue — a line that appears every day stops being read.
     """
-    q = pub_result.get("unpublish_queue") or {}
-    if q.get("error"):
-        return f", unpublish-queue FOUT: {q['error'][:120]}"
-    if q.get("refused"):
-        return f", unpublish-queue GEWEIGERD: {q['refused'][:160]}"
-    bits = []
-    if q.get("unpublished"):
-        bits.append(f"{q['unpublished']} van live af")
-    if q.get("failed"):
-        bits.append(f"{q['failed']} mislukt")
-    return f", {', '.join(bits)}" if bits else ""
+    if not drain_results:
+        return ""
+    parts = []
+    for kind in ("koptekst", "faq"):
+        q = drain_results.get(kind) or {}
+        if q.get("error"):
+            parts.append(f"{kind} FOUT: {q['error'][:120]}")
+            continue
+        if q.get("refused"):
+            parts.append(f"{kind} GEWEIGERD: {q['refused'][:160]}")
+            continue
+        bits = []
+        if q.get("unpublished"):
+            bits.append(f"{q['unpublished']} van live af")
+        if q.get("failed"):
+            bits.append(f"{q['failed']} mislukt")
+        if bits:
+            parts.append(f"{kind} {', '.join(bits)}")
+    return f"\nUnpublish-queue: {'; '.join(parts)}" if parts else ""
 
 
 def _fold_interrupted(result, pub_result, mapping, log, label):
@@ -591,8 +604,7 @@ def step_publish_kopteksten_records():
         skipped = pub_result.get("urls_too_long", 0)
         extra = f", skipped {skipped} too-long URLs" if skipped else ""
         log.info(f"  Kopteksten: pushed {pub_result.get('urls_pushed', 0)} URLs"
-                 f" (pruned {pub_result.get('urls_retired', 0)}{extra})"
-                 f"{_unpublish_note(pub_result)}")
+                 f" (pruned {pub_result.get('urls_retired', 0)}{extra})")
         return pub_result
     else:
         raise RuntimeError(f"Kopteksten publish did not succeed: {pub_result}")
@@ -646,11 +658,67 @@ def step_publish_faq_v2():
                       log, "FAQ")
     if pub_result.get("success"):
         log.info(f"  FAQ: pushed {pub_result.get('records_pushed', 0)} records"
-                 f" across {pub_result.get('urls_processed', 0)} URLs"
-                 f"{_unpublish_note(pub_result)}")
+                 f" across {pub_result.get('urls_processed', 0)} URLs")
         return pub_result
     else:
         raise RuntimeError(f"FAQ publish did not succeed: {pub_result}")
+
+
+def step_drain_unpublish_queue():
+    """Remove from the live stores what was deleted locally — both kinds.
+
+    Its own step since 2026-09-11. It used to run at the tail of each publisher, and
+    that is what broke the daily run: drain() fires up to 5,000 HTTP DELETEs over 8
+    threads inside the publish task, the dashboard stopped answering status polls
+    while it did, and poll_task() hit POLL_MAX_ERRORS and aborted the whole run —
+    including a publish that had already succeeded.
+
+    AFTER the publish and not before: the queue is filled by triggers on the content
+    tables, so anything the publish run deletes locally should be drained in the same
+    pass rather than waiting a day.
+
+    Non-fatal by contract with the caller — main() catches, warns and continues. The
+    queue is durable: what is not unpublished today is still queued tomorrow.
+    """
+    log = logging.getLogger("automation")
+    payload = {"environment": "production"}
+
+    def _start():
+        resp = SESSION.post(
+            f"{BASE_URL}/api/content-unpublish/drain",
+            json=payload,
+            timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+        )
+        if resp.status_code == 401 and _reauth_on_401(resp):
+            resp = SESSION.post(
+                f"{BASE_URL}/api/content-unpublish/drain",
+                json=payload,
+                timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+            )
+        resp.raise_for_status()
+        task_id = resp.json().get("task_id")
+        log.info(f"  Unpublish-queue drain started, task_id={task_id}")
+        return f"{BASE_URL}/api/content-unpublish/drain/status/{task_id}"
+
+    # No restart_fn, unlike the publish steps. A drain that dies with the server
+    # leaves its queue rows exactly as they were — the stamp happens after each
+    # DELETE — so the next daily run picks up the remainder. Restarting it here would
+    # re-run the same work against a server that has just proven it cannot finish it.
+    status_url = _start()
+    result = poll_task(status_url, PUBLISH_TIMEOUT)
+
+    drain_result = result.get("result", {}) or {}
+    for kind in ("koptekst", "faq"):
+        q = drain_result.get(kind) or {}
+        if q.get("error"):
+            log.warning(f"  Unpublish-queue {kind}: FAILED — {q['error'][:200]}")
+        elif q.get("refused"):
+            log.warning(f"  Unpublish-queue {kind}: REFUSED — {q['refused'][:200]}")
+        else:
+            log.info(f"  Unpublish-queue {kind}: {q.get('unpublished', 0)} unpublished,"
+                     f" {q.get('failed', 0)} failed"
+                     f" ({q.get('pending', 0)} were pending)")
+    return drain_result
 
 
 def step_publish_parallel():
@@ -791,6 +859,23 @@ def main():
         )
         sys.exit(1)
 
+    # --- Unpublish-queue drain (non-fatal — the queue keeps what it cannot do) ---
+    # After the publish, and only if it got here: the publish is what fills the queue
+    # with today's deletions. Same non-fatal shape as the recheck step above, because
+    # the queue is durable — a failure today is retried tomorrow with nothing lost.
+    drain_failed = False
+    drain_results = None
+    log.info("--- Starting: Unpublish-queue drain ---")
+    try:
+        drain_results = step_drain_unpublish_queue()
+        completed_steps.append("Unpublish-queue drain")
+        log.info("--- Completed: Unpublish-queue drain ---")
+    except Exception as e:
+        drain_failed = True
+        log.warning(f"--- FAILED (non-fatal): Unpublish-queue drain --- Error: {e}",
+                    exc_info=True)
+        log.info("Continuing — the queue keeps its rows and the next run drains them")
+
     # --- Final Slack notification ---
     duration = datetime.now() - start_time
 
@@ -813,15 +898,19 @@ def main():
         publish_summary = (
             f"\nPublish: Kopteksten {_approx_count(kopt, 'urls_pushed')} URLs"
             f" (pruned {kopt.get('urls_retired', 0)})"
-            f"{_unpublish_note(kopt)}"
             f", FAQ {_approx_count(faq, 'records_pushed')} records"
             f" ({_approx_count(faq, 'urls_processed')} URLs)"
-            f"{_unpublish_note(faq)}"
             f"{restart_note}"
         )
 
+    # Build drain summary — its own line, since the drain is its own step now. It
+    # stays empty on a clean run; see _drain_note().
+    drain_summary = _drain_note(drain_results)
+    if drain_failed:
+        drain_summary += "\nUnpublish-queue: stap mislukt (volgende run opnieuw)"
+
     any_timed_out = process_results and any(r["timed_out"] for r in process_results.values())
-    partial = any_timed_out or recheck_failed
+    partial = any_timed_out or recheck_failed or drain_failed
     icon = ":warning:" if partial else ":white_check_mark:"
     label = "Partial" if partial else "Complete"
 
@@ -831,7 +920,8 @@ def main():
         f"{icon} *DM Tools - Daily Automation {label}*"
         f"{recheck_note}"
         f"{process_summary}"
-        f"{publish_summary}\n"
+        f"{publish_summary}"
+        f"{drain_summary}\n"
         f"Duration: {str(duration).split('.')[0]}"
     )
 
