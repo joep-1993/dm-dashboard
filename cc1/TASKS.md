@@ -34,6 +34,12 @@ URL-type. Lessen in LEARNINGS, zelfde datum. Commits ebdf18d + c6c42cc.
       stond op `z-index: 1` en de lagen in het paneel — `.donut-center` 2, `.donut-tip` 3,
       `.chart-skel` 4 — winnen daarvan; nu 5. In `bothits.html` zelf en niet in
       `css/style.css`, want het page-blok laadt later en wint. Regel staat in UI_BLUEPRINT.
+- [x] **Caret bleef bij de naam**: openklappen zette de rij op `font-weight: 600`, en
+      vetgedrukt paste "GoogleOther" — de langste familienaam — net niet meer in de kolom,
+      dus de naam wipte onder het pijltje. Alleen die ene familie, want de kolombreedte
+      komt uit de dichte (niet-vette) rijen. `.bot-name` krijgt nu `nowrap` plus
+      `font-weight: 400` bij `.is-open`, net als `.url-cell` al had. Gemeten: caret en naam
+      op dezelfde regel, kolom 113px dicht én open. Regel staat in UI_BLUEPRINT.
 - [ ] **Open: geen legenda onder de mini-donuts.** De vier ringen in het paneel dragen alleen een
       hover; naast elkaar zijn URL-type en Statuscode sinds de kleurwissel lastiger uit elkaar te
       houden (beide blauw-roze-groen). Een regeltje `2xx · 3xx · 4xx` eronder zou dat oplossen,

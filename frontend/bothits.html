@@ -105,6 +105,19 @@
            het proportionele font (2026-08-13) zwaarder, want daar scheelt bold méér
            breedte dan bij monospace. */
         .tool-table tbody tr.url-row.is-open > td.url-cell { font-weight: 400; }
+        /* Dezelfde twee dingen voor de Bot-familie-kolom (Joep, 2026-09-11). Bij het
+           openklappen van GoogleOther — de langste familienaam — sprong de naam ONDER de
+           caret, en alleen bij die ene. Oorzaak is de regel hierboven: een open rij gaat
+           op font-weight 600, vet is breder, en de kolombreedte komt uit de niet-vette
+           rijen. Net te weinig ruimte, dus de cel brak af tussen het pijltje en de naam.
+           nowrap is het antwoord op de eis zelf ("altijd naast de crawler, ongeacht hoe
+           lang"): een cel die niet mag afbreken kán het pijltje niet achterlaten, ook
+           niet als er ooit een langere familie bijkomt of het venster smaller is.
+           De font-weight erbij is wat de TABEL stil houdt: zonder dat wordt de kolom bij
+           elke klik een paar pixels breder en schuift de hele rij mee. Zelfde afweging en
+           zelfde uitkomst als bij .url-cell hierboven — daar verschoof de ellipsis. */
+        .bot-name { white-space: nowrap; }
+        .tool-table tbody tr.bot-row.is-open > td.bot-name { font-weight: 400; }
         /* Kadertje om een grafiek, zoals .tool-table-wrap om een tabel. In de kaarten
            van het overzicht zit hij alleen om de staafgrafiek: een donut heeft zijn eigen
            ronde vorm als omlijning en de kaart eromheen doet de rest.
@@ -1897,7 +1910,7 @@
                    grafiek een eigen kleur heeft terwijl er daar acht benoemd zijn en de
                    rest in Overig valt. De SOORT houdt zijn kleur wel — dat zijn vier
                    waarden die op elke rij hetzelfde betekenen. -->
-              <td><span class="bot-caret">▸</span>${escapeHtml(b.bot_family)}</td>
+              <td class="bot-name"><span class="bot-caret">▸</span>${escapeHtml(b.bot_family)}</td>
               <td class="col-mid"><span class="lbl" style="color:${colorFor('bot_class', b.bot_class)}">${b.bot_class}</span></td>
               <td class="num">${fmt(b.hits)}</td>
               <td class="num">${pct(b.hits, total)}</td>

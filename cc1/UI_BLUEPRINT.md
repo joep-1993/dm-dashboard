@@ -211,6 +211,17 @@ other tool uses the grey default. New tools follow the grey default.
   the panel and the page agree about the period. After the await, check the canvas
   still exists: the row may have been closed or re-rendered while the request was in
   flight.
+- **De IDENTITEITSKOLOM van een open rij blijft op `font-weight: 400` en krijgt
+  `white-space: nowrap`** (Joep, 2026-09-11, Bot Hits; eerder al voor de URL-kolom).
+  Een open rij tinten én vet zetten is verleidelijk, maar vet is bréder terwijl de
+  kolombreedte uit de dichte rijen komt. Het gaat daardoor mis bij precies één waarde —
+  de langste: bij Bot Hits sprong "GoogleOther" onder zijn eigen caret, alle andere
+  families niet, en in de URL-tabel schoof de ellipsis een paar tekens op. Dat leest als
+  een bug in die ene rij in plaats van als een vormregel. Twee regels, twee taken:
+  `nowrap` garandeert dat de caret nooit van de naam af raakt, hoe lang een waarde ook
+  wordt of hoe smal het venster staat; de `font-weight: 400` op alleen die cel houdt de
+  KOLOM stil, zodat de tabel niet bij elke klik een paar pixels verspringt. De overige
+  cellen mogen wél vet — dat is wat de open rij aanwijst.
 - **Het uitklappaneel is een eigen vlak, niet een rij die langer werd** (Joep, 2026-08-14).
   Twee dingen die het verschil maken: **verticale padding van ~1,6rem** op de detail-`<td>`
   (met 0,9rem plakte de eerste grafiek tegen de rij waar je net op klikte), en de
