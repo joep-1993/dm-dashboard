@@ -68,6 +68,15 @@ afgekeurd, zonder fout in de log. Vervangen door
    .be-query duurde bij het meten meer dan twee minuten.
 4. De workflow staat op `active: false` in het exportbestand; activeren blijft handwerk.
 
+## Latere wijzigingen
+
+- **2026-09-14 — plusvorm-facet-URL's eruit, in beide takken.** Een `+` in een `/c/`-pad is een
+  multi-facetwaarde-combinatie en geen zelfstandige landingspagina. Onder de `'%#%'`-regel staat nu
+  `and not (<pad> like '%/c/%' and (strpos(<pad>, '+') > 0 or strpos(lower(<pad>), '%2b') > 0))`,
+  met `<pad>` = `SPLIT_PART(dv.url, '?', 1)`. De encoded vorm zit erbij omdat `dim_visit.url`
+  percent-encoded varianten bevat. `strpos()` in plaats van `LIKE`, anders had de literal `%` een
+  `ESCAPE`-clausule nodig gehad. De regel is in beide query's identiek, dus ze blijven diffbaar.
+
 ## Wat dit NIET oplost
 
 R-URL's blijven buiten IndexNow, op beide domeinen. Ze leveren 62% van de

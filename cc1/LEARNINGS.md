@@ -1,6 +1,45 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een node die bovenaan invoegt is waardeloos als er verderop nog gesorteerd wordt (2026-09-14, n8n basements homepage)
+
+Joep: "ik heb basements_homepage_nl gedraaid maar zie `/products/horloge/c/serie_horloge~24349451`
+niet terug op de homepage". Geen foutmelding, geen rij minder, de flow was groen.
+
+`add_custom` zette vier eigen links op `order: 1..4` en schoof de rest op. Twee nodes verderop
+staat `deduplicate`, en die sorteert op `visits` en herschrijft `order`:
+`sort((a, b) => (b.json.visits || 0) - (a.json.visits || 0))`. Custom-entries **hebben** geen
+`visits`-veld, dus `|| 0` zet ze op nul en ze zakken onder de 400 queryrijen. En
+`check_and_results` loopt van boven af met `if (kept.length >= TARGET) break;` op TARGET = 100.
+Plek 401 wordt dus nooit geevalueerd. Alle vier de custom-links ontbraken, niet alleen die ene.
+
+**De diagnosevolgorde die het snel uitwees: pleit eerst de URL vrij, lees daarna pas de
+nodevolgorde.** Bij een stille afwezigheid is de verleiding om te gaan zoeken in de filters die er
+wel zijn - de producttelling, de redirect-check. Die twee waren in twintig seconden uit te sluiten
+met een directe API-call, en daarna bleef er nog maar een verklaring over:
+
+- Search API met `filters[serie_horloge][0]=24349451` gaf **18 producten**, ruim boven
+  `MIN_RESULTS = 3`.
+- `redirect.api.beslist.nl` gaf `{"data":[],"totalRecords":0}`, dus `statusCode` valt via `?? 200`
+  terug op 200 en `remove` blijft false.
+
+**De vangnetregel in `check_and_results` bleek in de praktijk echt nodig.** Facetwaarde 24349451
+staat niet in de facetlijst van de kale categorie-call (top-8-truncatie), dus de eerste telling
+leest 0 en de pagina zou als "leeg" wegvallen. Alleen de single-facet-uitzondering - vertrouw de
+direct gefilterde `total` als die de categorie echt verkleint, 18 < 10.000 - houdt hem binnen.
+Nieuwe, langstaartige facetwaarden zijn precies het geval waarvoor die regel er staat.
+
+**De fix is de node verplaatsen, niet hem uitzonderen.** `add_custom` staat nu vlak voor
+`create_post_json`, als laatste stap; daar raakt geen enkele node de entries meer aan. Dat is
+stabieler dan elke downstream-node laten kijken naar een `custom: true`-vlag, want `check_redirect`
+is een HTTP-node die per item vuurt en die sla je niet over zonder er een IF-tak bij te bouwen.
+
+Twee dingen die bij het gelijktrekken van BE en DE opvielen: hun `add_custom` was nog de oude
+enkelvoudige `shifted.unshift(...)`-vorm met een hardgecodeerde entry, en in beide stond
+`country_code: 'NL'`. Dat laatste is dode data - `create_post_json` gebruikt alleen `url`,
+`keyword` en `order`, en de markt komt uit zijn eigen `countryCodes`. Onopvallend fout, tot iemand
+dat veld ooit wel gaat gebruiken.
+
 ## Een succesmelding en een foutmelding die van twee verschillende triggers komen (2026-09-14, GSD Low Linkage)
 
 De dagelijkse Excel-load werd twee keer getriggerd — een Windows Scheduled Task en een interne

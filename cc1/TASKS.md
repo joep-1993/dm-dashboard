@@ -3,6 +3,60 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-14 (3) — Basements homepage: de custom-links kwamen nooit in de payload
+
+`basements_homepage_nl` draaide groen, maar geen van de vier `add_custom`-links stond op de
+homepage. Oorzaak: `deduplicate` sorteert op `visits` en herschrijft `order`, en custom-entries
+hebben geen `visits` — ze zakten naar plek ~401 van 404 en de `TARGET = 100`-break in
+`check_and_results` bereikte ze nooit. Lessen in LEARNINGS, zelfde datum. De exports staan in
+`Downloads\claude\`, niet in deze repo.
+
+- [x] **`add_custom` is de laatste stap voor `create_post_json`** geworden, in alle drie de flows
+      (`basements_homepage_nl` / `_be` / `_de`). Nieuwe keten:
+      `homepage_query2 → fix_html_entities → … → check_and_results → add_custom → create_post_json`.
+      Verplaatsen in plaats van downstream uitzonderen, want `check_redirect` is een HTTP-node die
+      per item vuurt.
+- [x] **BE en DE omgezet naar dezelfde `CUSTOM`-array als NL** — die hadden nog de oude
+      `shifted.unshift(...)` met één hardgecodeerde Makita-entry. Keyword en URL ongewijzigd
+      overgenomen; `country_code` van `'NL'` naar `'BE'`/`'DE'` (dode data, `create_post_json` leest
+      alleen `url`, `keyword` en `order`).
+- [x] **`MAX_TOTAL = 100`** in de node, zodat de lijst even lang blijft als voorheen: de custom
+      entries duwen evenveel laag scorende query-URL's eruit, precies wat de oude volgorde-shift
+      vóór de cut op 100 ook deed. Op `0` zetten = niet afkappen.
+- [x] **Botsingsregel**: staat een custom-URL ook in de queryresultaten, dan gaat die queryvariant
+      eruit — anders stond dezelfde URL twee keer in de payload, de tweede keer met `page_heading`
+      als keyword. Vergelijking op genormaliseerd pad (domein, querystring, fragment en sluitende
+      slash eraf, lowercase).
+- [x] **Getest door de node-code van alle drie echt uit te voeren** tegen 100 mockrijen met een
+      botsing erin: 100 items, `order` aaneengesloten 1..100, custom bovenaan in CUSTOM-volgorde,
+      de dubbele URL één keer met het eigen keyword.
+- [x] **De URL zelf vrijgepleit vóór de diagnose**: Search API gaf 18 producten voor
+      `serie_horloge~24349451` (boven `MIN_RESULTS = 3`), de redirect-API gaf leeg, dus geen
+      404-drop. Alleen de nodevolgorde bleef over.
+- [ ] **Openstaand — importeren in n8n.** De drie exports staan klaar; de live workflows draaien nog
+      de oude volgorde, dus tot de import verandert er niets op de homepage. #priority:high
+- [ ] **Openstaand — publiceert de DE-flow überhaupt iets?** `POST keywords.api.beslist.nl/footer`
+      weigerde eerder country `de` (whitelist be/nl), en de DE-custom-entry is bovendien letterlijk
+      de BE-URL met Nederlandse slugs. #priority:medium
+
+### 2026-09-14 (2) — IndexNow: plusvorm-facet-URL's gaan er niet meer in
+
+Een `+` in een `/c/`-pad is een multi-facetwaarde-combinatie, geen zelfstandige landingspagina, en
+die hoeven we niet bij Bing aan te melden. Aangepast in
+`indexnow_submitter_IMPORT_2026-09-09_be.json` in `Downloads\claude\`, niet in deze repo. Zie ook
+`docs/indexnow_n8n_be.md`.
+
+- [x] **Uitsluitregel in beide takken** (`fetch_urls_from_redshift` en `_be`), direct onder de
+      `'%#%'`-regel. Alleen de combinatie telt: een `/p/`-URL met een `+` gaat gewoon mee, een
+      `/c/`-URL zonder `+` ook.
+- [x] **Ook de encoded vorm `%2B`** meegenomen, want `dim_visit.url` bevat percent-encoded
+      varianten; die zouden er anders stil doorheen glippen.
+- [x] **`strpos()` in plaats van `LIKE`**, omdat een literal `%` in een LIKE-patroon een
+      `ESCAPE`-clausule nodig heeft. `strpos(lower(<pad>), '%2b') > 0` leest rustiger en scheelt die
+      valkuil.
+- [x] **Beide takken gepatcht, niet alleen `_be`** — de twee query's zijn bewust identiek op de host
+      na, dus alleen BE aanpassen zou .nl plusvorm-URL's laten inzenden.
+
 ### 2026-09-14 (1) — GSD LL: de Excel-load meldt ook een mislukking, en draait nog maar één keer
 
 De dagelijkse Excel-load werd twee keer getriggerd: om 08:00 door een Windows Scheduled Task via
