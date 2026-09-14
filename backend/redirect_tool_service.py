@@ -499,6 +499,126 @@ def check_url_incoming(path: str, max_pages: int = 2,
     return matches
 
 
+def rows_with_fromurl(from_url: str, exact: bool = True,
+                      max_pages: int = 2) -> list[dict]:
+    """Rows whose `fromUrl` is `from_url`, read from the UNCACHED list endpoint.
+
+    This is the only honest way to verify a delete. The resolver
+    (`GET /api/redirect?searchterm=`) is Varnish-fronted for an hour and caches
+    POSITIVE answers too, so re-checking a URL straight after removing its rule
+    keeps showing the rule — and re-probing it also poisons the key for the live
+    site. `GET /api/redirects` is not cached (see redirect-api-behavior).
+
+    `exact=False` compares on `equiv_key`, i.e. it also reports the sibling
+    separator forms (`_` / `+` / space) of the same URL.
+    """
+    # VERBATIM, niet genormaliseerd: `normalize_path` unquote't, en dan zoekt
+    # een rij die letterlijk `%2f` in zijn fromUrl draagt op de tekst `/` —
+    # die rij vind je nooit terug en de verificatie meldt ten onrechte "weg".
+    want_exact = from_url.strip()
+    search = want_exact.strip("/")
+    if not search:
+        return []
+    want_key = equiv_key(from_url)
+
+    seen_ids: set[int] = set()
+    hits: list[dict] = []
+    for page in range(max_pages):
+        with _LIST_SEMAPHORE:
+            r = _get_with_retry(
+                f"{REDIRECT_API}/api/redirects",
+                params={"limit": LIST_PAGE_SIZE, "offset": page * LIST_PAGE_SIZE,
+                        "urlContains": search},
+                timeout=LIST_TIMEOUT,
+                retries=LIST_RETRIES,
+            )
+        data = r.json().get("data", [])
+        if not data:
+            break
+        for row in data:
+            rid = row.get("id")
+            if rid in seen_ids:
+                continue
+            seen_ids.add(rid)
+            raw = row.get("fromUrl", "")
+            if (raw.strip() == want_exact) if exact else (equiv_key(raw) == want_key):
+                hits.append(row)
+        if len(data) < LIST_PAGE_SIZE:
+            break
+    return hits
+
+
+def delete_from_url(from_url: str, variants: bool = True) -> dict:
+    """Remove the redirect rule(s) whose `fromUrl` is `from_url`.
+
+    `variants=True` also removes the sibling separator form, because a `/r/`
+    URL needs TWO rows to be covered (underscore + literal `+`, see
+    `separator_forms`) and leaving one behind is exactly the half-covered state
+    that made `peter+gevaert…` un-deletable in 2026-08-26. The targets are
+    `separator_forms` — NOT `url_variants`, which varies the whole path and
+    would aim DELETEs at unrelated rows that merely contain the same words.
+
+    `variants=False` deletes precisely the string given — the right mode for an
+    incoming row, whose `fromUrl` we read verbatim off the list endpoint
+    (it may hold escapes like `%2f` that normalising would destroy).
+
+    A 404 means the row was not there: reported as `missing`, never as a
+    failure — DELETE is idempotent and safe to call defensively.
+    """
+    targets = [from_url]
+    if variants:
+        targets += [v for v in separator_forms(from_url) if v != from_url]
+
+    results: list[dict] = []
+    for target in targets:
+        try:
+            code, body = delete_redirect_by_fromurl(target)
+        except Exception as exc:
+            logger.warning("delete %s failed: %s", target, exc)
+            results.append({"from_url": target, "status_code": None,
+                            "deleted": False, "missing": False, "error": str(exc)})
+            continue
+        ok = 200 <= code < 300
+        results.append({
+            "from_url": target,
+            "status_code": code,
+            "deleted": ok,
+            "missing": code == 404,
+            "error": None if (ok or code == 404) else str(body)[:300],
+        })
+        logger.info("redirect-tool delete %s -> %s", target, code)
+
+    # Verify on the uncached index; the resolver would lie for up to an hour.
+    # Only targets that reported a delete are worth a lookup — a 404 target was
+    # never there, and every list call is a table scan on an API that answers
+    # 503 when you pile those up.
+    remaining: list[dict] | None = []
+    seen_ids: set[int] = set()
+    for r in results:
+        if not r["deleted"]:
+            continue
+        try:
+            rows = rows_with_fromurl(r["from_url"], exact=True)
+        except Exception as exc:
+            logger.warning("delete verification failed for %s: %s", r["from_url"], exc)
+            remaining = None
+            break
+        for row in rows:
+            if row.get("id") not in seen_ids:
+                seen_ids.add(row.get("id"))
+                remaining.append(row)
+
+    return {
+        "from_url": from_url,
+        "targets": targets,
+        "results": results,
+        "deleted_count": sum(1 for r in results if r["deleted"]),
+        "failed_count": sum(1 for r in results if not r["deleted"] and not r["missing"]),
+        "remaining": remaining,
+        "verified": None if remaining is None else not remaining,
+    }
+
+
 def delete_redirect_by_fromurl(from_url: str) -> tuple[int, Any]:
     """DELETE /api/redirect?fromUrl=<url>. Per the API's Swagger spec
     (https://redirect.api.beslist.nl/swagger.json), delete is by fromUrl

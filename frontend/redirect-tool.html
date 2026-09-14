@@ -74,10 +74,31 @@
         #runsTable td { vertical-align: middle; }
         #runsTable th.col-check, #runsTable td.col-check { width: 42px; text-align: center; }
 
-        .check-result { background: #f8f9fa; padding: 12px 16px; border-radius: 6px; border-left: 4px solid #0d6efd; margin-top: 12px; }
+        .check-result { background: #f8f9fa; padding: 12px 16px; border-radius: 6px; border-left: 4px solid #0d6efd; margin-top: 12px; position: relative; }
         .check-result.empty { border-left-color: #6c757d; }
         .check-result.is-homepage { border-left-color: #dc3545; }
+        .check-result.removed { border-left-color: #198754; }
         .check-result .pair { font-family: monospace; font-size: 0.85rem; }
+
+        /* Hover-prullenbak op een gevonden redirect — exact het silhouet van het
+           potlood in Unique Titles (`.row-edit`): verborgen tot je over de regel
+           gaat, wit vlak met een lichte rand, en pas op hover krijgt hij kleur.
+           Enige afwijking: die kleur is rood `#d64545`, de destructieve tint uit
+           cc1/UI_BLUEPRINT.md, want dit knopje gooit een regel weg.
+           Op het blok staat hij verticaal gecentreerd zoals in Unique Titles; in
+           de incoming-tabel zit hij in zijn eigen cel, dus daar niet absoluut. */
+        .row-delete { display: inline-flex; visibility: hidden; align-items: center;
+            justify-content: center; cursor: pointer; color: #ced4da; background: #fff;
+            border: 1px solid #e9ecef; border-radius: 6px; padding: 3px; line-height: 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+        .check-result > .row-delete { position: absolute; top: 50%; right: 0.5rem; transform: translateY(-50%); }
+        .check-result:hover > .row-delete,
+        #checkIncoming tbody tr:hover .row-delete { visibility: visible; }
+        .row-delete:hover { color: #d64545; border-color: #d64545; }
+        .row-delete[disabled] { visibility: visible; opacity: 0.5; cursor: default; }
+        #checkIncoming th.col-act, #checkIncoming td.col-act { width: 40px; text-align: center; }
+        /* De From-cel mag niet onder het prullenbakje doorlopen als de rij smal is. */
+        #checkIncoming td { vertical-align: middle; }
 
         /* Alleen View leeft nog per rij; Export en Delete zijn naar de bulk-bar
            verhuisd, dus hun twee maatregels zijn weg (2026-09-03). */
@@ -1102,6 +1123,22 @@
             }
         }
 
+        // Het prullenbakje zelf. `TRASH_SVG` is de Feather-trash, zelfde maat en
+        // stroke als het potlood in Unique Titles zodat de twee tools één
+        // hover-affordance delen.
+        const TRASH_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';
+
+        const CHECK_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>';
+
+        // encodeURIComponent laat `'` staan, en dat breekt een attribuut tussen
+        // enkele quotes — zelfde escape als unique-titles.html gebruikt.
+        function jsArg(v) { return encodeURIComponent(String(v == null ? '' : v)).replace(/'/g, '%27'); }
+
+        function trashBtn(fromUrl, variants, title) {
+            return `<button type="button" class="row-delete" title="${escapeHtml(title)}"
+                        onclick="deleteFoundRedirect(this, '${jsArg(fromUrl)}', ${variants ? 'true' : 'false'})">${TRASH_SVG}</button>`;
+        }
+
         function renderCheckResult(d) {
             const out = document.getElementById('checkResult');
             const homepageWarn = d.is_homepage
@@ -1109,13 +1146,22 @@
                 : '';
             let outgoing = '';
             if (d.outgoing) {
-                outgoing = `<div class="check-result">
-                    <strong>Outgoing redirect found:</strong><br>
-                    <span class="pair">${escapeHtml(d.normalized_path)} → ${escapeHtml(d.outgoing.url)}</span>
-                    <span class="badge bg-secondary ms-2">${escapeHtml(String(d.outgoing.statusCode))}</span>
-                    ${d.outgoing.matched_variant && d.outgoing.matched_variant !== d.normalized_path
-                        ? `<br><span class="small-muted">Matched via variant: <code>${escapeHtml(d.outgoing.matched_variant)}</code></span>`
-                        : ''}
+                // De prullenbak verwijdert de vorm die de resolver ECHT raakte
+                // (`matched_variant`), niet het genormaliseerde pad: bij een
+                // `/r/`-URL kan dat de underscore- of de plus-vorm zijn.
+                const delFrom = d.outgoing.matched_variant || d.normalized_path;
+                // `pe-5`: de tekst mag niet onder het knopje doorlopen, net als
+                // de badge-rij in Unique Titles.
+                outgoing = `<div class="check-result" id="checkOutgoing">
+                    ${d.is_homepage ? '' : trashBtn(delFrom, true, 'Delete this redirect')}
+                    <div class="pe-5">
+                        <strong>Outgoing redirect found:</strong><br>
+                        <span class="pair">${escapeHtml(d.normalized_path)} → ${escapeHtml(d.outgoing.url)}</span>
+                        <span class="badge bg-secondary ms-2">${escapeHtml(String(d.outgoing.statusCode))}</span>
+                        ${d.outgoing.matched_variant && d.outgoing.matched_variant !== d.normalized_path
+                            ? `<br><span class="small-muted">Matched via variant: <code>${escapeHtml(d.outgoing.matched_variant)}</code></span>`
+                            : ''}
+                    </div>
                 </div>`;
             } else {
                 outgoing = `<div class="check-result empty"><strong>No outgoing redirect.</strong> This URL is not a <code>fromUrl</code> in the database (checked ${d.variants_checked.length} variant(s)).</div>`;
@@ -1123,12 +1169,16 @@
 
             let incoming = '';
             if (d.incoming_count > 0) {
+                // variants=false voor een incoming rij: die `fromUrl` komt
+                // verbatim van de lijst-index en kan escapes dragen (`%2f`) die
+                // je niet mag normaliseren, anders 404't de DELETE.
                 const rows = d.incoming.map(r =>
-                    `<tr><td class="url-cell">${escapeHtml(r.fromUrl)}</td><td class="text-center">${escapeHtml(String(r.statusCode))}</td><td>${escapeHtml(r.country || '')}</td><td>${escapeHtml(String(r.id))}</td></tr>`).join('');
+                    `<tr><td class="url-cell">${escapeHtml(r.fromUrl)}</td><td class="text-center">${escapeHtml(String(r.statusCode))}</td><td>${escapeHtml(r.country || '')}</td><td>${escapeHtml(String(r.id))}</td>` +
+                    `<td class="col-act">${trashBtn(r.fromUrl, false, 'Delete this redirect')}</td></tr>`).join('');
                 incoming = `<div class="check-result">
-                    <strong>${d.incoming_count} URL(s) point at this URL (incoming):</strong>
-                    <table class="table table-sm mt-2 mb-0">
-                        <thead><tr><th>From</th><th class="text-center">Code</th><th>Country</th><th>ID</th></tr></thead>
+                    <strong><span id="checkIncomingCount">${d.incoming_count}</span> URL(s) point at this URL (incoming):</strong>
+                    <table class="table table-sm mt-2 mb-0" id="checkIncoming">
+                        <thead><tr><th>From</th><th class="text-center">Code</th><th>Country</th><th>ID</th><th class="col-act"></th></tr></thead>
                         <tbody>${rows}</tbody>
                     </table>
                     <div class="small-muted mt-2">Heads up: because of the redirect API's unique-URL constraint, this URL cannot be added as a <code>fromUrl</code> in a new redirect until these rows are removed or rewritten.</div>
@@ -1137,6 +1187,79 @@
                 incoming = `<div class="check-result empty">No URLs point at this one.</div>`;
             }
             out.innerHTML = homepageWarn + outgoing + incoming;
+        }
+
+        // ---------------------- Delete a found redirect ----------------------
+        // Bewust GEEN her-check na een geslaagde delete: de resolver is een uur
+        // Varnish-gecacht (ook op positieve antwoorden), dus een tweede Check
+        // laat de net verwijderde regel gewoon weer zien — én zet die key nog
+        // een uur vast. De backend verifieert daarom op de ONgecachte
+        // lijst-index en stuurt dat oordeel mee; hier tonen we dat.
+        async function deleteFoundRedirect(btn, encodedFromUrl, variants) {
+            const fromUrl = decodeURIComponent(encodedFromUrl);
+            // `separator_forms` levert één vorm voor een categoriepad of een
+            // zoekterm van één woord, dus beloof geen twee: "any sibling form".
+            const scope = variants
+                ? '\n\nAny sibling separator form (underscore / +) of this URL goes with it.'
+                : '';
+            if (!confirm(`Delete the redirect for:\n\n${fromUrl}${scope}\n\nThis cannot be undone.`)) return;
+
+            btn.disabled = true;
+            const row = btn.closest('tr');
+            const block = btn.closest('.check-result');
+            try {
+                const r = await fetch(`${API}/redirect?from_url=${encodeURIComponent(fromUrl)}&variants=${variants}`,
+                                      { method: 'DELETE' });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+
+                if (data.failed_count > 0 || data.deleted_count === 0) {
+                    const why = (data.results.find(x => x.error) || {}).error
+                        || (data.deleted_count === 0
+                            ? 'the API has no rule at this fromUrl (404). It may already be gone — the resolver that found it is cached for up to an hour.'
+                            : 'unknown error');
+                    throw new Error(why);
+                }
+
+                const note = data.verified === true
+                    ? 'Confirmed gone on the uncached index. The resolver stays Varnish-cached for up to an hour, so a re-check may still show it.'
+                    : data.verified === false
+                        ? `Warning: ${data.remaining.length} row(s) with this fromUrl are still in the index.`
+                        : 'Could not verify on the index (list call failed) — check again later.';
+
+                if (row) {
+                    // Rij blijft staan, doorgestreept: je ziet wat je weghaalde.
+                    // `text-decoration` op de <tr> erft niet betrouwbaar door naar
+                    // de cellen, dus per cel zetten.
+                    row.querySelectorAll('td').forEach(td => { td.style.textDecoration = 'line-through'; });
+                    row.style.opacity = '0.55';
+                    // Vinkje i.p.v. een tekstbadge: de actiekolom is 40px en moet
+                    // dat blijven, anders schuift de From-kolom in.
+                    btn.outerHTML = `<span class="text-success" title="removed">${CHECK_SVG}</span>`;
+                    const counter = document.getElementById('checkIncomingCount');
+                    if (counter) counter.textContent = Math.max(0, parseInt(counter.textContent, 10) - 1);
+                    // Eén notitieregel die je bij elke volgende delete overschrijft,
+                    // niet een stapel identieke regels.
+                    let el = document.getElementById('checkIncomingNote');
+                    if (!el) {
+                        document.getElementById('checkIncoming')
+                            .insertAdjacentHTML('afterend', '<div class="small-muted mt-2" id="checkIncomingNote"></div>');
+                        el = document.getElementById('checkIncomingNote');
+                    }
+                    el.textContent = note;
+                } else if (block) {
+                    const forms = data.results.filter(x => x.deleted).map(x => x.from_url);
+                    block.classList.add('removed');
+                    block.innerHTML = `<strong>Redirect removed.</strong>
+                        <div class="pair mt-1">${forms.map(f => escapeHtml(f)).join('<br>')}</div>
+                        <div class="small-muted mt-2">${escapeHtml(note)}</div>`;
+                }
+            } catch (e) {
+                btn.disabled = false;
+                const target = block || document.getElementById('checkResult');
+                target.insertAdjacentHTML('beforeend',
+                    `<div class="alert alert-danger mt-2 mb-0">Delete failed: ${escapeHtml(e.message)}</div>`);
+            }
         }
 
         // ---------------------- Recent runs ----------------------

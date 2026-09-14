@@ -351,6 +351,30 @@ def check_url(url: str, country: str = "nl") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Delete a single rule (the trash can next to a Check-redirect hit)
+# ---------------------------------------------------------------------------
+
+@router.delete("/redirect")
+def delete_redirect(from_url: str, variants: bool = True) -> dict:
+    """Remove one redirect rule by its fromUrl.
+
+    `variants=true` (the Check result's outgoing hit) also removes the sibling
+    separator form, so a `/r/` URL does not end up half-covered.
+    `variants=false` (an incoming row) deletes exactly the string given — that
+    value came off the list endpoint verbatim and may carry escapes.
+    """
+    if not from_url.strip():
+        raise HTTPException(400, "from_url is required")
+    if svc.is_homepage(from_url):
+        raise HTTPException(400, "Refusing to delete a homepage rule")
+    # Only a full URL is reduced to a path. A value that is already a path goes
+    # through VERBATIM: an incoming row's fromUrl can hold escapes (`%2f`) that
+    # any normalising would destroy, and then the DELETE 404s.
+    target = svc.strip_domain(from_url) if "://" in from_url else from_url.strip()
+    return svc.delete_from_url(target, variants=variants)
+
+
+# ---------------------------------------------------------------------------
 # Runs (recent results)
 # ---------------------------------------------------------------------------
 
