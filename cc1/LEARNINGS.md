@@ -48,22 +48,126 @@ de renderfunctie uit de pagina knippen, in Node draaien met een stub-`document` 
 opvangt, en de gegenereerde HTML lezen. Dat vangt template- en escaping-fouten (gecontroleerd dat
 `'`, `&` en `<` als `%27`/`%26`/`%3C` door de onclick-parameter komen); het vangt géén layout.
 
-## Een R-url zonder treffers nodigt zichzelf uit om geïndexeerd te worden (2026-09-14, SEO/spam)
+## De referer splitst de R-url-crawls in tweeën (2026-09-14, SEO/spam)
+
+Joep zag dat Bing R-urls ophaalt met zoektermen die nergens op slaan — `schaatsbaan
+rotterdam`, `zib polisvoorwaarden`, `telia joop gesinkweg`, `ufansonlypay`. Vraag: waar komt
+dat vandaan? **`pa.bothits_*` kan dat niet beantwoorden**: die ingest parst acht velden en
+`cs(Referer)` zit daar niet bij. Alleen de ruwe CloudFront-logs uit S3 geven discovery.
+
+Gemeten op **13-09-2026, het hele etmaal**, de twee distributies die het www-verkeer dragen
+(1.263 logbestanden, **1.027.870 bot-hits op `/r/`**). Script:
+`scripts/analysis/rurl_referer_check.py --date 2026-09-13 --hours 0-23`.
+
+### 1. De willekeurige zoektermen hebben GEEN referer
+
+| bot | hits op /r/ | zonder referer |
+|---|---|---|
+| googlebot | 496.825 | 99,3% |
+| bingbot | 360.752 | **100,0%** |
+| googleother | 101.361 | 100,0% |
+| applebot | 45.129 | 100,0% |
+| chatgpt | 9.902 | 100,0% |
+
+Over het hele etmaal hadden **3.778 van de 1.027.870** hits een externe referer (0,37%). Er wordt op dat
+moment dus geen link gevolgd: elke crawler werkt **zijn eigen wachtrij** af. `schaatsbaan
+rotterdam` staat al in Bings index en wordt daar periodiek ververst. Dat past bij de andere
+sporen: die URL's staan in de **oude `+`-vorm** (spaties als `+`, de vingerafdruk van een
+querystring/GET-formulier; `/products/search/?query=…` bestaat nog als route maar geeft nu
+404), en de termen zijn deels stokoud — `2e helft 2008 CD`, `Top 1000 CD's`, `alle_40_goed`.
+Het is een backlog van jaren die blijft leven omdat wij 200 + `index,follow` blijven geven.
+**Niet met een edge-regel te vangen** — er is geen payload om op te matchen.
+
+### 2. De spam heeft wél een referer, en die is van een gehackt subdomein
+
+**543 verwijzende hostnames, 181 hoofddomeinen, waarvan 175 naar spam-URL's linken**
+(3.679 van de 3.778 hits). Top: `formfora.com` (1.566), `svsmetal.com` (401), `zagorc.com`
+(123), `ahlikuncimobiljakarta.com` (107), `araydesign.com` (79). Volledige lijst:
+`Downloads\claude\spam_referer_domeinen_20260913.csv`.
+
+Het patroon is **wildcard-DNS op een gekaapt domein**: één domein serveert tientallen
+willekeurige subdomeinen, elk met een linkpagina. `bagusprabangkara.com` **47**
+subdomeinen, `godfreyblow.com` 33, `giulioerbi.com` 31, `antotranslation.com` 25,
+`kudusyolu.com` 24. Verder normale bedrijven — een metaalbedrijf, een transferservice in
+Rome, een kliniek in India — plus één zelfbenoemde `www.seobacklinkpro.com`. **Vrijwel
+alles is Googlebot; bingbot staat op nul.** De link wordt één keer gevolgd, daarna zit de URL in de
+wachtrij en komt de referer nooit meer terug — vandaar dat 99,5% van Googlebots hits alsnog
+zonder referer binnenkomt.
+
+### 3. De spam is NIET weg, en het is een Google-probleem
+
+In dat venster van vier uur:
+
+- **524.025 van de 1.027.870 bot-hits op R-urls (51,0%) zijn CJK-spam**, op **480.437 unieke
+  URL's** — 1,1 hit per URL, dus een verse brede lijst, geen herhaling van dezelfde paar URL's.
+- Googlebot **422.009**, GoogleOther 80.870, bingbot **21.120**. De Bing-crawlgolf is een
+  ander verhaal dan de spam.
+- Status op de spam: **211.442 x 200** (Googlebot), 200.525 x 301, 7.524 x 500. Over alle
+  bots: **237.338 van de 480.437 unieke spam-URL's kreeg een 200** — de helft is gewoon een
+  indexeerbare pagina.
+- Dit is dus een half miljoen spam-crawls per dag, en het is geen momentopname: het venster
+  is een volledig etmaal.
+
+**Correctie op de eerdere framing.** Ik hing de diagnose op aan de 500 die de echte Googlebot
+kreeg. Die bestaat (982 in vier uur), maar is de minderheid; **de 200 is het probleem**. De
+edge-regel (410 op de zes payloadregels) haalt dus in één klap ~51% van het R-url-crawlbudget
+weg — dat is de zwaarste maatregel van de drie, zwaarder dan ik hem had ingeschat.
+
+De voorbeelden bevestigen het filter: `【线上投注：3OO.CC】`, `zq7.cc`, `【01.cyou】`,
+`【電：13291370107】` vallen onder regel A/B/C. Er zit inmiddels **Vietnamees** tussen
+(`cách kiểm tra tiền gửi tiết kiệm online techcombank【01.cyou】`), dus regel D (>=40
+niet-Latijnse tekens) dekt die familie niet — de payloadregels wel.
+
+### Drie meetvalkuilen
+
+- **`cs-uri-stem` is dubbel-encoded** voor deze URL's (`%25E5%25B7%259D`). Eén `unquote`
+  laat `%E5…` staan, een CJK-regex matcht dan niets en de eerste meting gaf **0,0% spam**.
+  Decoderen tot het niet meer verandert (`deep_unquote`).
+- **`pa.bothits_unknown_daily` is de top-500 per dag per botfamilie.** Joeps vier voorbeelden
+  stonden daar niet in en ook niet in `pa.urls` — dat is geen bewijs dat ze niet gecrawld
+  worden. Om diezelfde reden is "95% van de onbekende zoek-URL's wordt door maar één
+  botfamilie geraakt" **geen** bewijs dat crawlers verschillende lijsten hebben: de
+  steekproef drukt die overlap sowieso.
+- **psycopg2 geeft `sum()` terug als `Decimal`**, en `f"{x:7d}"` op een Decimal gooit
+  `ValueError: Invalid format string` — geen TypeError, dus je zoekt het in je f-string.
+  Cast naar `int` in analysescripts.
+
+---
+
+## Eén rakende token maakt een R-url indexeerbaar (2026-09-14, SEO/spam)
 
 Joep zag in de CloudFront-logs een echte Googlebot-hit op
 `/products/r/饶平县新圩镇找小姐上门服务预约❰精品小妹網→ｍ２２２２．ｖｉｐ上門全套❱` met een **500**.
 Dat is Chinese escortspam met een domein in fullwidth-tekens, en het IP was echt Googlebot
 (rDNS `crawl-66-249-72-38.googlebot.com`, forward bevestigd, in `googlebot.json` 66.249.72.32/27).
 
-**De oorzaak staat in onze eigen response.** Een zoekterm zonder één producttreffer geeft:
+**CORRECTIE 2026-09-14 (later die dag, door Joep opgemerkt).** De eerste versie van deze sectie
+zei dat een R-url zonder producttreffers een 200 met `index,follow` geeft. **Dat is onjuist.** Een
+echte nul-treffer-URL geeft al een keurige 404:
 
 ```
-GET /products/r/qzxkwjvbnmplfdhs_geen_resultaat_test/  ->  200, 431 KB
-<h1>Qzxkwjvbnmplfdhs geen resultaat test</h1>
-<meta name="robots" content="index,follow">
+GET /products/r/dithebbenwesowiesoniet/  ->  404, 47 KB, <meta name="robots" content="noindex,follow">
+                                              "Geen resultaten voor "dithebbenwesowiesoniet""
+GET /products/r/qzxkwjvbnmplfdhs/        ->  404, noindex,follow, 0 producten
 ```
 
-Een 200, de tekst terug als `<h1>`, en een expliciete uitnodiging om te indexeren. Dat is het
+De meetfout zat in de testslug. `qzxkwjvbnmplfdhs_geen_resultaat_test` is **meerwoordig**, en dan
+valt de zoekmachine terug op OR-matching: die pagina gaf 76 producten, dus de 200 met
+`index,follow` was correct gedrag. Ik las een 200 als bewijs van "nul treffers geeft 200" zonder
+te tellen wat erop stond. **Toets een nul-treffer-hypothese altijd met een slug van één
+onzinnig woord, en tel de producten op de pagina.**
+
+**Wat er wél fout is, en dat is scherper.** De drempel is niet "levert de zoekterm iets op" maar
+"levert *enig woord* in de zoekterm iets op":
+
+```
+GET /products/r/dithebbenwesowiesoniet_schoenen/  ->  200, index,follow, 76 producten
+<h1>Dithebbenwesowiesoniet schoenen</h1>
+```
+
+Eén rakende token sleept de hele string mee de index in, inclusief het onzinnige deel, als `<h1>`
+én als `<title>`. Voor spam betekent dat: zodra er één catalogus-rakend woord in de term zit — een
+Latijns brok, een merknaam, een gewoon Nederlands woord — is het inhoudelijke vangnet weg. Dat is het
 product dat de spammers afnemen — in China heet de techniek 留痕, "sporen achterlaten". Ze hoeven
 niets te hacken; elke site die een willekeurige zoekterm terugschrijft in een pagina is gratis
 hosting. Googlebot heeft geen link van ons nodig: hij vindt ze op linkfarms en gehackte sites en
@@ -159,8 +263,9 @@ klantverkeer opnieuw op, de 22 MB cache staat in `.gitignore`).
 
 **Het plafond.** 76,8% is waar patronen ophouden. Wat ontsnapt is spam zónder payload — een losse
 CJK-term van vier tekens is op URL-niveau niet te onderscheiden van een Koreaanse klant die
-`토니스 초콜릿` intypt. Die rest sluit je alleen met een inhoudelijk criterium: nul producttreffers
-→ noindex of 404.
+`토니스 초콜릿` intypt. Het inhoudelijke vangnet (nul producttreffers → 404 + noindex) bestaat al,
+maar dekt door de OR-fallback hierboven alleen termen waarin **geen enkel** woord de catalogus
+raakt. Het gewicht ligt dus bij de edge-regel, niet bij het vangnet.
 
 **Meetvalkuil bij bothits.** `pa.bothits_unknown_daily` slaat URL's deels gedecodeerd en deels nog
 percent-encoded op (de ingest doet één `unquote`-pass, dubbel-encodeerde URL's houden hun `%XX`).

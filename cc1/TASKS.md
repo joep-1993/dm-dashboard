@@ -64,11 +64,47 @@ Nu zes regels op de **payload** in plaats van op schrift of lengte: 76,8% vangst
 term op 1.848.005 visits. Artifact met de volledige spec is gedeeld met Joep. Lessen, de
 validatiefout en acht valkuilen staan in LEARNINGS, zelfde datum.
 
-- [ ] **Edge-regel → 410** op de drie regels (CloudFront Function, viewer-request). Per URL, dus
-      `/r/` blijft als familie ongemoeid. Haalt de spam meteen van de origin af. #priority:high
-- [ ] **Structureel: R-url met nul producttreffers → 404 of minimaal noindex.** Nu geeft die een
-      200 met de zoekterm als `<h1>` en `index,follow`. Dit is de enige maatregel die ook de
-      spamfamilie vangt die we over twee maanden nog niet kennen. #priority:medium
+- [ ] **Edge-regel → 410** op de zes regels (CloudFront Function, viewer-request). Per URL, dus
+      `/r/` blijft als familie ongemoeid. Haalt de spam meteen van de origin af. **Nu met cijfers
+      uit de ruwe logs (13-09, heel etmaal): 51,0% van álle bot-hits op R-urls is CJK-spam** —
+      524.025 van 1.027.870, op 480.437 unieke URL's, waarvan er **237.338 een 200** kregen.
+      Googlebot doet 422.009 daarvan tegen bingbot 21.120: een Google-probleem, niet de Bing-golf.
+      Verwijzende domeinen (175 stuks, wildcard-subdomeinen op gekaapte sites) in
+      `Downloads\claude\spam_referer_domeinen_20260913.csv`. Zie LEARNINGS "De referer splitst de R-url-crawls in tweeën" en
+      `scripts/analysis/rurl_referer_check.py`. #priority:high
+- [x] **~~Structureel: R-url met nul producttreffers → 404 of minimaal noindex.~~ BESTAAT AL.**
+      Joep wees erop en live nagemeten: `/products/r/dithebbenwesowiesoniet/` geeft **404 +
+      `noindex,follow`** met "Geen resultaten voor …". Mijn eerdere bewering (200 met `index,follow`)
+      kwam uit een meerwoordige testslug die door OR-fallback 76 producten opleverde. Zie de
+      correctie in LEARNINGS, zelfde datum.
+- [x] **Discovery gemeten op de ruwe logs.** `scripts/analysis/rurl_referer_check.py`
+      (commit `8fabb10`) leest `cs(Referer)` uit S3 — het veld dat de bothits-ingest niet parst.
+      Uitkomst: 99,3-100% van de bot-hits op R-urls komt zonder referer binnen, dus uit de eigen
+      wachtrij van elke crawler; alleen de CJK-spam draagt een referer, en die wijst naar
+      wildcard-subdomeinen op gekaapte domeinen.
+- [x] **Disavow-lijst opgeleverd.** 543 hostnames op **174 hoofddomeinen** (Googlebot-referers,
+      13-09 heel etmaal) in `Downloads\claude\disavow_beslist_20260913.txt`, met de
+      hostname-variant ernaast. `domain:<hoofddomein>` dekt de subdomeinen al, en dat is hier de
+      juiste vorm: het netwerk draait op wildcard-DNS (`formfora.com` linkte via drie verschillende
+      labels op één dag). `google.com` er handmatig uit — die stond erin door één `www.google.com`
+      referer op een spam-URL. **Let op: een disavow raakt het crawlbudget niet**; maar 0,37% van
+      de spamhits draagt een referer. Dat blijft het werk van de edge-regel.
+- [ ] **Lijst verloopt.** Het netwerk rouleert domeinen; opnieuw draaien met
+      `--date <datum> --hours 0-23` voordat je een volgende disavow indient. #priority:low
+- [ ] **De niet-CJK rommel (`schaatsbaan rotterdam`, `zib polisvoorwaarden`) is NIET met de
+      edge-regel te vangen** — geen payload, en 99,5-100% van die crawls komt zonder referer
+      binnen, dus uit de eigen wachtrij van elke bot. Die verdwijnt alleen als wij ophouden er
+      200 + `index,follow` op te geven. #priority:medium
+- [ ] **Wat er wél overblijft: één rakende token maakt de hele string indexeerbaar.**
+      `/products/r/dithebbenwesowiesoniet_schoenen/` → 200, `index,follow`,
+      `<h1>Dithebbenwesowiesoniet schoenen</h1>`, 76 producten. De drempel is "levert *enig woord*
+      iets op", niet "levert de zoekterm iets op", dus spam met één catalogus-rakend woord glipt
+      langs het vangnet. Opties: noindex zodra de OR-fallback aan staat (AND-treffers = 0), of een
+      minimumdekking van de zoekterm eisen. Bij teamsearch. #priority:medium
+- [ ] **Waarom kreeg de echte Googlebot een 500 op de spam-URL** terwijl een schone nul-treffer-URL
+      netjes 404 geeft? Vermoedelijk de fullwidth/CJK-decode in de applicatie. Niet vanaf kantoor te
+      reproduceren (WAF geeft 403 op die URL); bron is `pa.bothits_daily`. 5xx is precies de code
+      die Google laat terugkomen, dus dit houdt de spam-URL's in de wachtrij. #priority:high
 
 **Redirect-tool.**
 
