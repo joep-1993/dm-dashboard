@@ -500,7 +500,11 @@ def excel_schedule_endpoint():
 def excel_schedule_toggle_endpoint(
     enabled: bool = Query(..., description="Enable or disable the daily schedule"),
 ):
-    """Enable or disable the daily Excel data-load at 9:50 CET."""
+    """Enable or disable the in-process Excel data-load timer (9:50 CET).
+
+    OFF by default — the daily load is the 08:00 Windows Scheduled Task below.
+    This is the manual fallback for when that task's host is down.
+    """
     return toggle_excel_schedule(enabled)
 
 
@@ -523,7 +527,8 @@ def kill_switch_set_endpoint(
 async def excel_load_endpoint():
     """Load (cache) the newest Excel file for use by Preview/Run.
 
-    Called daily by the Windows Scheduled Task or manually from the UI.
+    The 08:00 Windows Scheduled Task calls this; the UI can too. It is the one
+    daily load, so it reports to Slack on success AND on failure.
     Does NOT pause/enable any campaigns.
     """
     try:

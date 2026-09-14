@@ -601,8 +601,9 @@
         }
 
         // --- Last-successful-data-load indicator ---
-        // The Excel data is still loaded daily (~09:50 CET) by the backend
-        // scheduler; the UI just surfaces WHEN that last succeeded via the
+        // The Excel data is loaded daily at 08:00 CET by a Windows Scheduled
+        // Task (POST /ll/excel-load); the UI just surfaces WHEN that last
+        // succeeded via the
         // purple "i" tooltip next to the card header. Prefer the actually-
         // cached data's loaded_at (that IS the last successful load); fall
         // back to the scheduler's last_run_at when no error is recorded.
@@ -614,7 +615,7 @@
         }
 
         // --- Date picker: the days we actually have Excel data for ------------
-        // The daily 09:50 load stores its rows per day (kept a week), so the
+        // The daily 08:00 load stores its rows per day (kept a week), so the
         // picker is constrained to the dates that really exist instead of
         // accepting any date and silently running the newest file.
         let llDatePicker = null;

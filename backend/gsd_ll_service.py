@@ -149,13 +149,18 @@ _LL_PROGRESS: Dict[str, Any] = {
 
 
 # ---------------------------------------------------------------------------
-# Excel schedule state (daily auto-run at SCHEDULE_HOUR:SCHEDULE_MINUTE CET)
+# Excel schedule state (opt-in fallback timer at SCHEDULE_HOUR:SCHEDULE_MINUTE CET)
 # ---------------------------------------------------------------------------
 
 _EXCEL_TIMER: Optional[threading.Timer] = None
 _EXCEL_LOCK = threading.Lock()
+# enabled=False: the daily load is the 08:00 Windows Scheduled Task (which calls
+# POST /ll/excel-load), and one load per day is the whole point — two produced two
+# Slack messages for the same file. This in-process timer stays in the code as the
+# manual fallback (POST /ll/excel-schedule/toggle?enabled=true) for when the task
+# host is down, but it schedules nothing unless someone asks for it.
 _EXCEL_STATE: Dict[str, Any] = {
-    "enabled": True,
+    "enabled": False,
     "next_run_at": None,
     "last_run_at": None,
     "last_file": None,
@@ -423,10 +428,36 @@ def _send_slack(text: str) -> None:
         logger.warning("GSD LL: Slack notification failed", exc_info=True)
 
 
-def load_excel_data(filepath: Optional[str] = None, *, notify: bool = True, max_retries: int = 3, retry_delay: float = 10.0) -> Dict[str, Any]:
+def load_excel_data(
+    filepath: Optional[str] = None, *, notify: bool = True,
+    max_retries: int = 3, retry_delay: float = 10.0,
+) -> Dict[str, Any]:
+    """Read the newest Excel file into the cache, announcing BOTH outcomes.
+
+    ``notify`` gates success and failure together, so a caller can never end up
+    subscribed to one and not the other. That asymmetry is what this wrapper
+    exists to prevent: the 08:00 Windows Scheduled Task (POST /ll/excel-load) is
+    the single daily load, and a load that never happened is the thing you most
+    need to hear about — it used to fail silently with an HTTP 500 the task
+    ignored, while only the in-process timer could report a failure.
+    """
+    try:
+        return _load_excel_data(
+            filepath, notify=notify, max_retries=max_retries, retry_delay=retry_delay,
+        )
+    except Exception as exc:
+        if notify and _get_server_port() == "3003":
+            _send_slack(
+                f":x: *GSD Low Linkage — Excel data load failed*\n"
+                f"Error: {exc}"
+            )
+        raise
+
+
+def _load_excel_data(filepath: Optional[str] = None, *, notify: bool = True, max_retries: int = 3, retry_delay: float = 10.0) -> Dict[str, Any]:
     """Read the newest Excel file and store in the in-memory cache.
 
-    Called daily by the scheduler and on-demand via POST /ll/excel-load.
+    Call load_excel_data() instead — it adds the failure notification.
     Does NOT pause/enable any campaigns — that only happens when the user
     clicks Preview or Run in the dashboard with source='excel'.
 
@@ -2927,11 +2958,7 @@ def _excel_scheduled_run() -> None:
         logger.exception("GSD LL Excel scheduler: data load failed")
         with _EXCEL_LOCK:
             _EXCEL_STATE["last_error"] = str(ex)
-        if _get_server_port() == "3003":
-            _send_slack(
-                f":x: *GSD Low Linkage — Excel data load failed*\n"
-                f"Error: {ex}"
-            )
+        # The Slack :x: is sent by load_excel_data() itself, for every caller.
     finally:
         _schedule_next_excel_run()
 
@@ -2959,11 +2986,15 @@ def _schedule_next_excel_run() -> None:
 
 
 def start_excel_scheduler() -> None:
-    """Initialize the daily Excel scheduler. Call on app startup.
+    """Call on app startup.
 
-    Also eagerly loads the newest Excel file into the in-memory cache so
-    the "last successful data load" indicator is correct immediately after
-    a server restart (the cache is volatile).
+    Eagerly loads the newest Excel file into the in-memory cache so the "last
+    successful data load" indicator is correct immediately after a server
+    restart (the cache is volatile). Silently — the 08:00 task already announced
+    the load this file came from.
+
+    Schedules nothing while _EXCEL_STATE["enabled"] is False, which is the
+    default: the daily load is the 08:00 Windows Scheduled Task.
     """
     try:
         load_excel_data(notify=False)
