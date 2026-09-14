@@ -3,6 +3,56 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-14 (4) — Bing-crawlgolf, R-url-spam en de 410 die niet bestaat
+
+Drie losse draden uit dezelfde sessie. Ze raken elkaar op één punt: R-urls geven onder druk 5xx,
+en dat is zowel wat de Bing-golf zichtbaar maakt als wat de spam-URL's onhoudbaar maakt.
+
+**Bing-crawl (loopt).** Sinds 09-09 van ~9.400 naar ~986.000 hits/dag, 25-30% van al ons
+botverkeer, 100% geverifieerde Microsoft-IP's. Oorzaak is vrijwel zeker de robots.txt-wijziging:
+er staat nu een `User-agent: bingbot`-groep zonder crawl-delay, en een bot met een eigen groep
+negeert de `msnbot`-groep die hem eerder remde. IndexNow is uitgesloten — NL staat al maanden op
+exact 10.000 inzendingen/dag en .be zit niet eens in deze logs.
+
+- [x] **Gemeten en toegeschreven**: verdeling, verificatie, en de uitsluiting van IndexNow
+      (overlapmeting: 185 van 73.944 hits op ingezonden C-urls = 0,25%).
+- [x] **Meetscript** `scripts/analysis/bing_crawlcontrol_check.py` — basislijn, piek en de
+      schade-KPI's in één run.
+- [ ] **Effect van Crawl Control meten.** Joep heeft 14-09 de blokjes op de helft gezet; 14-09 is
+      een halve dag, de eerste schone dag is 15-09. Openstaande vragen: dekt de property
+      `www.beslist.nl`, klopt de tijdzone van het uurpatroon, en **buigt adidxbot mee** (Crawl
+      Control is gedocumenteerd voor bingbot, niet voor de Ads-crawler). #priority:high
+- [ ] **Het uurpatroon is niet uit bothits te toetsen** — dagkorrel. Daarvoor moet een dag ruwe
+      CloudFront-logs uit S3; het lokale archief loopt tot 12-08. #priority:low
+
+**De echte schade zit bij Google, niet bij Bing.** Bot-5xx van ~500 naar 14.325/dag, Googlebots
+responstijd van ~320 naar 715 ms. De 5xx concentreren op R-urls: 13-09 stond op 13.605, waarvan
+Googlebot 8.045 en GoogleOther 2.302 tegen Bing 2.977.
+
+- [ ] **R-url mag nooit een 5xx geven.** Dit is het zwaarste punt van de drie: het raakt onze
+      grootste organische kliksoort, en Google komt terug op een 5xx. Bij teamsearch. #priority:high
+
+**R-url-spam (voorstel ligt klaar).** Drie gevalideerde regexregels, 99,1% vangst, 0 valse
+positieven. Artifact met de volledige spec is gedeeld met Joep. Lessen en valkuilen in LEARNINGS,
+zelfde datum.
+
+- [ ] **Edge-regel → 410** op de drie regels (CloudFront Function, viewer-request). Per URL, dus
+      `/r/` blijft als familie ongemoeid. Haalt de spam meteen van de origin af. #priority:high
+- [ ] **Structureel: R-url met nul producttreffers → 404 of minimaal noindex.** Nu geeft die een
+      200 met de zoekterm als `<h1>` en `index,follow`. Dit is de enige maatregel die ook de
+      spamfamilie vangt die we over twee maanden nog niet kennen. #priority:medium
+
+**Redirect-tool.**
+
+- [ ] **Stille statuscode-coercion vervangen door een zichtbare fout.**
+      `backend/redirect_tool_service.py:668` en `backend/redirect_tool_router.py:315` zetten een
+      onbekende statuscode geruisloos op 301, waardoor de nette 400 van de API nooit bij de
+      gebruiker komt. Klein, op zichzelf staand. #priority:medium
+- [ ] **Bij teamsearch**: kan de Redirect API 410 gaan ondersteunen, en wat hoort er dan in
+      `toUrl`? Dat veld is `required` en een 410 heeft geen doel. Er is precedent — 200 betekent
+      al *canonical* — dus een niet-3xx code met andere `toUrl`-semantiek past in het schema.
+      Pas daarna 410 toevoegen aan de allow-list en de dropdown. #priority:low
+
 ### 2026-09-14 (3) — Basements homepage: de custom-links kwamen nooit in de payload
 
 `basements_homepage_nl` draaide groen, maar geen van de vier `add_custom`-links stond op de

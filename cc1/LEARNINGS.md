@@ -1,6 +1,110 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een R-url zonder treffers nodigt zichzelf uit om geïndexeerd te worden (2026-09-14, SEO/spam)
+
+Joep zag in de CloudFront-logs een echte Googlebot-hit op
+`/products/r/饶平县新圩镇找小姐上门服务预约❰精品小妹網→ｍ２２２２．ｖｉｐ上門全套❱` met een **500**.
+Dat is Chinese escortspam met een domein in fullwidth-tekens, en het IP was echt Googlebot
+(rDNS `crawl-66-249-72-38.googlebot.com`, forward bevestigd, in `googlebot.json` 66.249.72.32/27).
+
+**De oorzaak staat in onze eigen response.** Een zoekterm zonder één producttreffer geeft:
+
+```
+GET /products/r/qzxkwjvbnmplfdhs_geen_resultaat_test/  ->  200, 431 KB
+<h1>Qzxkwjvbnmplfdhs geen resultaat test</h1>
+<meta name="robots" content="index,follow">
+```
+
+Een 200, de tekst terug als `<h1>`, en een expliciete uitnodiging om te indexeren. Dat is het
+product dat de spammers afnemen — in China heet de techniek 留痕, "sporen achterlaten". Ze hoeven
+niets te hacken; elke site die een willekeurige zoekterm terugschrijft in een pagina is gratis
+hosting. Googlebot heeft geen link van ons nodig: hij vindt ze op linkfarms en gehackte sites en
+houdt ze daarna maandenlang in de wachtrij.
+
+**Waarom de 500 het slechtst mogelijke antwoord is.** Google leest 5xx als "tijdelijk, kom later
+terug" en blijft het proberen, dus zo'n URL verlaat de wachtrij nooit. Een 404/410 laat hem vallen.
+
+**De WAF laat juist de bots door die stukgaan.** Op R-urls, 12-13 sep: 5xx 25.634 op
+`verify_state='verified'` tegen **24** op de rest; 4xx 41.482 verified tegen 12.699. Geverifieerde
+crawlers worden doorgelaten en komen bij de applicatie, onbekend verkeer wordt met 403 aan de rand
+afgevangen. Zelfde URL gaf mij zes keer 403 (ook met een Googlebot-UA) terwijl de echte Googlebot
+een 500 kreeg. Wie dit reproduceert vanaf een kantoor-IP meet dus het verkeerde ding.
+
+### Het filter: drie regels, gevalideerd op 52.843 unieke R-urls (20-08 t/m 13-09)
+
+```
+anker   ^/products/(?:[a-z0-9_-]+/)*r/
+regel 1 <anker>(?:.*?%(?!E2%8[01])(?:[EF][0-9A-F]|D[0-9A-F]|C[EF])){5}
+regel 2 <anker>.*?%(?:E3%80%9[01]|E3%80%8[EF]|E2%9D%B[01]|EF%B9%8[3-6]|EF%BC%BB)
+regel 3 \.(?!(?:com|net|org|nl|be|de|…|iso)$)[a-z]{3,4}$        (op de zoekterm)
+```
+
+Samen 1.727 van 1.743 spam-URL's (99,1%) met **0 valse positieven** op 51.100 legitieme R-urls.
+Script: `scripts/analysis/spamfilter_validate.py` — regex bovenin aanpassen, draaien, en je ziet
+wat je vangt én wat je onterecht raakt. Nul valse positieven is de drempel voor livegang.
+
+**Vier valkuilen die elk een ronde kostten:**
+
+- **Het anker is het echte gat.** `^/products/r/` dekt maar één van de twee vormen; spam zit óók op
+  `/products/<categorie>/[<ids>/]r/<term>` (namaakhorloges met WeChat-nummers). Niet een
+  volumeprobleem maar een dekkingsprobleem — een spammer zet er één segment voor en is onzichtbaar.
+- **`%[EF]` mist tweebyte-schriften volledig.** Cyrillisch `%D0-%D1`, Arabisch `%D8-%D9`, Grieks
+  `%CE-%CF`, Hebreeuws `%D7` kunnen nooit matchen. Maar `%C0-%C5` moet je er juist buiten houden:
+  `é` = `%C3%A9`, dus anders blokkeer je Nederlandse en Franse zoektermen met accenten.
+- **`%E2%80`/`%E2%81` uitsluiten is verplicht.** Dat is Algemene Interpunctie; lange producttitels
+  gebruiken de en-dash als scheidingsteken en *muursticker – voertuigen – vliegtuig – kasteel –
+  luchtballon* heeft er vijf. Zonder de lookahead krijgen drie echte zoektermen een 410.
+- **Regel 3 heeft die extensielijst nodig.** De spamtool hangt achter elke term een punt met 3-4
+  willekeurige letters (`.vqpc`, `.thms`, `.trxg`) als cache-buster — taalonafhankelijk en dus de
+  breedste regel. Maar zonder negatieve lookahead blokkeer je `bol.com`, `intertoys_bol.com` en
+  `bol.vom`: honderden echte zoekopdrachten naar de concurrent.
+
+**Wat NIET werkt:** Latijnse trefwoordenlijsten. Er is op dit moment nul ASCII-only spam (expliciet
+op gescand), maar wel veel vals alarm — `bet` zit in *beton* en *beterschap*, en
+`/voor_volwassenen/` is een echte categorie. En de drempel van 5 niet verlagen: dat is de marge die
+de nul valse positieven oplevert.
+
+**Meetvalkuil.** `pa.bothits_unknown_daily` slaat URL's deels gedecodeerd en deels nog
+percent-encoded op (de ingest doet één `unquote`-pass, dubbel-encodeerde URL's houden hun `%XX`).
+Een edge-regex toets je dus niet op de kolomwaarde maar op de gereconstrueerde wire-vorm:
+volledig decoderen, dan `quote()` terug. En de tabel is de top-500 per dag per botfamilie — alle
+aantallen zijn een **ondergrens**, geen totaal.
+
+**Regel 2 is vandaag redundant** (0 unieke vangst naast regel 1 en 3) maar kost niets; meenemen als
+verzekering voor het geval de spamtool zijn achtervoegsel laat vallen.
+
+---
+
+## De Redirect API weigert 410 hard, en onze tool verbergt die melding (2026-09-14)
+
+Vraag was of we spam-URL's op 410 konden zetten via de Redirect-tool. Antwoord: nee, op drie niveaus.
+
+**De API.** `POST /api/redirect` met `statusCode: 410` geeft **400**:
+`{"message": "Invalid status code for redirect at index 0. Allowed values: 200, 301, 302, 303, 307, 308"}`
+— en er wordt niets weggeschreven (teruggelezen op het ongecachte `GET /api/redirects`: leeg). De
+swagger-beschrijving van de POST zegt exact hetzelfde. Let op: **200 hoort er wél bij** (= canonical,
+`fromUrl` serveert 200 en declareert zijn canonieke `toUrl`); de oude aantekening dat 200-rijen "via
+een andere weg" moesten zijn ingevoegd was fout.
+
+**Onze tool zet een onbekende statuscode stil om naar 301.** `ALLOWED_STATUS_CODES` in
+`backend/redirect_tool_service.py:139` is `{200, 301, 302, 303, 307, 308}`, en regel 668 doet
+`if sc not in ALLOWED_STATUS_CODES: sc = DEFAULT_STATUS_CODE` zonder melding. Zelfde coercion in
+`backend/redirect_tool_router.py:315`. Upload je een bestand met `statuscode 410`, dan krijg je
+301-rijen terug en niemand ziet het. Erger nog: het verbergt precies de nette 400 hierboven, dus je
+leert nooit waaróm het niet kan. De dropdown in `frontend/redirect-tool.html:238` biedt sowieso
+alleen 301 en 302.
+
+**En het is hier het verkeerde gereedschap.** Een redirecttabel werkt per URL; deze spamverzameling
+is niet op te sommen, want er komen doorlopend nieuwe bij. De 410 hoort uit een *regel* te komen —
+edge of applicatie — niet uit een lijst. Zie de vorige sectie.
+
+**Waarom 410 en niet robots.txt of noindex:** een `Disallow` stopt het crawlen maar verwijdert niets
+uit de index (een geblokkeerde URL blijft indexeerbaar, zonder snippet), en `noindex` vereist dat de
+pagina élke keer wordt opgehaald en gerenderd — dezelfde origin-belasting, en het crawlen stopt niet.
+Een 410 doet alle drie: geen belasting, snelste verwijdering, en de tekst van de spammer wordt niet
+meer geserveerd. `/r/` blanket dichtzetten is geen optie, dat is onze grootste organische kliksoort.
+
 ## Een node die bovenaan invoegt is waardeloos als er verderop nog gesorteerd wordt (2026-09-14, n8n basements homepage)
 
 Joep: "ik heb basements_homepage_nl gedraaid maar zie `/products/horloge/c/serie_horloge~24349451`
