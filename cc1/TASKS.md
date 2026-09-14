@@ -3,6 +3,43 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-14 (1) — GSD LL: de Excel-load meldt ook een mislukking, en draait nog maar één keer
+
+De dagelijkse Excel-load werd twee keer getriggerd: om 08:00 door een Windows Scheduled Task via
+`POST /ll/excel-load`, en om 09:50 door de interne `threading.Timer` (`_excel_scheduled_run`). Beide
+stuurden bij succes een Slack-bericht over hetzelfde bestand. Onder die dubbele melding zat een
+scheefheid: succes kwam van 08:00, fout alleen van 09:50 — dus een mislukte ochtendload was stil.
+Commit `ac49c2a`. Lessen in LEARNINGS, zelfde datum.
+
+- [x] **`load_excel_data()` is nu een wrapper** om de oude functie (`_load_excel_data`) die bij een
+      exception een `:x:` naar Slack stuurt en hem daarna doorgooit, zodat het endpoint nog steeds
+      een 500 teruggeeft. `notify` stuurt succes én fout samen aan. `FileNotFoundError` telt mee.
+- [x] **De `:x:` uit `_excel_scheduled_run()` verwijderd** — die is nu dubbel; de wrapper dekt elke
+      caller.
+- [x] **09:50-timer uit**: `_EXCEL_STATE["enabled"]` staat op `False`, dus `_schedule_next_excel_run()`
+      zet geen timer op. De code blijft als handmatige terugvalklep
+      (`POST /ll/excel-schedule/toggle?enabled=true`); wie hem aanzet krijgt weer beide meldingen.
+      De pre-load bij serverstart blijft `notify=False`.
+- [x] **Gedekt met een gestubde `_load_excel_data`**: fout bij `notify=True` geeft één Slack en
+      her-raist, fout bij `notify=False` geeft er geen, succes gaat ongewijzigd door, en
+      `_schedule_next_excel_run()` laat `next_run_at` op `None`.
+- [x] **De "leest 08:00 wel het verse bestand?"-vraag is beantwoord — ja.** `pa.jvs_gsd_ll_excel_load`
+      gaf op 14-09 `loaded_at` 04:59:20 UTC (= 06:59 CEST, de mtime van het bestand) tegen `updated_at`
+      07:50:00 UTC (= 09:50 CEST, de load die de rij schreef). Het bronbestand staat er dus rond 07:00,
+      niet rond 09:50 zoals het codecommentaar suggereerde.
+- [ ] **Openstaand — herstart nodig.** `_EXCEL_STATE` leeft in het geheugen en de backend draait
+      zonder `--reload`. Pas na kill+relaunch van :8003 hier én prod :3003 is de 09:50-timer echt uit
+      en de foutmelding echt actief. #priority:high
+- [ ] **Openstaand — welke poort raakt de 08:00-taak eigenlijk?** `_send_slack` gaat alleen af als
+      `_get_server_port() == "3003"` (leest `sys.argv`). De registratierij `pa.scheduled_tasks` id=2
+      zegt `curl -s -X POST http://localhost:8003/...` — poort **8003** — en staat bovendien nog op
+      schedule_time **09:50** met `updated_at` 2026-07-16, terwijl de taak in werkelijkheid om 08:00
+      draait. Registratie en realiteit lopen dus uit elkaar. Raakt de taak een instance die niet met
+      `--port 3003` is gestart, dan komt er niets binnen — succes noch fout. Na te trekken in Windows
+      Task Scheduler op `C:\Users\l.davidowski\dm-dashboard`; werk daarna de rij bij. #priority:high
+- [ ] **Openstaand — verifieer morgenochtend.** Eén `:white_check_mark:` rond 08:00 met
+      `File: gsd_shops_nl_be_<vandaag>.xlsx`, en niets meer om 09:50. #priority:medium
+
 ### 2026-09-12 (2) — DMA Exclusions: de OOS-monitor krijgt 60s en drie pogingen
 
 De nachtelijke OOS-cyclus viel op 2026-09-11 om voor NL met een `TimeoutError`.

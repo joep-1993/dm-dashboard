@@ -23,6 +23,28 @@ Prod = uvicorn `--port 3003` on **win-htz-006.colo.beslist.net** (worker PID 334
 - **No auth on `/ll/run` + `/ll/apply`** — anyone reaching the dashboard can trigger real mutations. Backlogged (see BACKLOG.md → "GSD LL: auth/confirm on real-mutation endpoints"). Interim guard: kill switch (was OFF on prod today).
 - Ensure only ONE prod instance runs + vestigial launchers disabled so the zombie-APScheduler can't return.
 
+## Update (2026-09-14) — de 09:50-timer staat uit
+
+`_excel_scheduled_run` is nooit de mutator geweest (dat is hierboven uitgezocht), maar hij was wel de
+tweede *load* van de dag naast de Windows Scheduled Task, en dus de bron van dubbele
+Slack-meldingen — dezelfde klacht die in `3bf8995` aan de zombie-instances werd toegeschreven, maar
+deze keer met één gezonde instance. `_EXCEL_STATE["enabled"]` staat nu standaard op `False`, dus de
+timer plant niets meer; de scheduled task is de enige dagelijkse load. Commit `ac49c2a`.
+
+De timer blijft als handmatige terugvalklep bestaan (`POST /ll/excel-schedule/toggle?enabled=true`)
+voor als de taakhost eruit ligt. Wie hem aanzet krijgt weer zowel de succes- als de foutmelding.
+
+Twee dingen uit deze notitie zijn daarbij bijgewerkt:
+
+- **De taaktijd klopt niet meer met de registratie.** `pa.scheduled_tasks` id=2 staat nog op
+  schedule_time **09:50** met commando `curl -s -X POST http://localhost:8003/...` (`updated_at`
+  2026-07-16), terwijl de taak in werkelijkheid om **08:00** draait. De poort in die rij is boven-
+  dien 8003 en niet 3003 — en `_send_slack` gaat alleen af als `_get_server_port() == "3003"`. Zie
+  TASKS 2026-09-14 (1); na te trekken in Task Scheduler op de machine van l.davidowski.
+- **Het Excel-bestand staat er rond 07:00 CEST**, niet rond 09:50: mtime 04:59:20 UTC op 14-09
+  (`pa.jvs_gsd_ll_excel_load.loaded_at`). De 09:50-timer las dus al jaren hetzelfde bestand als een
+  vroegere load zou lezen.
+
 ---
 
 ## Original investigation notes (2026-07-21) — kept for history

@@ -1,6 +1,58 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een succesmelding en een foutmelding die van twee verschillende triggers komen (2026-09-14, GSD Low Linkage)
+
+De dagelijkse Excel-load werd twee keer getriggerd — een Windows Scheduled Task en een interne
+`threading.Timer` — en de klacht was de dubbele Slack-melding. Onder die ruis zat iets vervelenders:
+de **succes**melding kwam van de ene trigger en de **fout**melding van de andere. Het endpoint dat
+de scheduled task aanroept logde een mislukking en gaf een HTTP 500 terug, verder niets; alleen de
+timer kende een `except` met een `:x:`. Zet je dan de timer uit omdat hij dubbel meldt, dan houd je
+een dagelijkse load over die bij succes piept en bij falen zwijgt.
+
+- **Regel:** laat één vlag succes én fout aansturen, in één wrapper om de worker heen. Zodra de twee
+  uitkomsten op verschillende plekken worden gemeld, kan een caller op de ene ingeschreven zijn en
+  op de andere niet — en dat merk je per definitie op de dag dat het misgaat.
+- **Regel:** "de taak gaf een 500 terug" is geen melding. Een `curl` onder Task Scheduler gooit de
+  exit-code meestal weg, dus de kant die de fout kent (de server) moet hem versturen.
+- **Fout die hoort mee te tellen:** `FileNotFoundError`. Bij deze load is een ontbrekend bestand geen
+  randgeval maar de waarschijnlijkste manier waarop de ochtend stukgaat.
+
+### Een cooldown-dedupe is geen vervanging voor één trigger
+
+`_LAST_SLACK_NOTIFY` + `SLACK_COOLDOWN_SECONDS = 600` onderdrukt een herhaald bericht over hetzelfde
+bestand binnen 10 minuten. De twee triggers lagen bijna twee uur uit elkaar, dus die vlieger ging
+nooit op. Een cooldown vangt een retry-storm; twee geplande bronnen vang je alleen door er één te
+hebben.
+
+### De Slack-gate hangt aan `--port` in `sys.argv`
+
+`_send_slack` gaat alleen af als `_get_server_port() == "3003"`, en die functie leest `sys.argv`. Een
+melding is daarmee stil afhankelijk van hoe uvicorn is gestart: dezelfde code op een instance die met
+een andere poort (of via een process manager zonder `--port`) draait, stuurt niets — succes noch
+fout, zonder spoor. Prima als vangnet tegen dev-ruis, maar reken erop bij het beantwoorden van
+"waarom kreeg ik geen bericht".
+
+### `loaded_at` is de mtime van het bestand, `updated_at` is wanneer de load draaide
+
+In `pa.jvs_gsd_ll_excel_load` (singleton-rij) staan twee tijden en ze betekenen iets anders. Dat is
+precies het paar dat de vraag "leest de ochtendtaak wel het verse bestand?" beantwoordt zonder dat je
+bij de Windows-machine hoeft te kunnen — `EXCEL_DIR` staat onder `C:\Users\l.davidowski\` en is
+vanuit WSL onbereikbaar.
+
+Meting 2026-09-14 (de DB is `Etc/UTC`, dus +2 voor CEST):
+
+| kolom | waarde | betekenis |
+|---|---|---|
+| `loaded_at` | 04:59:20 UTC = **06:59 CEST** | mtime van `gsd_shops_nl_be_2026-09-14_.xlsx` |
+| `updated_at` | 07:50:00 UTC = **09:50 CEST** | de laatste load die de rij schreef |
+
+**Conclusie:** het bronbestand staat er rond 07:00 CEST, niet rond 09:50 zoals het codecommentaar in
+`_load_excel_data` suggereert. Een load om 08:00 leest dus gewoon de verse dag — de vrees dat de
+vroege taak structureel het bestand van gisteren pakt, is hiermee weerlegd. Dat het commentaar iets
+anders beweerde, kwam doordat het de tijd van de *timer* beschreef en niet die van het bestand.
+
+
 ## Een OR met een NULL erin is geen false, en dat merk je pas als iemand hem omdraait (2026-09-12, Auto-Redirects push-tracking)
 
 `LIVE_SQL` in `backend/rurl_push_tracking.py` begon als:
