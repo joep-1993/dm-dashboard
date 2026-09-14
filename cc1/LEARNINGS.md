@@ -31,48 +31,94 @@ crawlers worden doorgelaten en komen bij de applicatie, onbekend verkeer wordt m
 afgevangen. Zelfde URL gaf mij zes keer 403 (ook met een Googlebot-UA) terwijl de echte Googlebot
 een 500 kreeg. Wie dit reproduceert vanaf een kantoor-IP meet dus het verkeerde ding.
 
-### Het filter: drie regels, gevalideerd op 52.843 unieke R-urls (20-08 t/m 13-09)
+### Het filter: zes regels, en de validatiefout die de eerste versie kostte
+
+**LEES DIT EERST.** De eerste versie van dit filter (drie regels: multibyte-drempel, haken,
+willekeurig achtervoegsel) is gevallen. Hij was getoetst op `pa.bothits_unknown_daily`, en die
+tabel bevat **per definitie** alleen URL's die NIET in `pa.urls` staan — legitieme R-urls zaten er
+structureel niet in, dus "nul valse positieven" kon daar niet anders dan uitkomen. Bij de regel
+voor het willekeurige achtervoegsel was het erger: het label "spam" was mede op datzelfde
+achtervoegsel gebaseerd, dus de meting was cirkelredenering.
+
+Getoetst tegen **757.571 R-urls waar echte mensen op zijn geland** (`datamart.dim_visit`, 1,85 mln
+visits, aug+sep 2026) bleken die drie regels **277 zoekopdrachten van echte klanten** te blokkeren:
+
+- `雅诗兰黛面霜` (Estée Lauder-crème), `토니스 초콜릿` (Tony's Chocolonely), `케라스타즈 제네시스 세럼`
+  (Kérastase), `بلايستيشن 5` (PlayStation 5), `жан поль готье`, `сол де жанейро`, `кіко румяна`.
+  **Klanten zoeken in hun eigen taal naar merken die wij verkopen.** 246 termen, 254 visits.
+- `45.km.auto` (~40 visits), `inbouw_vaatwasser_52_cm.diep` (26), `e.bike`, `govee.lamp`, plus
+  productnamen die écht een punt bevatten: `jean paul gaultier le.male`, `villeroy_&_boch_o.novo`,
+  `gaerne g.izar`. Mensen typen een punt in plaats van een spatie. 30 termen, 89 visits.
+
+**De les is methodisch, niet technisch: een filter valideer je tegen het verkeer dat je NIET mag
+breken, en dat staat in `dim_visit`, niet in bothits.** Bothits meet alleen je dekking.
+
+### Het ontwerpprincipe
+
+Het onderscheidende kenmerk van spam is **niet het schrift en niet de lengte, maar de payload**:
+elke spam-URL draagt een manier om de spammer te bereiken. Een Chinese klant die naar een crème
+zoekt heeft die niet. Drempels opschroeven helpt niet — bij 30 multibyte-tekens raak je nog steeds
+klanten en verlies je 44% van de spam.
+
+De zes regels draaien op de **gedecodeerde, NFKC-genormaliseerde zoekterm** (`decodeURIComponent`,
+dan `normalize('NFKC')`; dat maakt van de fullwidth-ontwijking `ｍ２２２２．ｖｉｐ` gewoon
+`m2222.vip`). Niet op de percent-encodeerde vorm — dat was het eerdere advies en het is
+onnodig broos.
 
 ```
-anker   ^/products/(?:[a-z0-9_-]+/)*r/
-regel 1 <anker>(?:.*?%(?!E2%8[01])(?:[EF][0-9A-F]|D[0-9A-F]|C[EF])){5}
-regel 2 <anker>.*?%(?:E3%80%9[01]|E3%80%8[EF]|E2%9D%B[01]|EF%B9%8[3-6]|EF%BC%BB)
-regel 3 \.(?!(?:com|net|org|nl|be|de|…|iso)$)[a-z]{3,4}$        (op de zoekterm)
+A  (?<![a-z0-9.-])[a-z0-9][a-z0-9-]{0,30}\.(?:vip|cyou|icu|bingo|tw|cc|xyz|pw|su|fun)(?![a-z0-9-])
+B  (?<![a-z])(?:微信|WeChat|QQ|飞机|telegram|whatsapp)(?![a-z])[^0-9]{0,4}\d{6,}
+C  [【『❰〖][^】』❱〗]{2,40}[】』❱〗]   met daarbinnen  \.[a-z]{2,6}(?![a-z])  of  \d{5,}
+D  >= 40 niet-Latijnse tekens (leestekens U+2000-U+206F niet meetellen)
+E  [▷㊣☞乀→←⇒》《〉〈‹›❰❱❮❯✦★☀☸✿❤▶◀※〖〗]
+F  网址|網址|加微|微信号|威信|薇信|телеграм
 ```
 
-Samen 1.727 van 1.743 spam-URL's (99,1%) met **0 valse positieven** op 51.100 legitieme R-urls.
-Script: `scripts/analysis/spamfilter_validate.py` — regex bovenin aanpassen, draaien, en je ziet
-wat je vangt én wat je onterecht raakt. Nul valse positieven is de drempel voor livegang.
+| regel | spam | echte termen | visits |
+|---|---|---|---|
+| A wegwerpdomein | 742 | 0 | 0 |
+| B contact-handle | 304 | 0 | 0 |
+| C haak + payload | 184 | 0 | 0 |
+| D >=40 niet-Latijn | 707 | 1 | 1 |
+| E decoratief teken | 377 | 0 | 0 |
+| F 网址 / 加微 | 362 | 0 | 0 |
+| **samen** | **1.058/1.378 = 76,8%** | **1** | **1** |
 
-**Vier valkuilen die elk een ronde kostten:**
+Eén geraakte term op 1.848.005 visits (0,000054%), en dat is een Japanse pornofilmtitel.
+Script: `scripts/analysis/spamfilter_validate.py` (draait beide ijkpunten; `--refresh` haalt het
+klantverkeer opnieuw op, de 22 MB cache staat in `.gitignore`).
 
-- **Het anker is het echte gat.** `^/products/r/` dekt maar één van de twee vormen; spam zit óók op
-  `/products/<categorie>/[<ids>/]r/<term>` (namaakhorloges met WeChat-nummers). Niet een
-  volumeprobleem maar een dekkingsprobleem — een spammer zet er één segment voor en is onzichtbaar.
-- **`%[EF]` mist tweebyte-schriften volledig.** Cyrillisch `%D0-%D1`, Arabisch `%D8-%D9`, Grieks
-  `%CE-%CF`, Hebreeuws `%D7` kunnen nooit matchen. Maar `%C0-%C5` moet je er juist buiten houden:
-  `é` = `%C3%A9`, dus anders blokkeer je Nederlandse en Franse zoektermen met accenten.
-- **`%E2%80`/`%E2%81` uitsluiten is verplicht.** Dat is Algemene Interpunctie; lange producttitels
-  gebruiken de en-dash als scheidingsteken en *muursticker – voertuigen – vliegtuig – kasteel –
-  luchtballon* heeft er vijf. Zonder de lookahead krijgen drie echte zoektermen een 410.
-- **Regel 3 heeft die extensielijst nodig.** De spamtool hangt achter elke term een punt met 3-4
-  willekeurige letters (`.vqpc`, `.thms`, `.trxg`) als cache-buster — taalonafhankelijk en dus de
-  breedste regel. Maar zonder negatieve lookahead blokkeer je `bol.com`, `intertoys_bol.com` en
-  `bol.vom`: honderden echte zoekopdrachten naar de concurrent.
+**Zes valkuilen, allemaal zelf ingelopen.** Dit is dezelfde klasse fout, zes keer:
 
-**Wat NIET werkt:** Latijnse trefwoordenlijsten. Er is op dit moment nul ASCII-only spam (expliciet
-op gescand), maar wel veel vals alarm — `bet` zit in *beton* en *beterschap*, en
-`/voor_volwassenen/` is een echte categorie. En de drempel van 5 niet verlagen: dat is de marge die
-de nul valse positieven oplevert.
+- `slot` voor gokspam matcht `fietsslot`, `waterslot`, `kinderslot` — en zat in mijn eigen
+  spam-ijkpunt, waardoor Nederlandse slotenzoekopdrachten als spam telden.
+- `[` `]` in de haakregel matcht echte artikelnummers: `velux_ggl_mk04_[ggl_mk04_207021]`.
+  Alleen CJK-haken gebruiken.
+- `whatsapp`/`telegram` zonder cijfer-eis matcht `senifone … whatsapp … sos_functie` en
+  `jamin_chocotelegram_get_well_soon`. Daarom `\d{6,}` erachter.
+- `.top` in een domeinlijst matcht `www.top-model.biz`. Alleen TLD's die **nul keer** in
+  klantverkeer voorkomen: gemeten zijn dat `vip`, `cc`, `cyou`, `bingo`, `tw`. `.com` niet —
+  389 keer echt (kruidvat.nl, bol.com, blokker.nl) tegen 10 keer spam.
+- `@[a-z0-9_]{5,}` als handle-patroon matcht `Samsonite_Fold@way`, `ch@t350`, `tempur_pro@_luxe`.
+- Een willekeurig achtervoegsel (`.vqpc`, `.thms`) is een echt spamsignaal maar **geen veilige
+  410-regel**: het raakt `45.km.auto` en `cm.diep`. Gebruik het hooguit voor noindex.
 
-**Meetvalkuil.** `pa.bothits_unknown_daily` slaat URL's deels gedecodeerd en deels nog
+**Twee hardeningen die het SLECHTER maken — niet opnieuw proberen:**
+
+- Domein op structuur herkennen (kort label + cijfers) in plaats van een TLD-lijst: 83 echte
+  termen, 214 visits geraakt. `50.cm` en `10.cm` zijn geen domeinen.
+- Herhalingsdetectie voor keyword stuffing (blok van 6 tekens dat 3x voorkomt): **11.935** echte
+  termen geraakt. Producttitels herhalen van nature woorden.
+
+**Het plafond.** 76,8% is waar patronen ophouden. Wat ontsnapt is spam zónder payload — een losse
+CJK-term van vier tekens is op URL-niveau niet te onderscheiden van een Koreaanse klant die
+`토니스 초콜릿` intypt. Die rest sluit je alleen met een inhoudelijk criterium: nul producttreffers
+→ noindex of 404.
+
+**Meetvalkuil bij bothits.** `pa.bothits_unknown_daily` slaat URL's deels gedecodeerd en deels nog
 percent-encoded op (de ingest doet één `unquote`-pass, dubbel-encodeerde URL's houden hun `%XX`).
-Een edge-regex toets je dus niet op de kolomwaarde maar op de gereconstrueerde wire-vorm:
-volledig decoderen, dan `quote()` terug. En de tabel is de top-500 per dag per botfamilie — alle
-aantallen zijn een **ondergrens**, geen totaal.
-
-**Regel 2 is vandaag redundant** (0 unieke vangst naast regel 1 en 3) maar kost niets; meenemen als
-verzekering voor het geval de spamtool zijn achtervoegsel laat vallen.
+Volledig decoderen vóór je iets meet. En de tabel is de top-500 per dag per botfamilie — alle
+aantallen zijn een **ondergrens**.
 
 ---
 

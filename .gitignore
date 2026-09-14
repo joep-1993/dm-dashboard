@@ -124,3 +124,6 @@ scripts/analysis/compare_prompts.py
 
 # findfacetvalues: taxonomie-cache (facetlijst + facetwaarden, opnieuw op te halen)
 scripts/findfacetvalues/.cache/
+
+# Cache van spamfilter_validate.py — 22 MB klantverkeer uit Redshift, herbouwbaar met --refresh
+scripts/analysis/.rurl_real_traffic.tsv

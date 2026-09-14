@@ -32,9 +32,12 @@ Googlebot 8.045 en GoogleOther 2.302 tegen Bing 2.977.
 - [ ] **R-url mag nooit een 5xx geven.** Dit is het zwaarste punt van de drie: het raakt onze
       grootste organische kliksoort, en Google komt terug op een 5xx. Bij teamsearch. #priority:high
 
-**R-url-spam (voorstel ligt klaar).** Drie gevalideerde regexregels, 99,1% vangst, 0 valse
-positieven. Artifact met de volledige spec is gedeeld met Joep. Lessen en valkuilen in LEARNINGS,
-zelfde datum.
+**R-url-spam (voorstel ligt klaar, regels herzien).** De eerste opzet met drie regels is
+gevallen: getoetst tegen echt bezoekersverkeer blokkeerde die 277 zoekopdrachten van klanten
+(`雅诗兰黛面霜`, `토니스 초콜릿`, `بلايستيشن 5`, `45.km.auto`, `inbouw_vaatwasser_52_cm.diep`).
+Nu zes regels op de **payload** in plaats van op schrift of lengte: 76,8% vangst en 1 geraakte
+term op 1.848.005 visits. Artifact met de volledige spec is gedeeld met Joep. Lessen, de
+validatiefout en acht valkuilen staan in LEARNINGS, zelfde datum.
 
 - [ ] **Edge-regel → 410** op de drie regels (CloudFront Function, viewer-request). Per URL, dus
       `/r/` blijft als familie ongemoeid. Haalt de spam meteen van de origin af. #priority:high
