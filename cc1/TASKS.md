@@ -3,6 +3,31 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-14 (5) — Redirect-tool: een gevonden redirect verwijderen vanuit Check
+
+Joep vroeg om een prullenbakje bij "Check redirect", in dezelfde vorm als het potlood in Unique
+Titles. Geleverd en gepusht (`bf6f645`). Lessen staan in LEARNINGS, zelfde datum.
+
+- [x] **Hover-prullenbak op de gevonden outgoing redirect én op elke incoming rij.** Zelfde
+      `.row-delete`-silhouet als `.row-edit` in `unique-titles.html`, maar rood `#d64545` uit
+      UI_BLUEPRINT omdat hij destructief is. Verwijderde incoming-rij blijft doorgestreept staan
+      met een vinkje, de teller erboven telt af.
+- [x] **`DELETE /api/redirect-tool/redirect?from_url=…&variants=…`** + `svc.delete_from_url()` en
+      `svc.rows_with_fromurl()` (verificatie op de ongecachte lijst-index). Homepage-guard geeft 400.
+- [x] **`variants=true` voor outgoing** (beide separatorvormen), **`variants=false` voor een
+      incoming rij** (verbatim, want die `fromUrl` kan `%2f` dragen).
+- [x] **Live getest tegen de echte API** met wegwerp-rijen: beide separatorvormen aangemaakt en
+      verwijderd inclusief de letterlijke-plus-row, plus een rij met `%2f`, elk teruggelezen op de
+      ongecachte index. Nul testrijen achtergebleven (`urlContains=jvs_deltest` → 0).
+- [ ] **Hover-CSS nog niet in een echte browser gezien** — headless Chromium start niet in deze WSL
+      (`libnspr4.so` ontbreekt, root nodig). De CSS is een kopie van de `.row-edit`-regels uit
+      `unique-titles.html`, dus het risico is klein, maar het is niet visueel bevestigd.
+      #priority:low
+- [ ] **Backfill blijft open**: bestaande `/r/`-rijen waar de `+`-vorm ontbreekt zijn niet te vinden
+      via `equiv_key` (dat collapst `+` en `_` op één key). Vergt een aparte pass over
+      `GET /api/redirects`. Ongewijzigd t.o.v. 2026-08-26, maar het prullenbakje maakt het nu wel
+      makkelijker om een losse rij op te ruimen zodra je er een vindt. #priority:low
+
 ### 2026-09-14 (4) — Bing-crawlgolf, R-url-spam en de 410 die niet bestaat
 
 Drie losse draden uit dezelfde sessie. Ze raken elkaar op één punt: R-urls geven onder druk 5xx,

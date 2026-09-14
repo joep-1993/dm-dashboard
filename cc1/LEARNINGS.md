@@ -1,6 +1,53 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Verifieer een verwijderde redirect nooit op de resolver (2026-09-14, redirect-tool)
+
+Bij het bouwen van het prullenbakje in "Check redirect" was de voor de hand liggende UX: na een
+geslaagde delete opnieuw checken en het lege resultaat tonen. Dat is precies fout. De resolver
+`GET /api/redirect?searchterm=` zit achter Varnish met een uur TTL en cachet **ook positieve
+antwoorden**, dus die her-check toont de zojuist verwijderde regel gewoon weer — en zet die key
+nog een uur vast, óók voor de live site. De gebruiker concludeert dat de delete faalde en klikt
+opnieuw.
+
+`GET /api/redirects` (de lijst-index) is niet gecacht en is dus de enige eerlijke verificatie.
+De backend doet die controle nu zelf en stuurt een oordeel mee; de UI toont "bevestigd weg op de
+ongecachte index" plus de mededeling dat de resolver kan achterlopen. Geen automatische her-check.
+
+**De zoekterm voor die verificatie moet VERBATIM.** Eerste versie draaide
+`normalize_path(from_url)` om de `urlContains`-zoekterm te maken. Die functie unquote't, dus voor
+een rij die letterlijk `%2f` in zijn `fromUrl` draagt zocht hij op de tekst met een echte `/` —
+nul treffers, en de verificatie meldde vrolijk "weg" terwijl de rij er nog stond. Het valse
+negatief is hier gevaarlijker dan een gemiste rij: het bevestigt iets dat niet gebeurd is.
+
+**`post_redirect()` escapet `fromUrl` al zelf.** Kostte een testronde: ik gaf de al-dubbel-geëncodeerde
+vorm mee (`%252f`, de wire-vorm uit de API-memory) en kreeg een 201 met een rij die als `%252f`
+was opgeslagen in plaats van `%2f` — weer een stille faal van hetzelfde type dat `encode_from_url`
+juist moest oplossen. Geef die functie dus de vorm die je **in de DB wilt zien**, niet de wire-vorm.
+Twee wees-rijen opgeruimd.
+
+```
+svc.post_redirect("/products/r/x%2fslash/", …)    -> DB: /products/r/x%2fslash/     GOED
+svc.post_redirect("/products/r/x%252fslash/", …)  -> DB: /products/r/x%252fslash/   FOUT
+```
+
+**Een wegwerp-redirect heeft een VERSE `toUrl` nodig.** `/computers/` als testdoel geeft een 500
+(`Duplicate entry` op `url_UNIQUE`): de bestaande-doel-afwijzing uit de API-memory, niet een fout
+in je code. Gebruik een `toUrl` die nog nergens voorkomt, dan is de test schoon.
+
+**Delete-doelen komen uit `separator_forms`, niet uit `url_variants`.** `url_variants` varieert het
+hele pad en zou DELETE's richten op rijen die alleen dezelfde woorden bevatten; `separator_forms`
+varieert alleen de zoekterm na `/r/` of `/k/` en levert voor een categoriepad of een zoekterm van
+één woord gewoon één doel op. Alleen de gematchte vorm wissen laat de half-gedekte staat achter
+waar `peter+gevaert+leffingestraat+oostende` op stukliep: underscore weg, plus nog live, tool zegt
+"geregeld".
+
+**Headless Chromium start niet in deze WSL** (`libnspr4.so: cannot open shared object file`), dus
+een screenshot-controle van hover-CSS zit er niet in zonder root. Wat wél werkt als vervanging:
+de renderfunctie uit de pagina knippen, in Node draaien met een stub-`document` die `innerHTML`
+opvangt, en de gegenereerde HTML lezen. Dat vangt template- en escaping-fouten (gecontroleerd dat
+`'`, `&` en `<` als `%27`/`%26`/`%3C` door de onclick-parameter komen); het vangt géén layout.
+
 ## Een R-url zonder treffers nodigt zichzelf uit om geïndexeerd te worden (2026-09-14, SEO/spam)
 
 Joep zag in de CloudFront-logs een echte Googlebot-hit op
