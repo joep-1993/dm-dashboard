@@ -1,6 +1,61 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een campagne op een dood cat-id draait jaren door via de Overig-tak (2026-09-15, DMA-productgroepen)
+
+Joep liet een artifact narekenen dat stelde: 169 DMA-campagnes vielen stil omdat hun custom label 0
+een verouderd categorienummer draagt. De cijfers klopten tot op de euro, de causaliteit niet.
+
+- **13050** ("Mobiele telefoons", oud) heeft in `bt.cpa_outclicks_transactional` **5 outclicks ooit**,
+  de laatste op 07-01-2024. Toch gaven die campagnes daarna nog bijna twee jaar €63.561 uit. Een
+  nummer dat al in 2024 leeg was kan ze niet in november 2025 hebben stilgelegd.
+- `product_group_view` over 40 van die campagnes: **alle 14,1 mln impressies** (dec 2024 – nov 2025)
+  kwamen van de **INDEX0 "Overig"-unit**, nul uit de 13050-tak. Ze draaiden dus nooit op hun eigen
+  nummer maar op het vangnet.
+- Die Overig-unit staat nu op *uitgesloten* — in **alle** campagnes, oud én nieuw. Bij de oude was
+  dat de enige inkomstenbron; toen die dichtging viel alles stil. Bij de nieuwe maakte het niets uit,
+  want die serveren via hun eigen gevulde tak.
+
+**Les:** het dode nummer verklaart waarom ze het niet overleefden, niet waarom ze stopten. Bij
+"campagne staat aan maar geeft niets uit" is de eerste vraag *via welke node liepen de impressies* —
+en dat kan alleen met `product_group_view`, want `ad_group_criterion` accepteert geen metrics
+(`PROHIBITED_METRIC_IN_SELECT_OR_WHERE_CLAUSE`).
+
+**Betere tegenproef dan een accountbrede percentagevergelijking:** zelfde categorie, andere tier.
+`PLA/Mobiele telefoons_b` staat op 9005282 en geeft t/m september 2026 gewoon geld uit, terwijl `_a`
+en `_c` op 13050 stilvielen. Zelfde feed, zelfde periode, één verschil.
+
+**Twee `shopping_product`-details:** zodra je `campaign` of `ad_group` selecteert eist de resource een
+gelijkheidsfilter op `shopping_product.campaign` (`MISSING_CAMPAIGN_FILTER`); laat je die velden weg,
+dan mag je vrij filteren op `custom_attribute0`. En `issues` met `not_eligible_in_any_campaign` is
+Googles eigen oordeel — de snelste maat voor "deze categorie wordt door niemand opgepakt".
+
+## Custom label 0 omzetten betekent de hele productgroepboom herbouwen (2026-09-15, Google Ads API)
+
+`listing_group.case_value` is immutable. Een cat-id wijzigen kan dus niet met een update: je
+verwijdert de subtree (root verwijderen cascadeert) en bouwt hem identiek opnieuw op. Verwijderen en
+aanmaken kunnen **niet** in één atomaire mutate als je dezelfde dimensies terugzet — twee mutates, en
+daartussen heeft de campagne even geen boom.
+
+- **`SetInParent()` op de oneof, anders klapt een lege others-node.** Een others-unit op
+  `product_custom_attribute` houdt nog `index`, dus die markeert de oneof vanzelf. Een others-unit op
+  `product_item_id` heeft **geen enkel veld**; zet je dan niets, dan blijft de oneof ongezet en volgt
+  `LISTING_GROUP_SUBDIVISION_REQUIRES_OTHERS_CASE` + `field_error: REQUIRED`. Fix:
+  `getattr(dim._pb, "<dimensienaam>").SetInParent()` vóór je de velden zet. Dit sloopte SSD a/b/c —
+  boom leeg, en het herstelpad faalde ook omdat dat het subdivisiebod wél meestuurde.
+- **`CANNOT_SET_BIDS_ON_LISTING_GROUP_SUBDIVISION`**: veel bestaande bomen dragen een
+  `cpc_bid_micros` op een *subdivisie*. Dat kun je niet terugzetten. Bouw met een terugvalketen
+  (status + subdivisiebod → zonder subdivisiebod → zonder beide). Geen effect op vertoning: biedingen
+  gelden alleen op de biedbare leaf, en die houdt zijn bod.
+- **De boomvolgorde ligt niet vast.** Meestal CL0 boven CL1, maar `PLA/Bureaus_b` heeft CL1 bóven
+  CL0. Kopieer de structuur generiek uit de bron, ga niet uit van een vaste vorm.
+- **Start nooit een tweede run terwijl de eerste loopt.** `nohup … &` in een achtergrond-Bash gaf een
+  misleidende "exit 0" terwijl het Python-proces gewoon doorliep; de tweede run haalde bomen weg die
+  de eerste net terugzette (1 exceptie + 3 lege bomen). Controleer met `pgrep -f <scriptnaam>` — en
+  let op dat je eigen shellregel de match kan zijn, dus lees de PID's.
+- Verifieer achteraf onafhankelijk: één verse GAQL-pull van alle INDEX0-waarden per campagne, niet
+  het logboek van het script dat de wijziging zelf deed.
+
 ## Meet CTR, bounce en OPB zoals SEO Stats het doet (2026-09-15, meetmethode)
 
 Ik meldde "de kwaliteit van wat overblijft is intact" op basis van `number_of_outclicks / visits`

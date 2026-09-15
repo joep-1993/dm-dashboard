@@ -3,6 +3,48 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-15 (4) — DMA: 213 campagnes van een dood categorie-id naar het juiste gezet
+
+Joep liet eerst een artifact narekenen over "169 stilgevallen DMA-campagnes", vroeg daarna welke
+categorieën in NL/BE/DE het Mobiele-telefoons-patroon hadden, en gaf vervolgens opdracht de bomen om
+te zetten — alleen custom label 0, boom verder identiek. Analyse- en API-lessen in LEARNINGS,
+zelfde datum.
+
+- [x] **Artifact nagerekend**: cijfers exact (169 campagnes, €63.561 kosten / €101.635 omzet
+      dec-24 t/m nov-25, 153 stopten nov 2025), causale conclusie onjuist — zie LEARNINGS. Eén
+      controlepunt in het stuk was al achterhaald: item-ID `nl-nl-gold-0195951410500` staat op
+      ELIGIBLE, niet op "niet in een campagne".
+- [x] **Accountbrede inventarisatie** tegen de 3.575 categorie-id's uit taxv2 (`/api/Categories` +
+      `includeSubCategories` recursief; `/api/Categories/tree` uit de skill-docs bestaat niet).
+      NL `3800751597`: 253 campagnes op een dood id (169 legacy 5-cijferig + 84 ingetrokken
+      9xxxxxx), 38 categorieën MIXED, 62 volledig dood. NL 2 `4089798584`: schoon. BE `9920951707`:
+      63 campagnes / 21 categorieën, allemaal volledig dood en nooit iets uitgegeven, géén MIXED.
+      DE `8276523186`: alleen bundelcampagnes (`PLA/Tuinartikelen` 1 dood id van 167,
+      `PLA/INACTIVE - DVD's` 15 van 15).
+- [x] **NL ronde 1** — 120 campagnes in 40 volledig dode categorieën, doel-id via taxv2-naam-match.
+- [x] **NL ronde 2** — 66 campagnes in 37 MIXED-categorieën, doel-id overgenomen van de levende
+      zustercampagne (hardste bron; geen enkele categorie dubbelzinnig).
+- [x] **BE** — 27 campagnes in 9 categorieën; maakt ~4.000 producten los die op
+      `not_eligible_in_any_campaign` stonden (Pyjama's 2.073, Badjassen 959, Geursets 697).
+- [x] **Eindcontrole 213/213** op het doel-id met gevulde boom, via een verse GAQL-pull. 39 exact
+      identiek, de rest alleen zonder het niet-zetbare bod op een subdivisie.
+- [x] Snapshots van alle 213 originele bomen + `repair.py` in
+      `Downloads\claude\dma_repoint_20260915\`; overzicht in `omgezette_campagnes.xlsx` (4 tabbladen).
+- [ ] **Opruimen: 23 NL- en 36 BE-campagnes op categorieën die niet meer in taxv2 bestaan** —
+      Plasma TV's, Repeaters, Vakantiehuizen, Cyclocross fietsen, Tandems, Klokpuzzels, Schuifpuzzels,
+      Puzzelballen, OLD-Magnetronmeubelen, OLD-Wachtkamerbanken, Kleefrollers, Letterbakken,
+      Ligfietsen, Moederfietsen, Opslag voor speeltjes, Toiletemmers, Travelmaaltijden. Elf ervan
+      staan in béide accounts. Pauzeren of verwijderen, niet repointen.
+- [ ] **Warmhoudlades (NL, `12041`)**: enige kandidaat is *Warmhouders* `9005338` — laten bevestigen
+      door DM voordat het gezet wordt.
+- [ ] **Netwerk `9005178`, Systemen `9005180` (NL) en Fietstassen `9005619` (BE)**: doel-id bestaat,
+      maar 0 producten in de feed — repointen levert daar niets op.
+- [ ] **Effect volgen**: 213 campagnes komen tegelijk uit ~10 maanden stilstand (samen €69.900
+      kosten / €111.200 omzet in hun laatste normale jaar) en hun tROAS-strategieën hebben al die
+      tijd geen data gezien. Eerste dagen de uitgaven in de gaten houden.
+- [ ] **Vraag aan DM**: wie heeft in november 2025 de Overig-node accountbreed uitgesloten, en is de
+      halve migratie naar de nieuwe cat-id's bewust blijven liggen?
+
 ### 2026-09-15 (3) — SEO-breuk sinds 10-09 doorgemeten, en Overig Kanaal uitgezocht
 
 Joep vroeg de SEO-performance sinds afgelopen donderdag, waar we het meest verliezen en of er
