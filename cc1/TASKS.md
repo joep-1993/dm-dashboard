@@ -3,6 +3,51 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-15 (3) — SEO-breuk sinds 10-09 doorgemeten, en Overig Kanaal uitgezocht
+
+Joep vroeg de SEO-performance sinds afgelopen donderdag, waar we het meest verliezen en of er
+beweging in de laatste twee dagen zit. Daarna twee vervolgvragen: kloppen de verslechterende
+CTR/bounce/OPB die hij in SEO Stats zag, en zit er in `Overig Kanaal` alleen crawlerverkeer of
+gaat er iets mis met de attributie. Alleen gemeten, geen code gewijzigd. Methode-lessen in
+LEARNINGS, zelfde datum.
+
+- [x] **Omvang vastgesteld** (do 10 t/m ma 14 sep vs dezelfde weekdagen ervoor, all-domain,
+      `is_real_visit=1`): SEO **−25,3%** (288.082 → 215.058), Google organisch **−28,3%**, SEO
+      CPC-omzet −27,8% (≈ €1.120/dag gemist). Nog steeds Google-only: overige referers −3,4%,
+      Bing organisch +11,4%, DMA paid +2,6%; alle niet-SEO-kanalen samen op ma 14-09 +0,9%
+      (bot-gecorrigeerd).
+- [x] **94% van het verlies zit op listingpagina's**: R-url −36.212 visits (−27,2%), C-url −27.295
+      (−28,2%), browse-zonder-/r/-/c/ −42,4%, PLP maar −1,7%. GSC-vertoningen op 3-daagse vensters
+      (06-08 vs 10-12): categorie −80,5%, C-url −77,4%, R-url −70,2% — maar **P-url +20,9%** en
+      GSAAS/CSS +23,6%. Productpagina's wónnen, dus geen sitebrede afwaardering.
+- [x] **Geen dader op URL-niveau.** Unieke landings-URL's 41.000 → 28.600; slechts 17 pagina's
+      halen ≥60 visits in 3 dagen. Merk-R-urls groeiden zelfs (`/r/action/` +19%, `/r/blokker/`
+      +32%) terwijl generieke wegzakten (`/r/pan-pompoen/` −83%).
+- [x] **Categorie**: absoluut zwaarst Woonaccessoires −9.414, Klussen −9.300, Tuinartikelen −6.292,
+      Meubels −5.721 (samen 47%). Het minst geraakt zijn merk-/productgedreven categorieën:
+      Schoenen −12%, Huishoudelijk −15%, Kleding −16%, Erotiek ±0%. NL −26,8% en BE −25,4%.
+- [x] **Beweging gemeten**: do −31,4 · vr −29,6 · za −27,8 · **zo −17,2** · **ma −24,0**. Zondags
+      winst zat volledig tussen 11:00 en 18:00 en hield maandag niet. GSC t/m 12-09 geeft
+      impressies +5% vanaf het dal terwijl de **positie elke dag verder zakt** (8,64 → 8,77 →
+      9,00) — longtail die terugkomt, geen ranking.
+- [x] **Gecorrigeerd na navraag: de kwaliteit per bezoek is NIET intact.** Week 08-14 tegen 01-07:
+      CTR 68,38% → 64,86%, bounce 59,83% → 61,50%, OPB €0,1058 → €0,1004. Zie LEARNINGS voor de
+      meetfout die ik daar eerst mee maakte.
+- [x] **`Overig Kanaal` uitgezocht** — beantwoordt de openstaande vraag van 2026-09-09 (2). Derde
+      scrapergolf (17.988 buitenlandse visits op 14-09, 15.741 IP's over 5.607 /16-blokken),
+      geen attributielek. Check en signatuur in LEARNINGS.
+- [x] **Opgeleverd**: artifact met alle grafieken, v3 —
+      https://claude.ai/artifact/MpZMSFVS9hvnwnsnKCUaoX
+- [ ] **Openstaand: Googlebot-crawlvolume niet gecheckt.** `pa.bothits_daily` geeft "relation does
+      not exist" op zowel de `beslist-query`- als de `dm-dashboard`-credentials, terwijl
+      `BOTHITS_PROCESS.md` er wel uit leest. Uitzoeken welke user/cluster die tabellen ziet — dit
+      blokkeert de meest directe voorlopende indicator: schaalt Googlebot weer op nu de Bing-crawl
+      geremd is?
+- [ ] **Openstaand: 13-09 in GSC**, beschikbaar vanaf 16-09 (3 dagen vertraging). Dan is te zien
+      of de zondagopleving ook in vertoningen en positie zit, of alleen in kliks.
+- [ ] **Openstaand: de hypothese zelf is nog onbewezen.** Het verdwenen interne facetlinkoppervlak
+      verklaart de vórm (listing weg, product intact), maar er is geen bewijs.
+
 ### 2026-09-15 (2) — iPhone 18-zoektermen op DMA + de attributieketen nagelopen
 
 Joep vroeg naar impressies en clicks op iPhone 18-zoektermen in DMA BE/DE/NL, met de campagnes en
@@ -1038,12 +1083,12 @@ Beide nog onverklaard. Achtergrond + de Carrousel-bevindingen staan in LEARNINGS
       8 sept, boven SEO). Omdat de sprong precies op één referer-bucket zit: **eerst een
       tagging-/referrer-wijziging verdenken, pas daarna echte groei.** Uit te zoeken: wat is
       `referer_source='Overig'` binnen aff 915, en is er op 3 sept iets aan de herkenning veranderd?
-- [ ] **`Overig Kanaal` op recordhoogte: 17.432 visits op 8 sept met 17.021 unieke IP's.** ~+75%
+- [x] **`Overig Kanaal` op recordhoogte: 17.432 visits op 8 sept met 17.021 unieke IP's.** ~+75%
       boven de ~10k-basislijn; 5 sept (17.177) en 7 sept (15.786) waren ook hoog. Bijna 1 visit per
       IP, dus **gedistribueerde scrapers**, niet één bron — en `is_real_visit=1` filtert ze niet weg
-      (zie [[overig_kanaal_scraper_is_real_visit]]). Uit te zoeken of dit dezelfde scraper-golf is
-      als sinds 22-08 of een nieuwe, en of er iets aan te doen valt. Raakt SEO niet direct, maar
-      vertekent elk kanaaltotaal waar het in meeloopt.
+      (zie [[overig_kanaal_scraper_is_real_visit]]). Raakt SEO niet direct, maar vertekent elk
+      kanaaltotaal waar het in meeloopt. **Uitgezocht op 2026-09-15 (3)**: derde golf van dezelfde
+      soort, géén attributielek, en niet af te vangen met een ASN- of geoblokkade.
 
 ### 2026-09-09 (2) — IndexNow: beslist.be aangezet, plus historie/export per domein
 

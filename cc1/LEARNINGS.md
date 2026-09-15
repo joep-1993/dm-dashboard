@@ -1,6 +1,91 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Meet CTR, bounce en OPB zoals SEO Stats het doet (2026-09-15, meetmethode)
+
+Ik meldde "de kwaliteit van wat overblijft is intact" op basis van `number_of_outclicks / visits`
+voor `aff_id=0` + `referer_source='Google'`. Die snede gaf −2 à −4% en las als ruis. Joep zag in
+SEO Stats dat CTR, bounce én OPB week-op-week verslechterden en vroeg of dat klopte. Het klopte;
+mijn maat was te smal.
+
+**Reproduceer de definities uit `backend/seo_stats_service.py`, niet een eigen variant:**
+
+| maat | formule |
+|---|---|
+| CTR | `(number_of_bvb_clicks + number_of_outclicks) / visits`, over **heel** `marketing_channel='SEO'` dus **inclusief Carrousel (aff 908)** |
+| Bounce | aandeel visits met `number_of_cpc_productclicks = 0 AND number_of_ww_productclicks = 0` |
+| OPB | `SUM(click_revenue)` uit **`bt.cpa_outclicks_transactional`** (niet `fct_visits`), met `actual_ind=1 AND deleted_ind=0 AND label NOT IN ('cpa_after_180_days','rejected_click')`, gedeeld door de visits uit `fct_visits` |
+
+De tool vergelijkt één dag: visits/CTR/bounce ref-dag vs ref−7d, omzet/OPB ref−1 vs ref−8d.
+
+Waarom de smalle snede misleidt: Carrousel is bijna volledig PLP, en PLP heeft een compleet andere
+CTR (30%) dan R- en C-urls (75-79%). Laat je die weg, dan mis je zowel het niveau als de
+mixverschuiving. Uitkomst week 08-14 tegen 01-07 september: CTR 68,38% → **64,86%** (−5,1%),
+bounce 59,83% → 61,50%, OPB €0,1058 → €0,1004 (−5,1%).
+
+**Splits een CTR-daling altijd in mix en niveau** door de oude CTR per paginatype te herwegen met
+de nieuwe visitmix. Bij deze breuk: van de −4,33pp is **−2,99pp niveau (69%)** en −1,34pp mix
+(31%) — elk type zakte dus op zichzelf:
+
+| paginatype | CTR voor | CTR na |
+|---|---|---|
+| C-url | 79,34% | 76,50% |
+| R-url | 74,79% | 71,79% |
+| PLP | 30,42% | 27,88% |
+| Browse | 88,63% | 74,34% |
+
+**Zet de omzet per outclick ernaast.** Die stond op €0,155 in beide weken (25-31 aug nog €0,167),
+dus de hele OPB-daling ís de CTR-daling en niet een lagere waarde per klik. Dat is meteen de test
+dat naleverende conversies het cijfer niet vervuilen: `click_revenue` ondertelt de laatste 1-2
+dagen, maar zou dan óók die €/outclick omlaag trekken. Doet het niet, dan is het weekcijfer
+bruikbaar. Pageviews per bezoek stegen tegelijk (C-url 1,95 → 2,06), wat past bij een slechtere
+match tussen zoekopdracht en pagina — de gemiddelde positie ging in dezelfde periode van 7,3
+naar 9,0.
+
+## Overig Kanaal: de drietrapscheck die een scrapergolf van een attributielek scheidt (2026-09-15, kanaalattributie)
+
+`Overig Kanaal` sprong op ma 14-09 naar 24.595 bezoeken tegen 10.953 een week eerder, midden in een
+SEO-daling van 25%. De voor de hand liggende vrees is dat SEO-verkeer verkeerd wordt toegerekend.
+Zo sluit je dat uit, in deze volgorde:
+
+1. **Splits het kanaal in zijn twee channels.** `Overig Kanaal` = `aff0/ch3` ("Overig direct
+   verkeer onbekend") + `aff0/ch5` ("Overige referers"). ch5 is de stabiele echte bak — 1.388-1.676
+   bezoeken/dag, 94% NL/BE, 0,62-0,77 outclicks/visit — en beweegt nooit mee. Alle beweging zit in
+   ch3.
+2. **Splits ch3 in NL/BE en buitenland.** De NL/BE-kern is vlak (5.472 op 07-09 → 5.111 op 14-09)
+   met normaal gedrag (0,52 outclicks/visit NL, 0,49 BE). De hele groei is buitenland:
+   4.009 → **17.988**, met 0,017 outclicks/visit — één outclick per 59 bezoeken.
+3. **Draai `aff_id=0 GROUP BY channel_id, referer_source` voor beide dagen.** ch3 is op 100% van de
+   rijen `referer_source='Overig'` — nul Google-verwijzingen. En ch4/Overig (3.954 → 4.027),
+   ch4/Bing, ch5/Google (900 → 853) en ch5/Overig staan vlak; alleen **ch4/Google** zakt
+   (45.898 → 33.653). Lekte SEO weg naar Overig, dan zouden er juist Google-verwijzingen in ch3 of
+   ch5 opduiken.
+
+**Signatuur van de golf** (derde na 22-08 en 03-09): 15.741 unieke IP's voor 17.988 bezoeken,
+verspreid over **5.607 verschillende /16-blokken**; user agents rouleren willekeurig over
+Chrome-versies **103 t/m 152**, elk 600-1.400 bezoeken; doelwit zijn **C-urls** (3.480 → 14.967)
+bij 1,18 pageviews per bezoek. Landen breed gespreid (US 2.005, MX 1.265, HK 1.243, BR 1.103,
+SG 1.051, VN 1.019), dus dit is een residentiële proxypool — een ASN- of geoblokkade zet het niet
+dicht. Eerdere golven: 04-09 (4.255), 05-09 (9.929), 08-09 (9.374), 12-09 (5.830), 13-09 (5.727),
+tegen een basis van 2.100-3.900 eind augustus.
+
+**Gevolg voor rapportage:** totale sitebezoeken op 14-09 zijn feitelijk ~134k en niet 152k. Een
+ongecorrigeerde "niet-SEO-kanalen +1,3% WoW" werd +0,9% — richting klopte, niveau niet. Controleer
+dus of er een golf loopt vóór je iets over `Overig Kanaal` of over sitetotalen rapporteert.
+
+## GSC-API: de ~5.000-rijen-dagcap geldt ook op de page-dimensie (2026-09-15, GSC-API)
+
+Bekend was dat `searchanalytics().query` op dagniveau afkapt op ~5.000 zoektermen. Diezelfde cap
+zit op **`page`**: een dagquery met `rowLimit` 25.000 gaf 4.961 / 4.929 / 4.924 URL's terug op drie
+opeenvolgende dagen, terwijl een 3-daags venster er 11.765 respectievelijk 12.622 opleverde. De cap
+zit dus op de dag, niet op de site.
+
+Praktisch: vergelijk **nooit** een meerdaagse aggregatie met een losse dag — dat fabriceert een
+schijnbare halvering. Neem gelijke vensters van minstens 3 dagen en lees de **aandelen** per
+paginatype, die zijn dekkingsongevoelig. Bij deze analyse maakte dat het verschil tussen
+"listingpagina's zijn gehalveerd" en het echte beeld: C-url −77,4%, categorie −80,5%, R-url −70,2%
+terwijl P-url +20,9% deed.
+
 ## Een DMA-klik wordt op de eerste redirect vastgelegd, niet op de landingspagina (2026-09-15, DMA-attributie)
 
 Joep vroeg naar iPhone 18-zoektermen op DMA en, toen de landingspagina's in beeld kwamen, of de
