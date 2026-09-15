@@ -1,6 +1,56 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Facet Watch kan niet zeggen wanneer iets begon — de audit-log wel (2026-09-15, taxv2/meetmethode)
+
+Joep vroeg vanaf wanneer de facetcreaties omhoog schoten. De tool kan dat niet beantwoorden en
+dat is geen bug maar een randeffect: **`pa.facet_watch_events` begint op 29-07-2026** omdat de
+eerste backfill (run #2, 28-08) een venster van 30 dagen terugpakte, niet omdat het daar begon.
+De UI-periode stopt bovendien op 90 dagen. Binnen dat venster loopt de reeks alleen maar áf, dus
+wie op de tool afgaat concludeert het tegenovergestelde van wat er gebeurde.
+
+Drie dingen om te onthouden voor de volgende keer dat dit gevraagd wordt:
+
+- **`entityName` is op 09-04-2026 hernoemd: `FacetValue` → `Facet Value` (met spatie).** Een
+  filter op de nieuwe naam geeft **0** voor alles daarvóór, zonder fout — precies zoals `From`/`To`
+  stil faalt. Mijn eerste census liet daardoor zien dat er vóór april niets gebeurde, terwijl er in
+  de week van 23-02 een seed-batch van 75.351 waarden staat. Loopt je venster over die grens, draai
+  dan beide namen en tel op. `Facet`, `Action` en de datumfilters zijn wél naam-stabiel.
+- **Een dagcensus is goedkoop maar traag**: `Take=1` + `EntityName` + `Action` en alleen `total`
+  uitlezen. 289 dagen × 4 series = ~1.150 calls = **26 minuten** bij 8 workers. Netwerk-bound, niet
+  CPU. Draai hem in de achtergrond en doe iets anders.
+- **De uitkomst**: waarden vanaf **27/28 juni** (300-800/dag → 2.090 → 7.445 → 11.606, piek juli met
+  193.702), facetten zelf al vanaf **10 juni** (159 op één dag, 15-06 zelfs 404). Nieuwe golf op
+  facetten sinds 12-09. Grote opruiming 21-27 juli: 112.096 DELETEs op 22-07 alleen.
+
+## `fct_visits.transactions` is geen orders (2026-09-15, Redshift)
+
+Over één week: `transactions` 83.036, `number_of_orders` **340**, `number_of_orderlines` 342. Op
+`/c/`-verkeer geeft `transactions` een "conversieratio" van 50%, wat er alleen maar plausibel uitziet
+als je er niets naast legt. Rapporteer die kolom niet als conversies; gebruik `number_of_orders`, of
+laat hem weg.
+
+## Performance van een verzameling facetwaarden meten (2026-09-15, recept)
+
+Vraag: wat leverden de 123.197 facetwaarden op die sinds 27-06 zijn aangemaakt? Werkend recept,
+80 dagen in ~15 seconden:
+
+1. Populatie uit `GET /api/Facets/values` (één call, 187 MB, 60 s) op `createdAt >= <datum>` —
+   betrouwbaar vanaf maart 2026, daarvóór is het een bulkstempel. Let op: waarden die inmiddels
+   verwijderd zijn zitten er niet in, dus je meet de oogst van wat overbleef.
+2. Ids in een **`CREATE TEMP TABLE`** op de Redshift-sessie (123k rijen via `execute_values`, 9 s).
+   Geen schrijfactie op een gedeeld schema nodig.
+3. Eerst aggregeren op `(frag, maincat, kanaal)`, dán exploderen met `SPLIT_TO_ARRAY` — 729.518
+   basisrijen uit 2,7 M visits.
+4. **Vlag per URL, niet per waarde.** Een `/c/`-pagina kan twee nieuwe waarden dragen; tel je op
+   waarde-niveau dan telt die visit dubbel. Maak een `hitfrag`-tabel met de URL-fragmenten die
+   mínstens één nieuwe waarde bevatten en join daarop terug.
+
+Uitkomst: **maar 6.070 van de 123.197 waarden (4,9%) komen in tachtig dagen in één bezochte URL
+voor.** Wat wél verkeer trekt doet het slechter dan de rest van `/c/`: CTR 0,560 vs 0,811, bounce
+64,3% vs 55,3%, OPB €0,091 vs €0,126 — in elk kanaal, niet in één hoek. Artifact:
+https://claude.ai/artifact/QWrr2hUqWYV5agn4qTzjVR
+
 ## Een correlatie over zes uur is geen mechanisme (2026-09-15, analysefout)
 
 Ik concludeerde dat bingbot en adidxbot uit één gedeeld host-budget putten: over 15-09 02-07u stond

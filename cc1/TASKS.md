@@ -3,6 +3,33 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-15 (6) — Facetcreatiegolf gedateerd en de opbrengst ervan doorgemeten
+
+Joep vroeg vanaf wanneer de stijging in facetcreaties begon, en daarna wat die nieuwe facetwaarden
+hebben opgeleverd per kanaal en hoofdcategorie. Artifact:
+https://claude.ai/artifact/QWrr2hUqWYV5agn4qTzjVR
+
+- [x] **De golf gedateerd.** Facetwáárden vanaf **27/28 juni 2026** (weekstap 12.723 → 65.481, piek
+      juli 193.702, augustus 33.410, september 1.017). Facetten zelf al vanaf **10 juni** (159 op één
+      dag, 15-06 404). Gemeten met een dagcensus rechtstreeks op `/api/audit-logs`, want Facet Watch
+      zelf begint pas 29-07 — zie LEARNINGS, zelfde datum.
+- [x] **Opbrengst gemeten**, 27-06 t/m 14-09, NL+BE: 123.197 nog bestaande waarden → 14.110 visits
+      (0,5% van al het `/c/`-verkeer) en €1.290 omzet (0,4%). Slechts **6.070 (4,9%) komen in één
+      bezochte URL voor**. CTR −31%, bounce +8,9pp, OPB −27% t.o.v. het overige `/c/`-verkeer, in
+      elk kanaal. SEO draagt 61% van het volume. Kleding is het zwakst (OPB −66%), Tuinartikelen en
+      Klussen verslaan de benchmark juist (+31% resp. +17%).
+- [ ] **Facet Watch-ingest staat stil sinds 03-09.** Laatste event 03-09 09:52; de septembergolf op
+      facetten (12-09: 26, 14-09: 56, 15-09: 78 nieuwe facetten) zit er niet in. Even "Ophalen"
+      draaien. #priority:high
+- [ ] **Loopt die septembergolf door?** Op 15-09 was hij de grootste facetactiviteit sinds juni.
+      Zelfde dagcensus over een week opnieuw draaien geeft antwoord. #priority:medium
+- [ ] **Waarom haalt 95% van de nieuwe waarden nul verkeer?** Onderscheid maken tussen "geen
+      seoPriority" (77.377 van de 123.197), "wel prioriteit maar nergens gelinkt" (vgl.
+      facetvalue_seoprio_linkbaarheid) en "te jong". Dat bepaalt of dit een aanmaak- of een
+      linkprobleem is. #priority:medium
+- [ ] **Backfill Facet Watch tot 27-06?** De tabel mist juist de piekweken. Eén ingest-run met
+      `from_date=2026-06-27` vult dat, ~260k events. #priority:low
+
 ### 2026-09-15 (5) — Bing-crawlgolf: Crawl Control gemeten, adidxbot loopt los, en de 5xx-oorzaak gevonden
 
 Vervolg op 14-09 (4). De ingreep van 14-09 is doorgemeten op de **ruwe S3-logs**, want `pa.bothits_*`
