@@ -1,6 +1,118 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een DMA-klik wordt op de eerste redirect vastgelegd, niet op de landingspagina (2026-09-15, DMA-attributie)
+
+Joep vroeg naar iPhone 18-zoektermen op DMA en, toen de landingspagina's in beeld kwamen, of de
+`?aff_id=` die 302 wel overleeft. Antwoord: ja. Maar er zitten twee dingen in die keten die er
+verkeerd uitzien en het niet zijn, en één die er goed uitziet en het niet is.
+
+### De URL uit `landing_page_view` is niet de URL van de bezoeker
+
+De `unexpanded_final_url` draagt `?aff_id=903`, en **903 is `DMA organic` (Free)** volgens
+`chan_deriv.ref_channel_derivation_stats`. Het **account-level `final_url_suffix`** plakt daar bij
+een betaalde klik overheen:
+
+| Account | `final_url_suffix` |
+|---|---|
+| DMA NL `3800751597` | `aff_id=906&utm_medium=paid-search&utm_source=dma&utm_campaign={_dscampaign}\|{_dscampaignid}\|{_dsadgroup}\|{_dsadgroupid}&device={device}&gclsrc=aw.ds` |
+| DMA BE `9920951707` | `aff_id=907&…` (verder identiek) |
+
+906 en 907 zijn `DMA paid`. De server neemt de laatste `aff_id`, dus dezelfde feed-URL levert
+organisch verkeer als 903 op en betaald verkeer als 906/907. Campagnes hebben zelf géén template
+of suffix — alles staat op accountniveau. Lees een URL uit `landing_page_view` dus nooit als "hier
+komt de bezoeker terecht, met deze parameters".
+
+### De keten, hop voor hop
+
+1. **302**, geen cache-control, `Set-Cookie: aff=<opaque>; Domain=.beslist.nl; Max-Age=86400;
+   Secure; SameSite=Lax`. Slikt `aff_id` **en `gclid`** op — de cookie groeit van 48 naar 120
+   tekens zodra er een gclid bij zit. `utm_*` blijft in de Location staan.
+2. **301** naar de huidige slug, alleen als de feed-URL een verouderde slug draagt.
+   `cache-control: public, max-age=86400`, en gooit de resterende querystring (`utm_*`, `device`,
+   `gclsrc`) volledig weg.
+3. **200** op de canonieke URL, zonder parameters.
+
+**Waarom hop 1 een 302 is en geen 301:** hij heeft een side-effect (een cookie zetten) en moet bij
+elke klik opnieuw gebeuren. Een 301 zou permanent door browser én CDN gecachet worden, waarna
+volgende klikken de origin nooit meer halen en de affiliate nooit meer geregistreerd wordt. Hop 2
+is juist terecht wél een 301: een echte verhuizing naar de canonieke slug.
+
+### Hop 2 gooit de utm's weg en kost tóch niets
+
+Omdat de vastlegging server-side op hop 1 gebeurt, vóór de 301. `datamart.dim_visit` heeft
+`campaign`, `campaign_id` én `gclid`; vulgraad 8-14 sep 2026, `is_real_visit=1`:
+
+| aff | visits | met gclid | met campaign |
+|---|---|---|---|
+| 906 DMA paid NL | 354.324 | 97,8% | 98,5% |
+| 907 DMA paid BE | 73.585 | 98,3% | 99,1% |
+| 0 SEO (controle) | 377.330 | 0,0% | 5,3% |
+
+Dat is meteen het bewijs: `gclid` wordt op hop 1 **altijd** van de URL gestript, dus als die kolom
+client-side uit de landingspagina-URL kwam, zou hij ~0% gevuld zijn. Twee bevestigingen erbij:
+`dim_visit.url` logt de **verouderde** slug (dus het eerste request, niet de eindpagina), en de A/B
+tussen wél en géén 301 geeft geen verschil — iPhone 18 (verouderde slug) 44 visits → 100% campaign,
+iPhone 17 (canoniek) 1.422 visits → 99,7%.
+
+Op de productpagina staat bovendien **geen GTM, gtag of GA4-id**; de `utm_*` die je in die HTML
+vindt zijn onze eigen uitgaande shop-links (`amac.nl?utm_source=beslist`). En Google's kant hangt
+aan de SA360-template op `ad.doubleclick.net/searchads/link/click`, die de klik registreert vóórdat
+onze site aan de beurt is.
+
+**Schaal van die extra hop:** klik-gewogen steekproef van 30 DMA-landingspagina's (9-14 sep,
+153.300 pagina's / 373.331 clicks): **0 van de 29** had een slug-fix, bovengrens ~10% bij dat
+steekproefformaat. De 301 zit op vers gelanceerde producten waar de feed-URL ouder is dan de
+definitieve producttitel — precies de iPhone 18-situatie. Kost latency, geen data.
+
+## Met de SEOuser agent meet je de CDN-cache, niet de origin (2026-09-15, meetvalkuil)
+
+Tijdens het bovenstaande leek de affiliate-overdracht een half uur lang kapot. Verzoeken met
+`?aff_id=903` gaven een **gecachete 301/200** (`x-cache: Hit`, `cache-control: public,
+max-age=86400`) zónder de `aff`-cookie, en `?zz=<random>` kreeg dezelfde cache-entry terug — de
+cache-sleutel op dit pad negeert de querystring. Dat leest als een structureel attributielek, en
+het was bijna de conclusie.
+
+Het is een artefact van de eigen opstelling. De cache wordt alleen geserveerd bij de combinatie
+**`Beslist script voor SEO` én geen cookies**:
+
+| Request | Resultaat |
+|---|---|
+| SEO-UA, geen cookies | 301 Hit, **geen** aff-cookie |
+| SEO-UA + één cookie | 302 Miss, aff-cookie |
+| Chrome-UA, geen cookies | 302 Miss, aff-cookie |
+| mobiele UA + Google-referrer | 302 Miss, aff-cookie (5/5) |
+
+**Regel: test nooit redirect-, cookie- of attributiegedrag met de SEOuser agent.** Die is bedoeld
+om HTML te lezen en is voor gedrág juist het verkeerde instrument. Gebruik een echte browser-UA
+plus `-e https://www.google.com/`.
+
+**En doseer.** Na ~40 requests slaat de WAF om naar `x-amzn-waf-action: challenge`: HTTP **202**,
+lege body, geen `Location`. Dat lijkt op een stukke pagina of een verdwenen redirect, maar het is
+rate limiting op je eigen IP. Een `curl -I` (HEAD) geeft sowieso 403 — gebruik
+`curl -s -o /dev/null -D -`.
+
+## Zoekterm x landingspagina bestaat niet voor Shopping, en `query_tool.py` verzwijgt dat (2026-09-15, Google Ads API)
+
+Voor de iPhone 18-vraag waren twee bronnen nodig die **niet te joinen** zijn: `search_term_view`
+geeft per zoekterm exact impressies/clicks/kosten, `landing_page_view` geeft URL's met metrics, en
+Google biedt voor Shopping geen segment dat die twee koppelt. Rapporteer ze dus apart en zeg erbij
+dat de toewijzing indicatief is (hier: 25.049 impressies op iPhone 18-termen tegen 19.136 op
+iPhone-18-landingspagina's binnen dezelfde campagnes en hetzelfde venster).
+
+Praktische punten die tijd kostten:
+- **`query_tool.py` uit de laiza-skill mapt élke query op één vaste campagne/metrics-kolomlijst**
+  en geeft buiten dat schema stil nullen terug. Voor alles behalve campagne-metrics dus een eigen
+  runner: `search_stream` + `MessageToDict(row, preserving_proto_field_name=True)`, drie regels.
+  De yaml heeft `use_proto_plus: False`, dus `row` is al een protobuf.
+- **GAQL kent geen `OR` in de `WHERE`.** Meerdere zoektermvarianten daarom via
+  `REGEXP_MATCH '(?i).*i ?-?phone.*'` en daarna in Python filteren; zo vang je ook `iphone18pro` en
+  `18 pro max iphone`.
+- **`landing_page_view` eist `campaign.name` in de SELECT** zodra je er in de WHERE op filtert —
+  anders `EXPECTED_REFERENCED_FIELD_IN_SELECT_CLAUSE`.
+- DMA DE (`8276523186`) had in het hele venster **geen enkele impressie**, op geen enkele campagne.
+  Dat account ligt stil; dat is geen eigenschap van deze zoektermen.
+
 ## Van de vier DMA/GSD-tools draait er maar één automatisch (2026-09-15, DMA/GSD-tooling)
 
 Uit de sessie waarin de werking van DMA Exclusions, DMA Bidding, GSD Budgets en GSD Campaigns

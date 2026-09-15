@@ -3,6 +3,31 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-15 (2) — iPhone 18-zoektermen op DMA + de attributieketen nagelopen
+
+Joep vroeg naar impressies en clicks op iPhone 18-zoektermen in DMA BE/DE/NL, met de campagnes en
+de landingspagina's erbij, en daarna om verificatie of de `aff_id` die 302 wel overleeft. Alleen
+gelezen en gemeten, geen code gewijzigd. Lessen in LEARNINGS, zelfde datum.
+
+- [x] **Zoektermanalyse over vier DMA-accounts** (NL `3800751597`, NL 2 `4089798584`, BE
+      `9920951707`, DE `8276523186`), 16 aug t/m 15 sep: 983 unieke termen, **25.049 impressies /
+      81 clicks / EUR 8,35**, CTR 0,32% — een factor 10-20 onder normaal. Piek op 13 sep (11.774
+      impressies, vrijwel alles in NL `PLA/Elektronica store_c`). NL 2 nul, DE nul.
+- [x] **Campagnes en landingspagina's in kaart.** Er staan al echte iPhone 18-producten in de feed
+      (MediaMarkt NL, Krefel BE): 19.136 impressies / 52 clicks op `iphone-18`-URL's. De rest van
+      de iPhone 18-queries landt op **iPhone 17-pagina's** (Amazon bestsellers NL/BE, APlus BE).
+- [x] **Excel opgeleverd**: `Downloads\claude\dma_iphone18_zoektermen_20260915.xlsx`, tabbladen
+      Per dag / Zoektermen (983) / Campagnes / Landingspaginas.
+- [x] **Attributieketen geverifieerd** op Joeps vervolgvraag: hop 1 (302) legt `aff_id` + `gclid`
+      server-side vast, hop 2 (301) gooit de utm's weg maar kost niets — `dim_visit` heeft voor aff
+      906/907 98% gclid én campaign. Onderweg bleek de `?aff_id=903` uit `landing_page_view` de
+      organische tag te zijn, die door `final_url_suffix` wordt overschreven naar 906/907.
+- [ ] **De iPhone 18-feed-URL's dragen een verouderde en tegenstrijdige slug**
+      (`apple-iphone-18-pro-max-256-gb-black-256-gb-donkerrood` → 301 naar
+      `...-smartphone-burgundy-256-gb`): de slug noemt twee kleuren en kost een extra redirect op
+      mobiel. Feed-URL verversen zodra de producttitel definitief is. Geen datagevolg, puur
+      hygiëne. #priority:low
+
 ### 2026-09-15 (1) — Werking van de vier DMA/GSD-tools vastgelegd
 
 Joep vroeg om een artifact met per tool het schema, de uitleg in gewone taal, de data-afwegingen,
