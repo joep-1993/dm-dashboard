@@ -1,6 +1,83 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een correlatie over zes uur is geen mechanisme (2026-09-15, analysefout)
+
+Ik concludeerde dat bingbot en adidxbot uit één gedeeld host-budget putten: over 15-09 02-07u stond
+het Bing-totaal op **15.168 hits/uur met een CV van 1,4%** terwijl bingbot zakte en adidxbot steeg —
+correlatie **−0,99**. Dat verhaal heb ik aan Joep gepresenteerd en vijf uur later moeten intrekken.
+
+Met de uren 08-12u erbij is de correlatie over de hele dag **+0,05** (.nl) en **+0,86** (.be), en het
+uurtotaal liep van 15.168 naar 19.910 (+31%). De vlakke ochtend was toeval: bingbots dagcurve kruiste
+precies zo hard omlaag als adidxbot omhoog ging. Op dagniveau was het bewijs net zo dun — n=5.
+
+**Les:** een "ontdekt mechanisme" uit een venster van een handvol punten eerst tegen een langer
+venster houden vóór je het presenteert, zeker als het precies het verhaal bevestigt dat je zoekt.
+
+**Wat wél werkt: zoek het natuurlijke experiment.** Dezelfde dag leverde de omgekeerde vraag ("komen
+de 5xx door de Bing-belasting?") wél een hard antwoord, omdat er een moment in de data zat waarop de
+belasting constant bleef en de uitkomst omsloeg: 14-09 09:00 UTC, Bing 60.544/uur (was 66.705),
+Googlebot-5xx 1.006 → 12 per uur, responstijd 699 → 299 ms. Eén zo'n breuk zegt meer dan elke
+correlatie over dezelfde reeks.
+
+## Het uurpatroon van een crawler komt uit S3, niet uit de cube (2026-09-15, bothits/meetmethode)
+
+`pa.bothits_*` heeft dagkorrel, dus een ingreep die om 18:00 UTC ingaat is er niet in te zien: 14-09
+staat gewoon op 769.467 bingbot-hits terwijl de crawl die avond halveerde. Daarvoor is
+`scripts/analysis/bing_hourly_from_s3.py` gemaakt (uur × host × bot, met 5xx en servetijd). 2.969
+logbestanden = 57 uur = ~3 minuten met 24 threads.
+
+Drie vallen, alle drie zelf ingelopen:
+
+- **beslist.be zit WEL in de ruwe logs**, distributie `E1M5IC93ZML0R0`. Alleen de *ingest* filtert
+  het eruit (zie § "Domeinfilter — ALLEEN beslist.nl" in BOTHITS_PROCESS.md). Onze echte Bing-last
+  ligt dus ~40% hoger dan de tabel toont — ruim 230k hits/dag extra. Splits in elke S3-meting op
+  `x-host-header`, anders vergelijk je twee sites met elkaar.
+- **De R-url-vorm is `/products/<maincat>/<subcat>/r/<term>/`**, niet `/r/…`. Een classifier die op
+  de prefix test mist ze allemaal en telt ze als categoriepagina. Dat gaf een verkeerde mixtabel die
+  ik al gedeeld had. Test op `'/r/' in pad`.
+- **De user-agent van adidxbot bevat het woord `bingbot`** (`+http://www.bing.com/bingbot.htm`).
+  Match dus eerst op `adidxbot` en pas daarna op `bingbot`, anders tel je de Ads-crawler bij de
+  zoekcrawler. Tellen met `data.count(b'bingbot')` is helemaal fout: een bingbot-regel bevat het
+  token twee keer.
+
+## Een 403 in het log is niet per se een geblokkeerde URL (2026-09-15, WAF/meetvalkuil)
+
+Ik zag legitiem ogende R-urls met een 403 en meldde dat als vals-positieven van de nieuwe
+spam-WAF-regel. Joep opende er één in zijn browser: gewoon 200. Het zat aan de client, niet aan de
+URL.
+
+- Beslist serveert een **challenge** aan elke client met een browser-user-agent die geen JavaScript
+  uitvoert: kale `curl` met een Chrome-UA krijgt **202** op R-urls, categorie- én productpagina's
+  (alleen de homepage geeft 200). Wie er doorheen valt krijgt een 403. Dit is dezelfde laag als
+  § "Metriek-valkuil: `status_class = '2xx'` bevat de WAF-challenge" in BOTHITS_PROCESS.md — daar
+  als 202, hier als 403.
+- De 403's op legitiem ogende R-urls bleken geen bezoekers: **244 van de 323 per uur kwamen van vijf
+  IP-adressen** (Google LLC `72.14.201.x`, RIPE-blok `193.186.4.x`) en 248 droegen `www.google.com`
+  als referer. 76 unieke IP's voor 323 hits is geen consumentenverkeer.
+- **Meet een live pagina daarom nooit met kale curl + browser-UA** — die geeft altijd de challenge.
+  Gebruik de whitelist-UA `Beslist script voor SEO`; die gaf op alle drie de "geblokkeerde"
+  voorbeelden een 200 en op `/products/r/vleeswaren/` een 301 naar de juiste categorie.
+
+## `var(--token)` werkt niet in een SVG-presentatieattribuut (2026-09-15, frontend/grafieken)
+
+`el("rect", {fill: "var(--bing)"})` levert een onzichtbare grafiek op: het attribuut wordt niet
+geresolved, er komt geen console-fout, en de SVG houdt gewoon zijn ruimte — dus het leest als "de
+data komt niet binnen" terwijl alle marks er staan. In HTML werkt `style="background:var(--bing)"`
+wél, wat de verwarring compleet maakt (de legenda kleurde correct, de grafiek niet).
+
+Fix: kleuren via classes zetten en die in CSS binden.
+
+```css
+.f-bing { fill: var(--bing); }   .s-bing { stroke: var(--bing); }
+```
+```js
+el("rect", { x: x, y: y, width: w, height: h, "class": "f-bing" })
+```
+
+Relevant voor elke dashboardgrafiek die themakleuren gebruikt: als een chart leeg oogt maar de
+legenda klopt, is dit de eerste verdachte.
+
 ## Een campagne op een dood cat-id draait jaren door via de Overig-tak (2026-09-15, DMA-productgroepen)
 
 Joep liet een artifact narekenen dat stelde: 169 DMA-campagnes vielen stil omdat hun custom label 0

@@ -3,6 +3,48 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-15 (5) — Bing-crawlgolf: Crawl Control gemeten, adidxbot loopt los, en de 5xx-oorzaak gevonden
+
+Vervolg op 14-09 (4). De ingreep van 14-09 is doorgemeten op de **ruwe S3-logs**, want `pa.bothits_*`
+heeft dagkorrel en ziet een verandering die om 18:00 UTC ingaat niet. Het hele verhaal met grafieken
+staat in een artifact: https://claude.ai/artifact/Job3fyHyaJGjx2u8cjTX5o
+
+- [x] **Crawl Control werkt — op bingbot.** Harde stap tussen 17:00 en 18:00 UTC op 14-09, en die
+      houdt stand: beslist.nl **34.824 → 11.728 hits/uur (−66%)**, beslist.be 16.358 → ~9.500 (−42%).
+      De winst zit vooral op legacy `/…/dNNNNNN/`: −98%, dat waren ~100k 404's/dag uit Bings eigen
+      oude index. Categorie/facet −80%, `/p/` −54%, R-urls −54%; `/data/graphql` ging juist omhoog.
+- [x] **adidxbot buigt NIET mee** — de openstaande vraag van 14-09 is beantwoord: Crawl Control is
+      bingbot-only. Sterker, hij groeide 15-09 van 1.032 (01u) naar **11.029 hits/uur** (11u) en
+      wisselde van doelwit: `/p/` −96%, R-urls 49 → 13.010 per vier uur. Dagprojectie ~113k tegen
+      60.653 op 14-09. Netto is de winst van Crawl Control daarmee half opgegeten (totaal .nl
+      36-39k/uur vóór → 15k vanochtend → 20-25k vanmiddag).
+- [x] **De bot-5xx kwamen NIET van de Bing-golf.** Natuurlijk experiment op 14-09 09:00 UTC: Bing
+      bleef op 60.544/uur (was 66.705) terwijl Googlebot-5xx van **1.006 naar 12 per uur** viel en de
+      responstijd van 699 naar 299 ms — negen uur vóór Crawl Control. Oorzaak bevestigd door Joep: de
+      **WAF-regel op de linkspam-URL's** die 13-09 gevonden waren. Per uur zichtbaar: spam-403 123 →
+      1.874 (08u, uitrol) → 10.842 (09u), spam-200 11.309 → 66, 5xx op R-urls 1.378 → 95. De 5xx op
+      *schone* R-urls vielen mee (532 → 45/uur): de spam liep de origin vast en dat sloeg door naar
+      alle R-urls. Vangst 15-09 11u: **100% van de CJK-spam**, 99,5% van het latijnse patroon.
+- [x] **403's op legitiem ogende R-urls zijn de bot-challenge, geen vals-positieven.** 244 van 323
+      per uur komen van vijf datacenter-IP's (Google LLC `72.14.201.x`, RIPE `193.186.4.x`), 248 met
+      `www.google.com` als referer. Alle drie de "geblokkeerde" voorbeelden geven met een legitieme
+      client gewoon 200. Zie LEARNINGS, zelfde datum.
+- [x] **Meetscript** `scripts/analysis/bing_hourly_from_s3.py` — uurkorrel uit S3 met host-split,
+      5xx en servetijd per bot. Hiermee is ook de oude taak "uurpatroon is niet uit bothits te
+      toetsen" afgesloten. **Nog niet gecommit.**
+- [ ] **Zet de adidxbot-stijging door?** Vanavond dezelfde uren opnieuw trekken geeft de eerste hele
+      dag ná de ingreep. Op het tempo van 11:00 is hij morgen groter dan bingbot. #priority:high
+- [ ] **adidxbot-groep in robots.txt klaarzetten** (`Crawl-delay` + **de zes `*`-disallows erin
+      herhaald**, anders herhaal je de bingbot/AdsBot-Google-regressie). Pas uitrollen ná een check
+      bij SEA: adidxbot controleert landingspagina's voor Microsoft Advertising en ons Bing-verkeer
+      is ~80% betaald. #priority:medium
+- [ ] **beslist.be: eigen BWT-property met eigen Crawl Control?** Het .be-effect is zwakker (−42%) en
+      liep 15-09 om 11u alweer op naar 15.392/uur. Ook nog checken of de .nl-property `www` dekt.
+      #priority:medium
+- [ ] **Zit er Chrome-prefetch tussen het geweigerde Google-verkeer?** Als we prefetch weigeren namens
+      iemand die op ons zoekresultaat klikt, gooien we snelheidswinst weg. Te toetsen op
+      `Purpose: prefetch`, een header die de CloudFront-logs nu niet meeschrijven. #priority:low
+
 ### 2026-09-15 (4) — DMA: 213 campagnes van een dood categorie-id naar het juiste gezet
 
 Joep liet eerst een artifact narekenen over "169 stilgevallen DMA-campagnes", vroeg daarna welke
@@ -185,12 +227,12 @@ exact 10.000 inzendingen/dag en .be zit niet eens in deze logs.
       (overlapmeting: 185 van 73.944 hits op ingezonden C-urls = 0,25%).
 - [x] **Meetscript** `scripts/analysis/bing_crawlcontrol_check.py` — basislijn, piek en de
       schade-KPI's in één run.
-- [ ] **Effect van Crawl Control meten.** Joep heeft 14-09 de blokjes op de helft gezet; 14-09 is
-      een halve dag, de eerste schone dag is 15-09. Openstaande vragen: dekt de property
-      `www.beslist.nl`, klopt de tijdzone van het uurpatroon, en **buigt adidxbot mee** (Crawl
-      Control is gedocumenteerd voor bingbot, niet voor de Ads-crawler). #priority:high
-- [ ] **Het uurpatroon is niet uit bothits te toetsen** — dagkorrel. Daarvoor moet een dag ruwe
-      CloudFront-logs uit S3; het lokale archief loopt tot 12-08. #priority:low
+- [x] **Effect van Crawl Control gemeten** — zie 2026-09-15 (5). bingbot −66% vanaf 14-09 18:00 UTC,
+      adidxbot buigt niet mee. Open blijft alleen nog of de property `www.beslist.nl` dekt en of .be
+      een eigen property heeft.
+- [x] **Het uurpatroon is niet uit bothits te toetsen** — dagkorrel. Opgelost met
+      `scripts/analysis/bing_hourly_from_s3.py`, dat rechtstreeks uit S3 leest (het lokale archief
+      loopt maar tot 12-08). 57 uur scannen kost ~3 minuten.
 
 **De echte schade zit bij Google, niet bij Bing.** Bot-5xx van ~500 naar 14.325/dag, Googlebots
 responstijd van ~320 naar 715 ms. De 5xx concentreren op R-urls: 13-09 stond op 13.605, waarvan

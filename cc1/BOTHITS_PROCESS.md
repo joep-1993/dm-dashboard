@@ -695,6 +695,30 @@ inmiddels uit S3 verlopen.
 weggefilterde hosts: dat is de volledigheidsmaat van een logdatum en moet op het
 bestand kloppen, niet op wat wij ervan bewaren.
 
+## Uurkorrel: wat de cube niet kan (2026-09-15)
+
+De cube is per dag. Een ingreep die halverwege een dag ingaat — Bing Crawl Control ging 14-09 om
+18:00 UTC bijten — is er niet in te zien: die dag stond gewoon op 769.467 bingbot-hits terwijl de
+crawl die avond halveerde. Daarvoor leest **`scripts/analysis/bing_hourly_from_s3.py`** rechtstreeks
+de ruwe logs:
+
+```bash
+venv/bin/python scripts/analysis/bing_hourly_from_s3.py --dates 2026-09-14,2026-09-15 --hours 0-23
+```
+
+Geeft per uur × host × bot: hits, 5xx, 4xx en servetijd, voor bingbot / adidxbot / Googlebot /
+GoogleOther. 2.969 bestanden (57 uur, twee distributies) = ~3 minuten met 24 threads.
+
+Twee dingen om te onthouden bij elke S3-meting:
+
+- **Splits op `x-host-header`.** Distributie `E1M5IC93ZML0R0` draagt `www.beslist.be` en
+  `E3QQH7GDBASLV1` draagt `www.beslist.nl`. De ingest gooit .be weg (zie § Domeinfilter), de ruwe
+  logs niet — zonder split vergelijk je twee sites met elkaar. Bing alleen al doet ~230k hits/dag
+  op .be die in geen enkele tabel staan.
+- **Match `adidxbot` vóór `bingbot`.** De UA van adidxbot bevat `+http://www.bing.com/bingbot.htm`,
+  dus een test op `bingbot` pakt hem ook. En een bingbot-regel bevat het token twee keer, dus
+  tellen met `.count(b'bingbot')` telt dubbel.
+
 ## Bot-taxonomie
 
 `bot_class` ∈ `ai` / `search` / `seo-tool` / `social` / `monitoring` / `other`.
