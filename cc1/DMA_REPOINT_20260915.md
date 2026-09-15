@@ -5,6 +5,9 @@ Op **15 september 2026** is in de DMA-accounts van 316 campagnes het targeting-i
 later te kunnen meten wat die ingreep heeft opgeleverd. Achtergrond en de API-valkuilen staan in
 `LEARNINGS.md` (2026-09-15), het verloop in `TASKS.md` (2026-09-15 (4)).
 
+Samenvatting voor het DM-team als artifact:
+<https://claude.ai/artifact/FMFP5GPDnrwwyKd9mA67zJ>
+
 De campagnelijst met baseline per campagne staat in **`DMA_REPOINT_20260915_campagnes.csv`**
 (316 regels). Snapshots van alle originele productgroepbomen + `repair.py` voor terugdraaien staan
 buiten de repo in `Downloads\claude\dma_repoint_20260915\`.
