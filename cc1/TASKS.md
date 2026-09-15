@@ -72,7 +72,11 @@ zelfde datum.
       identiek, de rest alleen zonder het niet-zetbare bod op een subdivisie.
 - [x] Snapshots van alle 213 originele bomen + `repair.py` in
       `Downloads\claude\dma_repoint_20260915\`; overzicht in `omgezette_campagnes.xlsx` (4 tabbladen).
-- [ ] **Opruimen: 23 NL- en 36 BE-campagnes op categorieën die niet meer in taxv2 bestaan** —
+- [ ] **Opruimen: 103 campagnes (67 NL + 36 BE) in 35 categorieën die niet meer bruikbaar zijn** —
+      90 op een categorie die niet meer in taxv2 bestaat, 10 op een doel-id met 0 producten
+      (Netwerk, Systemen, Input devices, Fietstassen), 3 op Warmhoudlades. Samen €178 in dec-24
+      t/m nov-25; 73 staan op ENABLED. Export:
+      `Downloads\claude\dma_op_te_ruimen_campagnes_20260915.xlsx`. Categorieën o.a.
       Plasma TV's, Repeaters, Vakantiehuizen, Cyclocross fietsen, Tandems, Klokpuzzels, Schuifpuzzels,
       Puzzelballen, OLD-Magnetronmeubelen, OLD-Wachtkamerbanken, Kleefrollers, Letterbakken,
       Ligfietsen, Moederfietsen, Opslag voor speeltjes, Toiletemmers, Travelmaaltijden. Elf ervan
