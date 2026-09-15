@@ -85,6 +85,13 @@ zelfde datum.
       door DM voordat het gezet wordt.
 - [ ] **Netwerk `9005178`, Systemen `9005180` (NL) en Fietstassen `9005619` (BE)**: doel-id bestaat,
       maar 0 producten in de feed — repointen levert daar niets op.
+- [x] **103 campagnes gepauzeerd** (67 NL + 36 BE) en 13 daarvan eerst omgezet; `PLA/Warmhouders_a/b/c`
+      bleken al te bestaan, dus Warmhoudlades zou gedubbeld hebben. Meetnotitie + campagnelijst:
+      `cc1/DMA_REPOINT_20260915.md` en `cc1/DMA_REPOINT_20260915_campagnes.csv`.
+- [ ] **5.537 ENABLED campagnes in DMA NL staan op een overzichtscategorie** (`isBiddingCategory =
+      false`): 0 daarvan gaf in 2026 iets uit, tegen 87% van de 2.769 op een echte biedcategorie.
+      Kost niets (€0), maar maakt het account onleesbaar. Uitzoeken of ze ooit gedraaid hebben en
+      of een script ze blijft aanmaken.
 - [ ] **Effect volgen**: 213 campagnes komen tegelijk uit ~10 maanden stilstand (samen €69.900
       kosten / €111.200 omzet in hun laatste normale jaar) en hun tROAS-strategieën hebben al die
       tijd geen data gezien. Eerste dagen de uitgaven in de gaten houden.

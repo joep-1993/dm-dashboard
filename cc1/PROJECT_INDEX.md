@@ -808,6 +808,10 @@ For detailed architectural decisions, design patterns, and technology rationales
   Parfumerie-uitdraai van facetvalues zonder SEO-visits. Bevat ook de Taxonomy/Search-API-gotchas:
   Search API is read-only, HTTP 400 met errors-payload, `limit=0` voor de AND-count, en de truc om
   een child-facet te lezen door op zijn parent te filteren.
+- **cc1/DMA_REPOINT_20260915.md** — meetnotitie bij de repoint van 15-09-2026: 213 DMA-campagnes
+  van een dood categorie-id naar een geldige biedcategorie, 103 gepauzeerd. Bevat de baseline
+  (dec-24 t/m nov-25), het meetrecept met zijn vier valkuilen, en de campagnelijst in
+  `cc1/DMA_REPOINT_20260915_campagnes.csv` (316 regels, per campagne oud/nieuw cat-id en status).
 - **cc1/BOTHITS_PROCESS.md** — CloudFront bot-logs: korrelkeuze, S3-retentie, ingest.
 - **cc1/GSD_LL_MYSTERY_RUN.md** — GSD low-linkage mystery run + kill switch.
 
