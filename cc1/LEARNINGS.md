@@ -1,6 +1,44 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Van de vier DMA/GSD-tools draait er maar één automatisch (2026-09-15, DMA/GSD-tooling)
+
+Uit de sessie waarin de werking van DMA Exclusions, DMA Bidding, GSD Budgets en GSD Campaigns
+op een rij is gezet. De frequenties stonden nergens; ze zijn gemeten, niet geschat.
+
+| Tool | Runs/week | Aansturing | Gemeten aan |
+|---|---|---|---|
+| DMA Exclusions | 28 (4x/dag, NL+BE) | Windows-taak, elke 6 uur | `applied_at` in `public.dma_exclusions`: 04/10/16/22 UTC, elke dag |
+| DMA Bidding | 2 (1x NL, 1x BE) | handmatig | 43 runs op prod, 20-04 t/m 08-09, elke week precies twee |
+| GSD Budgets | 2 (1x NL, 1x BE) | handmatig | 42 runs op prod, 13-05 t/m 09-09, woensdagochtend |
+| GSD Campaigns | ~6 op ~3 dagen | handmatig | 80 "Run Script" + 61 LL-runs in `pa.jvs_gsd_activity_log` (12 weken) |
+
+**Dat "handmatig" is geen detail.** Drie van de vier tools verzetten pas geld als iemand op Run
+klikt. Hun ritme kan dus veranderen zonder dat er een regel code verandert, en een gemiste week is
+onzichtbaar: er is geen scheduler die iets meldt. Wie op een wijziging in het gedrag van die tools
+jaagt, moet eerst de runhistorie erbij pakken (`/api/dma-bidding/history`,
+`/api/gsd-budgets/history` op prod :3003) en niet aannemen dat er wekelijks gedraaid is.
+
+De enige Windows-taak rond GSD Campaigns laadt alleen de linkage-Excel in het geheugen — die
+muteert niets. Zie 2026-09-14 (1) en `GSD_LL_MYSTERY_RUN.md`.
+
+**De BE-tak van DMA Exclusions levert al sinds de start niets op.** De OOS-cyclus vraagt netjes
+`exclude-eans?country=BE` op, maar die lijst is leeg: `count: 0` tegen `count: 1579` voor NL
+(gemeten 15-09-2026 03:05 UTC, beide `healthy: true`). In `public.dma_exclusions` staat dan ook
+geen enkele BE-rij — alle 9.317 rijen sinds 26-06-2026 zijn NL, en allemaal `source='oos'`
+(er is nooit een handmatige uitsluiting vastgelegd).
+
+**Het voor de hand liggende vermoeden is fout, en dat is het opschrijven waard.** `DMA_ITEM_PREFIX`
+staat hard op `nl-nl-gold-`, wat er als BE-blokkade uitziet. Maar die sleutelvorm is marktbreed:
+de be-index draagt zijn `pimId` ook als `nl-nl-gold-<ean>` (zie "Een be-index draagt nog steeds
+nl-nl-sleutels", 2026-09-09). De prefix is dus geen verdachte; wat overblijft is dat de monitor
+voor BE geen data heeft. Navragen bij de beheerder in plaats van in onze code zoeken.
+
+**GSD Budgets kent geen DE, GSD Campaigns wel.** `COUNTRY_CONFIG` in `gsd_budgets_service.py` heeft
+alleen NL en BE, terwijl `gsd_campaigns_service.ACCOUNTS` een DE-account bedient (4192567576,
+MC 5342886105). Duitse GSD-winkels krijgen dus wel campagnes, maar hun budgetten worden door geen
+enkele automatisering bijgesteld.
+
 ## Verifieer een verwijderde redirect nooit op de resolver (2026-09-14, redirect-tool)
 
 Bij het bouwen van het prullenbakje in "Check redirect" was de voor de hand liggende UX: na een

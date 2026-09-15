@@ -3,6 +3,36 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 
 ## Current Sprint
 _Active tasks for immediate work_
+### 2026-09-15 (1) — Werking van de vier DMA/GSD-tools vastgelegd
+
+Joep vroeg om een artifact met per tool het schema, de uitleg in gewone taal, de data-afwegingen,
+de frequentie en de accounts: DMA Exclusions, DMA Bidding, GSD Budgets, GSD Campaigns. Alleen
+gelezen en gemeten, geen code gewijzigd. Lessen in LEARNINGS, zelfde datum.
+
+- [x] **Frequenties gemeten in plaats van geschat** uit `public.dma_exclusions`, de runhistorie op
+      prod :3003 (`/api/dma-bidding/history`, `/api/gsd-budgets/history`) en
+      `pa.jvs_gsd_activity_log` + `pa.jvs_gsd_ll_campaigns`. Tabel staat in LEARNINGS.
+- [x] **Beslisregels uitgeschreven** per tool: de L1/L2/L3-ladder van DMA Bidding (marge, clicks,
+      ROAS, OPB), de beslisboom van GSD Budgets (marge, linkage, transacties, rev/click, delta) met
+      de tweede poort per campagne uit SA360, en de drie boomvormen van DMA Exclusions.
+- [x] **Artifact opgeleverd** met tabs per tool. Bevat ook de vindplaatsen (bestand + regelaantal)
+      zodat de tekst naar de code te herleiden blijft.
+- [ ] **Navragen: waarom is de BE-lijst van de OOS-monitor leeg?** `exclude-eans?country=BE` geeft
+      `count: 0` en dat is al zo sinds de tool live staat. De monitor meldt zichzelf wel `healthy`,
+      dus het is geen storing die wij zien. Onze kant is vrijgepleit (zie LEARNINGS: de
+      `nl-nl-gold-`-prefix is marktbreed, dus geen blokkade). Vraag voor de beheerder van
+      googlemc-suc. #priority:medium
+- [ ] **Openstaand: heeft prod de timeout-fix `edbc2bd` nu?** Zie 2026-09-11 hierboven, dat item
+      staat nog open op #priority:high. Aanwijzing van deze sessie: sinds 12-09 landen de
+      OOS-mutaties weer keurig op 04/10/16/22 UTC, en de enige afwijking is 11-09 zelf (181 rijen om
+      11:00 in plaats van de nachtrun). Dat past bij een herstelde cyclus, maar bewijst de
+      codeversie niet — vanuit WSL is :3003 niet te bevragen op zijn commit. Niet afgevinkt.
+      #priority:high
+- [ ] **GSD Budgets dekt DE niet.** `COUNTRY_CONFIG` heeft alleen NL en BE, terwijl GSD Campaigns
+      wel een DE-account bedient. Duitse winkels krijgen dus campagnes maar geen budgetbijstelling.
+      Voor zover te zien een bewuste scope-keuze en geen bug — maar het is nergens vastgelegd, dus
+      hier genoteerd tot iemand bevestigt dat het zo hoort. #priority:low
+
 ### 2026-09-14 (5) — Redirect-tool: een gevonden redirect verwijderen vanuit Check
 
 Joep vroeg om een prullenbakje bij "Check redirect", in dezelfde vorm als het potlood in Unique
