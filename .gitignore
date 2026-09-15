@@ -127,3 +127,7 @@ scripts/findfacetvalues/.cache/
 
 # Cache van spamfilter_validate.py — 22 MB klantverkeer uit Redshift, herbouwbaar met --refresh
 scripts/analysis/.rurl_real_traffic.tsv
+
+# Joeps eigen werkvoorraad ("de lijst") — lokaal, niet meer in de repo (2026-09-15).
+# Laatste getrackte inhoud blijft opvraagbaar met: git show 90b3577:suggestions.txt
+suggestions.txt
